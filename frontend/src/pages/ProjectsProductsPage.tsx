@@ -111,7 +111,25 @@ export const ProjectsProductsPage: React.FC = () => {
       setStatusMessage({ type: 'success', text: `Product '${productName}' deleted successfully.` });
       fetchData();
     } catch (err: any) {
-      setStatusMessage({ type: 'error', text: err.message || 'Cannot delete product with sales history' });
+      setStatusMessage({ type: 'error', text: err.message || 'Cannot delete product' });
+    }
+  };
+
+  const handleDeleteProject = async (projectId: string) => {
+    const proj = projects.find(p => p.id === projectId);
+    const projName = proj ? proj.name : 'this project';
+
+    if (!window.confirm(`Are you sure you want to delete project '${projName}'? Any products and stock under it will also be deleted.`)) {
+      return;
+    }
+
+    try {
+      const res = await api.delete(`/projects/${projectId}`);
+      setStatusMessage({ type: 'success', text: res?.message || `Project '${projName}' deleted successfully.` });
+      setSelectedProjectId('all');
+      fetchData();
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err.message || 'Failed to delete project' });
     }
   };
 
@@ -187,33 +205,46 @@ export const ProjectsProductsPage: React.FC = () => {
       )}
 
       {/* Project Filter Pills */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1">
-        <button
-          onClick={() => setSelectedProjectId('all')}
-          className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-all cursor-pointer ${
-            selectedProjectId === 'all'
-              ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
-              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-          }`}
-        >
-          All Projects ({products.length})
-        </button>
-        {projects.map(p => {
-          const count = products.filter(prod => prod.projectId === p.id).length;
-          return (
-            <button
-              key={p.id}
-              onClick={() => setSelectedProjectId(p.id)}
-              className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-all cursor-pointer ${
-                selectedProjectId === p.id
-                  ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              {p.name} ({count})
-            </button>
-          );
-        })}
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setSelectedProjectId('all')}
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-all cursor-pointer ${
+              selectedProjectId === 'all'
+                ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            All Projects ({products.length})
+          </button>
+          {projects.map(p => {
+            const count = products.filter(prod => prod.projectId === p.id).length;
+            return (
+              <button
+                key={p.id}
+                onClick={() => setSelectedProjectId(p.id)}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-all cursor-pointer ${
+                  selectedProjectId === p.id
+                    ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                {p.name} ({count})
+              </button>
+            );
+          })}
+        </div>
+
+        {selectedProjectId !== 'all' && (
+          <button
+            onClick={() => handleDeleteProject(selectedProjectId)}
+            className="px-3 py-1.5 text-xs font-semibold rounded-md border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+            title={`Delete ${projects.find(p => p.id === selectedProjectId)?.name} project`}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Delete "{projects.find(p => p.id === selectedProjectId)?.name}" Project</span>
+          </button>
+        )}
       </div>
 
       {/* Products Table */}
