@@ -9,7 +9,7 @@ interface AuthContextType {
   isMemberConfirmed: boolean;
   login: (token: string, user: User) => void;
   logout: () => void;
-  confirmMember: () => void;
+  confirmMember: (updatedName?: string, updatedDepartment?: string | null, newToken?: string) => void;
   isDeveloper: boolean;
   isAdmin: boolean;
   isHead: boolean;
@@ -64,9 +64,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(newUser);
     localStorage.setItem('enactus_ims_token', newToken);
     localStorage.setItem('enactus_ims_user', JSON.stringify(newUser));
-    // Member confirms their identity directly at login
-    setIsMemberConfirmed(true);
-    sessionStorage.setItem('enactus_member_confirmed', 'true');
+    // Reset member confirmation on new login so check-in screen is presented
+    setIsMemberConfirmed(false);
+    sessionStorage.removeItem('enactus_member_confirmed');
   };
 
   const logout = () => {
@@ -78,9 +78,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     sessionStorage.removeItem('enactus_member_confirmed');
   };
 
-  const confirmMember = () => {
+  const confirmMember = (updatedName?: string, updatedDepartment?: string | null, newToken?: string) => {
     setIsMemberConfirmed(true);
     sessionStorage.setItem('enactus_member_confirmed', 'true');
+    if (newToken) {
+      setToken(newToken);
+      localStorage.setItem('enactus_ims_token', newToken);
+    }
+    if (user && updatedName) {
+      const updatedUser: User = {
+        ...user,
+        name: updatedName,
+        department: updatedDepartment !== undefined ? updatedDepartment : user.department,
+      };
+      setUser(updatedUser);
+      localStorage.setItem('enactus_ims_user', JSON.stringify(updatedUser));
+    }
   };
 
   const isDeveloper = user?.role === 'DEVELOPER';

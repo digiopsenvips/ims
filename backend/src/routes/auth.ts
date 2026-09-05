@@ -125,4 +125,57 @@ router.get('/me', authenticateToken, async (req: AuthenticatedRequest, res: Resp
   });
 });
 
+// POST /api/auth/volunteer-checkin
+router.post('/volunteer-checkin', authenticateToken, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+
+  const { name, department } = req.body;
+
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    res.status(400).json({ error: 'Name is required' });
+    return;
+  }
+
+  try {
+    const updated = await prisma.user.update({
+      where: { id: req.user.id },
+      data: {
+        name: name.trim(),
+        department: department && typeof department === 'string' && department.trim() ? department.trim() : null,
+      },
+    });
+
+    const payload = {
+      id: updated.id,
+      name: updated.name,
+      username: updated.username,
+      role: updated.role,
+      department: updated.department,
+      permissions: req.user.permissions,
+    };
+
+    const token = jwt.sign(payload, ENV.JWT_SECRET, { expiresIn: '7d' });
+
+    res.json({
+      message: 'Check-in details updated successfully',
+      token,
+      user: {
+        id: updated.id,
+        name: updated.name,
+        username: updated.username,
+        email: updated.email,
+        role: updated.role,
+        department: updated.department,
+        permissions: req.user.permissions,
+      },
+    });
+  } catch (error) {
+    console.error('Checkin update error:', error);
+    res.status(500).json({ error: 'Internal server error updating checkin' });
+  }
+});
+
 export default router;

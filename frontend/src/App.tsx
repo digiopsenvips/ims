@@ -24,8 +24,15 @@ export const App: React.FC = () => {
       {/* Public Login */}
       <Route path="/login" element={<LoginPage />} />
 
-      {/* Member Pre-Sale Verification - Redirect directly to Sales Entry */}
-      <Route path="/member-confirm" element={<Navigate to="/sales-entry" replace />} />
+      {/* Member Volunteer Check-In — Name + Department */}
+      <Route
+        path="/member-confirm"
+        element={
+          <ProtectedRoute>
+            <MemberNameConfirmPage />
+          </ProtectedRoute>
+        }
+      />
 
       {/* Standalone PWA view for Member Sale Portal */}
       <Route

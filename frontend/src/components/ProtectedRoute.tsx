@@ -33,8 +33,18 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // Member flow enforcement: Members directly use /sales-entry
-  if (isMember && location.pathname !== '/sales-entry') {
+  // Member flow: must complete check-in first
+  if (isMember && !isMemberConfirmed && location.pathname !== '/member-confirm') {
+    return <Navigate to="/member-confirm" replace />;
+  }
+
+  // If member already checked in and lands on /member-confirm, push to sales
+  if (isMember && isMemberConfirmed && location.pathname === '/member-confirm') {
+    return <Navigate to="/sales-entry" replace />;
+  }
+
+  // Members can only access /sales-entry and /member-confirm
+  if (isMember && location.pathname !== '/sales-entry' && location.pathname !== '/member-confirm') {
     return <Navigate to="/sales-entry" replace />;
   }
 
