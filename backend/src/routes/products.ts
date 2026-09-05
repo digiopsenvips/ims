@@ -58,8 +58,19 @@ router.delete(
       }
 
       if (product.sales.length > 0) {
+        if (req.user?.role === Role.DEVELOPER) {
+          await prisma.$transaction([
+            prisma.sale.deleteMany({ where: { productId: id } }),
+            prisma.eventAllocation.deleteMany({ where: { productId: id } }),
+            prisma.inventory.deleteMany({ where: { productId: id } }),
+            prisma.product.delete({ where: { id } }),
+          ]);
+          res.json({ message: `Product '${product.name}' and all its associated sales/inventory were deleted successfully by Developer` });
+          return;
+        }
+
         res.status(400).json({
-          error: `Cannot hard delete product '${product.name}' (${product.id}) because it has ${product.sales.length} recorded sale(s). Sales history must remain intact.`,
+          error: `Cannot hard delete product '${product.name}' (${product.id}) because it has ${product.sales.length} recorded sale(s). Developer access required to force delete.`,
         });
         return;
       }

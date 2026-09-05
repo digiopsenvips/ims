@@ -3,6 +3,7 @@ import { prisma } from '../config/prisma';
 import { authenticateToken } from '../middleware/auth';
 import { AuthenticatedRequest } from '../types';
 import { sanitizeSaleForUser, sanitizeSalesListForUser } from '../middleware/piiSanitizer';
+import { requireRoles } from '../middleware/rbac';
 import { broadcast } from '../sockets';
 import { PaymentMethod, Role } from '@prisma/client';
 
@@ -416,4 +417,181 @@ router.post(
   }
 );
 
+// DELETE /api/sales/purge-all: Purge all sales records (DEVELOPER ONLY)
+router.delete(
+  '/purge-all',
+  authenticateToken,
+  requireRoles(Role.DEVELOPER),
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const { count } = await prisma.sale.deleteMany({});
+      broadcast('inventory:updated', { action: 'sales_purged', count });
+      res.json({ message: `Successfully deleted all ${count} sales records. Database is ready for actual project data.`, count });
+    } catch (error) {
+      console.error('Purge sales error:', error);
+      res.status(500).json({ error: 'Failed to purge sales records' });
+    }
+  }
+);
+
+// PUT /api/sales/:id: Edit an existing sale record (DEVELOPER ONLY)
+router.put(
+  '/:id',
+  authenticateToken,
+  requireRoles(Role.DEVELOPER),
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      res.status(400).json({ error: 'Invalid sale ID' });
+      return;
+    }
+
+    const {
+      quantity,
+      unitPrice,
+      paymentMethod,
+      customerName,
+      customerPhone,
+      saleTime,
+    } = req.body;
+
+    try {
+      const existing = await prisma.sale.findUnique({
+        where: { id },
+        include: {
+          product: { include: { project: true } },
+          event: true,
+          member: true,
+        },
+      });
+
+      if (!existing) {
+        res.status(404).json({ error: 'Sale record not found' });
+        return;
+      }
+
+      const updateData: any = {};
+
+      if (quantity !== undefined) {
+        const newQty = parseInt(quantity, 10);
+        if (isNaN(newQty) || newQty <= 0) {
+          res.status(400).json({ error: 'Quantity must be a positive integer' });
+          return;
+        }
+        updateData.quantity = newQty;
+      }
+
+      if (unitPrice !== undefined) {
+        const newPrice = parseFloat(unitPrice);
+        if (isNaN(newPrice) || newPrice < 0) {
+          res.status(400).json({ error: 'Unit price must be a non-negative number' });
+          return;
+        }
+        updateData.unitPrice = newPrice;
+      }
+
+      const effectiveQty = updateData.quantity !== undefined ? updateData.quantity : existing.quantity;
+      const effectivePrice = updateData.unitPrice !== undefined ? updateData.unitPrice : Number(existing.unitPrice);
+      updateData.totalAmount = effectiveQty * effectivePrice;
+
+      if (paymentMethod !== undefined) {
+        const normMethod = (paymentMethod as string).toUpperCase();
+        if (!['CASH', 'UPI'].includes(normMethod)) {
+          res.status(400).json({ error: 'Payment method must be CASH or UPI' });
+          return;
+        }
+        updateData.paymentMethod = normMethod as PaymentMethod;
+      }
+
+      if (customerName !== undefined) {
+        updateData.customerName = customerName ? String(customerName).trim() : null;
+      }
+
+      if (customerPhone !== undefined) {
+        updateData.customerPhone = customerPhone ? String(customerPhone).trim() : null;
+      }
+
+      if (saleTime !== undefined) {
+        updateData.saleTime = new Date(saleTime);
+      }
+
+      const updated = await prisma.sale.update({
+        where: { id },
+        data: updateData,
+        include: {
+          product: { include: { project: true } },
+          event: true,
+          member: true,
+        },
+      });
+
+      broadcast('inventory:updated', { action: 'sale_updated', id });
+
+      const formatted = {
+        id: updated.id,
+        clientTxId: updated.clientTxId,
+        eventId: updated.eventId,
+        eventName: updated.event.name,
+        productId: updated.productId,
+        productName: updated.product.name,
+        projectId: updated.product.project.id,
+        projectName: updated.product.project.name,
+        memberId: updated.memberId,
+        memberName: updated.member.name,
+        memberUsername: updated.member.username,
+        quantity: updated.quantity,
+        unitPrice: Number(updated.unitPrice),
+        totalAmount: Number(updated.totalAmount),
+        paymentMethod: updated.paymentMethod,
+        customerName: updated.customerName,
+        customerPhone: updated.customerPhone,
+        saleTime: updated.saleTime,
+        createdAt: updated.createdAt,
+      };
+
+      res.json({
+        message: 'Sale updated successfully',
+        sale: sanitizeSaleForUser(formatted, req.user),
+      });
+    } catch (error) {
+      console.error('Update sale error:', error);
+      res.status(500).json({ error: 'Failed to update sale' });
+    }
+  }
+);
+
+// DELETE /api/sales/:id: Delete a single sale record (DEVELOPER ONLY)
+router.delete(
+  '/:id',
+  authenticateToken,
+  requireRoles(Role.DEVELOPER),
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      res.status(400).json({ error: 'Invalid sale ID' });
+      return;
+    }
+
+    try {
+      const existing = await prisma.sale.findUnique({
+        where: { id },
+      });
+
+      if (!existing) {
+        res.status(404).json({ error: 'Sale record not found' });
+        return;
+      }
+
+      await prisma.sale.delete({ where: { id } });
+      broadcast('inventory:updated', { action: 'sale_deleted', id });
+
+      res.json({ message: `Sale #${id} deleted successfully`, id });
+    } catch (error) {
+      console.error('Delete sale error:', error);
+      res.status(500).json({ error: 'Failed to delete sale' });
+    }
+  }
+);
+
 export default router;
+
