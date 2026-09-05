@@ -2,10 +2,10 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../lib/api';
-import { UserCheck, Building2, ArrowRight, LogOut, AlertCircle } from 'lucide-react';
+import { UserCheck, Building2, ArrowRight, AlertCircle } from 'lucide-react';
 
 export const MemberNameConfirmPage: React.FC = () => {
-  const { user, token, confirmMember, logout } = useAuth();
+  const { user, confirmMember } = useAuth();
   const navigate = useNavigate();
 
   const [name, setName] = useState(user?.name || '');
@@ -112,13 +112,7 @@ export const MemberNameConfirmPage: React.FC = () => {
             </button>
           </form>
 
-          <button
-            onClick={logout}
-            className="mt-4 w-full flex items-center justify-center gap-2 py-2 px-4 rounded-md text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-50 transition-colors cursor-pointer"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Not you? Sign out</span>
-          </button>
+
         </div>
       </div>
     </div>
