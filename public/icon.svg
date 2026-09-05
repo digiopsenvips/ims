@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Enactus IMS app icon">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="120" fill="#f8fafc"/>
+  <rect x="72" y="72" width="368" height="368" rx="72" fill="url(#g)"/>
+  <path d="M170 180h172v46H170zm0 72h172v46H170zm0 72h120v46H170z" fill="#ffffff"/>
+  <circle cx="350" cy="250" r="48" fill="#facc15"/>
+  <path d="M350 213v74M313 250h74" stroke="#0f172a" stroke-width="14" stroke-linecap="round"/>
+</svg>

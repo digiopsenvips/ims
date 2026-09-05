@@ -1,0 +1,309 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  DEVELOPER
+  ADMIN
+  HEAD
+  MEMBER
+}
+
+enum EventStatus {
+  DRAFT
+  SCHEDULED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum InventoryTransactionType {
+  INITIAL_PRODUCTION
+  PRODUCTION
+  EVENT_ALLOCATION
+  EVENT_RETURN
+  SALE
+  DAMAGE
+  LOSS
+  ADJUSTMENT
+}
+
+enum InventoryReferenceType {
+  PRODUCT
+  EVENT
+  SALE
+  AUDIT
+  MANUAL
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+}
+
+enum SaleStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  REVERSED
+}
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  name         String
+  username     String    @unique
+  email        String?   @unique
+  passwordHash String
+  role         Role      @default(MEMBER)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  lastLoginAt  DateTime?
+
+  accounts             Account[]
+  sessions             Session[]
+  userPermissions      UserPermission[]       @relation("UserPermissionUser")
+  grantedPermissions   UserPermission[]       @relation("UserPermissionGrantedByUser")
+  createdEvents        Event[]                @relation("EventCreatedBy")
+  createdInventoryTxns InventoryTransaction[] @relation("InventoryTransactionCreatedByUser")
+  auditLogs            AuditLog[]             @relation("AuditLogUser")
+  salesAsMember        Sale[]                 @relation("SaleMember")
+  reconciliations      EventReconciliation[]  @relation("EventReconciliationReconciler")
+}
+
+model Account {
+  id                String  @id @default(uuid()) @db.Uuid
+  userId            String  @db.Uuid
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(uuid()) @db.Uuid
+  sessionToken String   @unique
+  userId       String   @db.Uuid
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  name        String
+  description String?
+  category    String
+  createdAt   DateTime @default(now())
+
+  userPermissions UserPermission[]
+}
+
+model UserPermission {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  permissionId String   @db.Uuid
+  grantedBy    String?  @db.Uuid
+  createdAt    DateTime @default(now())
+
+  user          User       @relation("UserPermissionUser", fields: [userId], references: [id], onDelete: Cascade)
+  permission    Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  grantedByUser User?      @relation("UserPermissionGrantedByUser", fields: [grantedBy], references: [id], onDelete: SetNull)
+
+  @@unique([userId, permissionId])
+}
+
+model Project {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  code        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  products Product[]
+}
+
+model Product {
+  id          String   @id @default(uuid()) @db.Uuid
+  productCode String   @unique
+  name        String
+  projectId   String   @db.Uuid
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project              Project                @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  eventProducts        EventProduct[]
+  inventoryTxns        InventoryTransaction[]
+  saleItems            SaleItem[]
+  eventReconciliations EventReconciliation[]
+}
+
+model Tenure {
+  id        String    @id @default(uuid()) @db.Uuid
+  name      String
+  startDate DateTime
+  endDate   DateTime?
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  events Event[]
+  sales  Sale[]
+}
+
+model Event {
+  id        String      @id @default(uuid()) @db.Uuid
+  eventCode String      @unique
+  tenureId  String?     @db.Uuid
+  name      String
+  location  String
+  startDate DateTime
+  endDate   DateTime?
+  startTime String?
+  endTime   String?
+  status    EventStatus @default(DRAFT)
+  notes     String?
+  createdBy String      @db.Uuid
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  tenure          Tenure?                @relation(fields: [tenureId], references: [id], onDelete: SetNull)
+  creator         User                   @relation("EventCreatedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+  products        EventProduct[]
+  sales           Sale[]
+  inventory       InventoryTransaction[]
+  reconciliations EventReconciliation[]
+}
+
+model EventProduct {
+  id                String   @id @default(uuid()) @db.Uuid
+  eventId           String   @db.Uuid
+  productId         String   @db.Uuid
+  allocatedQuantity Int      @default(0)
+  eventPrice        Decimal  @db.Decimal(12, 2)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  event   Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([eventId, productId])
+}
+
+model InventoryTransaction {
+  id              String                   @id @default(uuid()) @db.Uuid
+  productId       String                   @db.Uuid
+  eventId         String?                  @db.Uuid
+  transactionType InventoryTransactionType
+  quantity        Int
+  referenceType   InventoryReferenceType?
+  referenceId     String?
+  notes           String?
+  createdBy       String                   @db.Uuid
+  createdAt       DateTime                 @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  event   Event?  @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  creator User    @relation("InventoryTransactionCreatedByUser", fields: [createdBy], references: [id], onDelete: Restrict)
+}
+
+model Sale {
+  id                  String        @id @default(uuid()) @db.Uuid
+  transactionCode     String        @unique
+  clientTransactionId String?       @unique
+  eventId             String?       @db.Uuid
+  memberId            String        @db.Uuid
+  tenureId            String?       @db.Uuid
+  customerName        String?
+  customerPhone       String?
+  paymentMethod       PaymentMethod
+  totalAmount         Decimal       @db.Decimal(12, 2)
+  saleTime            DateTime      @default(now())
+  clientCreatedAt     DateTime?
+  syncedAt            DateTime?
+  status              SaleStatus    @default(COMPLETED)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  event     Event?     @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  member    User       @relation("SaleMember", fields: [memberId], references: [id], onDelete: Restrict)
+  tenure    Tenure?    @relation(fields: [tenureId], references: [id], onDelete: SetNull)
+  saleItems SaleItem[]
+}
+
+model SaleItem {
+  id        String   @id @default(uuid()) @db.Uuid
+  saleId    String   @db.Uuid
+  productId String   @db.Uuid
+  quantity  Int
+  unitPrice Decimal  @db.Decimal(12, 2)
+  lineTotal Decimal  @db.Decimal(12, 2)
+  createdAt DateTime @default(now())
+
+  sale    Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+}
+
+model EventReconciliation {
+  id                String   @id @default(uuid()) @db.Uuid
+  eventId           String   @db.Uuid
+  productId         String   @db.Uuid
+  allocatedQuantity Int      @default(0)
+  soldQuantity      Int      @default(0)
+  returnedQuantity  Int      @default(0)
+  damagedQuantity   Int      @default(0)
+  lostQuantity      Int      @default(0)
+  difference        Int      @default(0)
+  reconciledBy      String   @db.Uuid
+  reconciledAt      DateTime @default(now())
+  notes             String?
+
+  event      Event   @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  product    Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  reconciler User    @relation("EventReconciliationReconciler", fields: [reconciledBy], references: [id], onDelete: Restrict)
+
+  @@unique([eventId, productId])
+}
+
+model AuditLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String?  @db.Uuid
+  action       String
+  entityType   String
+  entityId     String?
+  previousData Json?
+  newData      Json?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  user User? @relation("AuditLogUser", fields: [userId], references: [id], onDelete: SetNull)
+}

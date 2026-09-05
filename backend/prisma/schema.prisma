@@ -1,0 +1,154 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  DEVELOPER
+  ADMIN
+  HEAD
+  MEMBER
+}
+
+enum EventStatus {
+  UPCOMING
+  ACTIVE
+  ENDED
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+}
+
+model User {
+  id           String           @id @default(uuid())
+  name         String
+  username     String           @unique
+  email        String?          @unique
+  passwordHash String           @map("password_hash")
+  role         Role             @default(MEMBER)
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+  permissions  HeadPermission[]
+  sales        Sale[]
+
+  @@map("users")
+}
+
+model HeadPermission {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  permissionKey String   @map("permission_key")
+  allowed       Boolean  @default(false)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permissionKey])
+  @@index([userId])
+  @@map("head_permissions")
+}
+
+model Project {
+  id        String    @id @default(uuid())
+  name      String    @unique
+  code      String    @unique
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  products  Product[]
+
+  @@map("projects")
+}
+
+model Product {
+  id          String            @id // Auto-generated ID: e.g. TAH-001, UPC-001
+  name        String
+  projectId   String            @map("project_id")
+  basePrice   Decimal?          @map("base_price") @db.Decimal(10, 2)
+  isDeleted   Boolean           @default(false) @map("is_deleted")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+  project     Project           @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  inventory   Inventory?
+  allocations EventAllocation[]
+  sales       Sale[]
+
+  @@index([projectId])
+  @@map("products")
+}
+
+model Inventory {
+  id             String   @id @default(uuid())
+  productId      String   @unique @map("product_id")
+  quantityOnHand Int      @default(0) @map("quantity_on_hand")
+  notes          String?
+  lastUpdated    DateTime @default(now()) @updatedAt @map("last_updated")
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([productId])
+  @@map("inventory")
+}
+
+model Event {
+  id            String            @id @default(uuid())
+  name          String
+  location      String
+  startDatetime DateTime          @map("start_datetime")
+  endDatetime   DateTime          @map("end_datetime")
+  status        EventStatus       @default(UPCOMING)
+  isDeleted     Boolean           @default(false) @map("is_deleted")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+  allocations   EventAllocation[]
+  sales         Sale[]
+
+  @@index([status])
+  @@map("events")
+}
+
+model EventAllocation {
+  id           String   @id @default(uuid())
+  eventId      String   @map("event_id")
+  productId    String   @map("product_id")
+  allocatedQty Int      @default(0) @map("allocated_qty")
+  priceAtEvent Decimal  @map("price_at_event") @db.Decimal(10, 2)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  event        Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([eventId, productId])
+  @@index([eventId])
+  @@index([productId])
+  @@map("event_allocations")
+}
+
+model Sale {
+  id            Int           @id @default(autoincrement()) // Serial No.
+  clientTxId    String?       @unique @map("client_tx_id") // For offline sync idempotency
+  eventId       String        @map("event_id")
+  productId     String        @map("product_id")
+  memberId      String        @map("member_id")
+  quantity      Int
+  unitPrice     Decimal       @map("unit_price") @db.Decimal(10, 2)
+  totalAmount   Decimal       @map("total_amount") @db.Decimal(10, 2)
+  paymentMethod PaymentMethod @map("payment_method")
+  customerName  String?       @map("customer_name")
+  customerPhone String?       @map("customer_phone")
+  saleTime      DateTime      @default(now()) @map("sale_time")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  event         Event         @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  product       Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+  member        User          @relation(fields: [memberId], references: [id], onDelete: Restrict)
+
+  @@index([eventId])
+  @@index([productId])
+  @@index([saleTime])
+  @@index([memberId])
+  @@map("sales")
+}

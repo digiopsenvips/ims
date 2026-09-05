@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Enactus IMS maskable icon">
+  <rect width="512" height="512" rx="120" fill="#0f172a"/>
+  <rect x="72" y="72" width="368" height="368" rx="72" fill="#1d4ed8"/>
+  <path d="M170 180h172v46H170zm0 72h172v46H170zm0 72h120v46H170z" fill="#ffffff"/>
+  <circle cx="353" cy="250" r="46" fill="#facc15"/>
+  <path d="M353 213v74M316 250h74" stroke="#0f172a" stroke-width="14" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="description" content="Enactus VIPS-TC Inventory & Sales Management System" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <title>Enactus VIPS-TC IMS</title>
+  </head>
+  <body class="bg-slate-50 text-slate-900 antialiased min-h-screen">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // Clear old service worker caches on load
+      if ('caches' in window) {
+        caches.keys().then(names => {
+          for (let name of names) {
+            if (name === 'enactus-ims-cache-v1') {
+              console.log('Purging legacy cache:', name);
+              caches.delete(name);
+            }
+          }
+        });
+      }
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then(reg => {
+              console.log('Service Worker registered:', reg.scope);
+              reg.update();
+            })
+            .catch(err => console.log('Service Worker registration failed:', err));
+        });
+      }
+    </script>
+  </body>
+</html>
