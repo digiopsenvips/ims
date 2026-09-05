@@ -42,12 +42,6 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  const handleQuickFill = (user: string, pass: string) => {
-    setUsername(user);
-    setPassword(pass);
-    setError(null);
-  };
-
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
@@ -121,68 +115,6 @@ export const LoginPage: React.FC = () => {
               {isSubmitting ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
-
-          {/* Quick Demo Credentials */}
-          <div className="mt-6 pt-6 border-t border-slate-200">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2 text-center">
-              Quick Role Switcher (Seeded Demo Accounts)
-            </div>
-            <div className="grid grid-cols-2 gap-1.5 text-xs">
-              <button
-                type="button"
-                onClick={() => handleQuickFill('developer', 'Admin@123')}
-                className="p-1.5 text-left border border-slate-200 rounded hover:bg-slate-50 transition-colors cursor-pointer"
-              >
-                <div className="font-semibold text-purple-900">Developer</div>
-                <div className="text-[10px] text-slate-500">developer / Admin@123</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickFill('admin', 'Admin@123')}
-                className="p-1.5 text-left border border-slate-200 rounded hover:bg-slate-50 transition-colors cursor-pointer"
-              >
-                <div className="font-semibold text-blue-900">Admin</div>
-                <div className="text-[10px] text-slate-500">admin / Admin@123</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickFill('head_finance', 'Head@123')}
-                className="p-1.5 text-left border border-slate-200 rounded hover:bg-slate-50 transition-colors cursor-pointer"
-              >
-                <div className="font-semibold text-emerald-900">Finance Head</div>
-                <div className="text-[10px] text-slate-500">head_finance / Head@123</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickFill('head_marketing', 'Head@123')}
-                className="p-1.5 text-left border border-slate-200 rounded hover:bg-slate-50 transition-colors cursor-pointer"
-              >
-                <div className="font-semibold text-emerald-900">Marketing Head</div>
-                <div className="text-[10px] text-slate-500">head_marketing / Head@123</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickFill('head_production', 'Head@123')}
-                className="p-1.5 text-left border border-slate-200 rounded hover:bg-slate-50 transition-colors cursor-pointer"
-              >
-                <div className="font-semibold text-emerald-900">Production Head</div>
-                <div className="text-[10px] text-slate-500">head_production / Head@123</div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleQuickFill('aarav_sharma', 'Member@123')}
-                className="p-1.5 text-left border border-slate-200 rounded hover:bg-slate-50 transition-colors cursor-pointer"
-              >
-                <div className="font-semibold text-slate-900">Sales Member</div>
-                <div className="text-[10px] text-slate-500">aarav_sharma / Member@123</div>
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>
