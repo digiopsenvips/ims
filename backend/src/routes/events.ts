@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { authenticateToken } from '../middleware/auth';
-import { requirePermission } from '../middleware/rbac';
+import { requirePermission, requireRoles } from '../middleware/rbac';
 import { AuthenticatedRequest } from '../types';
 import { broadcast } from '../sockets';
 import { EventStatus, Role } from '@prisma/client';
@@ -453,6 +453,74 @@ router.post(
     } catch (error) {
       console.error('End event error:', error);
       res.status(500).json({ error: 'Failed to end event' });
+    }
+  }
+);
+
+// DELETE /api/events/:id: Delete an event (DEVELOPER or ADMIN)
+router.delete(
+  '/:id',
+  authenticateToken,
+  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const { id } = req.params;
+
+    try {
+      const event = await prisma.event.findUnique({
+        where: { id },
+        include: {
+          allocations: true,
+          sales: { select: { id: true } },
+        },
+      });
+
+      if (!event) {
+        res.status(404).json({ error: 'Event not found' });
+        return;
+      }
+
+      // If event is not ENDED, return any unsold allocated stock back to main inventory
+      if (event.status !== EventStatus.ENDED) {
+        const salesCount = await prisma.sale.groupBy({
+          by: ['productId'],
+          where: { eventId: id },
+          _sum: { quantity: true },
+        });
+
+        const salesByProduct: Record<string, number> = {};
+        for (const s of salesCount) {
+          salesByProduct[s.productId] = s._sum.quantity || 0;
+        }
+
+        for (const alloc of event.allocations) {
+          const sold = salesByProduct[alloc.productId] || 0;
+          const unsold = Math.max(0, alloc.allocatedQty - sold);
+          if (unsold > 0) {
+            await prisma.inventory.update({
+              where: { productId: alloc.productId },
+              data: {
+                quantityOnHand: { increment: unsold },
+                lastUpdated: new Date(),
+              },
+            });
+          }
+        }
+      }
+
+      // In a transaction, delete related sales, allocations, and the event
+      await prisma.$transaction([
+        prisma.sale.deleteMany({ where: { eventId: id } }),
+        prisma.eventAllocation.deleteMany({ where: { eventId: id } }),
+        prisma.event.delete({ where: { id } }),
+      ]);
+
+      broadcast('event:updated', { eventId: id, action: 'deleted' });
+      broadcast('inventory:updated', { action: 'event_deleted', eventId: id });
+
+      res.json({ message: `Event '${event.name}' deleted successfully` });
+    } catch (error) {
+      console.error('Delete event error:', error);
+      res.status(500).json({ error: 'Failed to delete event' });
     }
   }
 );

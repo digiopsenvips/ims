@@ -15,6 +15,7 @@ import {
   Package,
   X,
   ArrowDownLeft,
+  Trash2,
 } from 'lucide-react';
 
 interface AllocationInput {
@@ -52,7 +53,29 @@ export const EventsPage: React.FC = () => {
   const [endEventTarget, setEndEventTarget] = useState<AppEvent | null>(null);
   const [isEndingEvent, setIsEndingEvent] = useState(false);
 
+  // Delete Event Modal State
+  const [deleteEventTarget, setDeleteEventTarget] = useState<AppEvent | null>(null);
+  const [isDeletingEvent, setIsDeletingEvent] = useState(false);
+
   const canEditEvents = isDeveloper || isAdmin || hasPermission('edit_events');
+
+  const handleConfirmDeleteEvent = async () => {
+    if (!deleteEventTarget) return;
+    setIsDeletingEvent(true);
+    try {
+      const res = await api.delete(`/events/${deleteEventTarget.id}`);
+      setStatusMessage({
+        type: 'success',
+        text: res?.message || `Event '${deleteEventTarget.name}' deleted successfully!`,
+      });
+      setDeleteEventTarget(null);
+      await fetchEventsAndProducts();
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err.message || 'Failed to delete event' });
+    } finally {
+      setIsDeletingEvent(false);
+    }
+  };
 
   const fetchEventsAndProducts = async () => {
     try {
@@ -374,7 +397,7 @@ export const EventsPage: React.FC = () => {
 
                           <button
                             onClick={() => setEndEventTarget(event)}
-                            className="px-3 py-1.5 text-xs font-semibold rounded bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 transition-colors flex items-center gap-1 cursor-pointer"
+                            className="px-3 py-1.5 text-xs font-semibold rounded bg-amber-50 border border-amber-200 text-amber-800 hover:bg-amber-100 transition-colors flex items-center gap-1 cursor-pointer"
                             title="Close event and return unsold stock"
                           >
                             <PowerOff className="w-3.5 h-3.5" />
@@ -387,6 +410,17 @@ export const EventsPage: React.FC = () => {
                         <span className="text-xs font-semibold text-slate-400 px-3 py-1 bg-slate-50 border border-slate-200 rounded">
                           Finalized
                         </span>
+                      )}
+
+                      {canEditEvents && (
+                        <button
+                          onClick={() => setDeleteEventTarget(event)}
+                          className="px-3 py-1.5 text-xs font-semibold rounded bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 transition-colors flex items-center gap-1 cursor-pointer"
+                          title="Delete Event"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete</span>
+                        </button>
                       )}
                     </div>
                   </div>
@@ -702,6 +736,49 @@ export const EventsPage: React.FC = () => {
                 className="px-4 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-500 rounded-md cursor-pointer shadow-sm"
               >
                 {isEndingEvent ? 'Finalizing...' : 'Confirm & Return Stock'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Event Confirmation Modal */}
+      {deleteEventTarget && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-sm p-6 text-center space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900">
+                Delete Event?
+              </h3>
+              <p className="text-xs text-slate-700 font-bold mt-1">
+                '{deleteEventTarget.name}'
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                {deleteEventTarget.status !== 'ENDED'
+                  ? 'This will delete the event, remove its allocations and sales, and safely return any unsold stock to main inventory.'
+                  : 'This will permanently remove this finalized event record and its allocations from the system.'}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteEventTarget(null)}
+                disabled={isDeletingEvent}
+                className="flex-1 py-2.5 border border-slate-300 text-slate-700 font-semibold text-xs rounded-md hover:bg-slate-50 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteEvent}
+                disabled={isDeletingEvent}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-md shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingEvent ? 'Deleting...' : 'Yes, Delete Event'}
               </button>
             </div>
           </div>
