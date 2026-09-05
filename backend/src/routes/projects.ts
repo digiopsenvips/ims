@@ -203,4 +203,39 @@ router.delete(
   }
 );
 
+// PUT /api/projects/:id: Edit project name (DEVELOPER or ADMIN)
+router.put(
+  '/:id',
+  authenticateToken,
+  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const { id } = req.params;
+    const { name } = req.body;
+
+    if (!name || !String(name).trim()) {
+      res.status(400).json({ error: 'Project name is required' });
+      return;
+    }
+
+    try {
+      const existing = await prisma.project.findUnique({ where: { id } });
+      if (!existing) {
+        res.status(404).json({ error: 'Project not found' });
+        return;
+      }
+
+      const trimmedName = String(name).trim();
+      const updated = await prisma.project.update({
+        where: { id },
+        data: { name: trimmedName },
+      });
+
+      res.json({ project: updated, message: `Project '${updated.name}' updated successfully` });
+    } catch (error) {
+      console.error('Update project error:', error);
+      res.status(500).json({ error: 'Failed to update project' });
+    }
+  }
+);
+
 export default router;

@@ -35,6 +35,65 @@ router.get(
   }
 );
 
+// PUT /api/products/:id: Edit product details (Developer/Admin)
+router.put(
+  '/:id',
+  authenticateToken,
+  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const { id } = req.params;
+    const { name, basePrice } = req.body;
+
+    try {
+      const existing = await prisma.product.findUnique({
+        where: { id },
+      });
+
+      if (!existing) {
+        res.status(404).json({ error: 'Product not found' });
+        return;
+      }
+
+      const updateData: any = {};
+      if (name !== undefined) {
+        const trimmed = String(name).trim();
+        if (!trimmed) {
+          res.status(400).json({ error: 'Product name cannot be empty' });
+          return;
+        }
+        updateData.name = trimmed;
+      }
+
+      if (basePrice !== undefined) {
+        if (basePrice === '' || basePrice === null) {
+          updateData.basePrice = null;
+        } else {
+          const parsed = parseFloat(basePrice);
+          if (isNaN(parsed) || parsed < 0) {
+            res.status(400).json({ error: 'Base price must be a valid positive number' });
+            return;
+          }
+          updateData.basePrice = parsed;
+        }
+      }
+
+      const updated = await prisma.product.update({
+        where: { id },
+        data: updateData,
+        include: {
+          project: true,
+          inventory: true,
+        },
+      });
+
+      res.json({ product: updated, message: `Product '${updated.name}' updated successfully` });
+    } catch (error) {
+      console.error('Update product error:', error);
+      res.status(500).json({ error: 'Failed to update product' });
+    }
+  }
+);
+
 // DELETE /api/products/:id: Delete or soft-delete (Developer/Admin)
 router.delete(
   '/:id',
