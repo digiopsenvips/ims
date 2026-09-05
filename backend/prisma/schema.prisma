@@ -32,6 +32,7 @@ model User {
   email        String?          @unique
   passwordHash String           @map("password_hash")
   role         Role             @default(MEMBER)
+  department   String?
   createdAt    DateTime         @default(now()) @map("created_at")
   updatedAt    DateTime         @updatedAt @map("updated_at")
   permissions  HeadPermission[]

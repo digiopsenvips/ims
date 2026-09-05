@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../lib/api';
-import { LogIn, KeyRound, User as UserIcon, AlertCircle } from 'lucide-react';
+import { LogIn, KeyRound, User as UserIcon, AlertCircle, Building2, UserCheck } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
+  const [name, setName] = useState('');
+  const [department, setDepartment] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -18,6 +20,10 @@ export const LoginPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!name.trim()) {
+      setError('Please enter your name');
+      return;
+    }
     if (!username || !password) {
       setError('Please enter both username and password');
       return;
@@ -27,11 +33,16 @@ export const LoginPage: React.FC = () => {
     setError(null);
 
     try {
-      const data = await api.post('/auth/login', { username, password });
+      const data = await api.post('/auth/login', {
+        username: username.trim(),
+        password,
+        name: name.trim(),
+        department: department.trim() || undefined,
+      });
       login(data.token, data.user);
 
       if (data.user.role === 'MEMBER') {
-        navigate('/member-confirm', { replace: true });
+        navigate('/sales-entry', { replace: true });
       } else {
         navigate(from === '/login' ? '/dashboard' : from, { replace: true });
       }
@@ -68,6 +79,43 @@ export const LoginPage: React.FC = () => {
           )}
 
           <form className="space-y-4" onSubmit={handleSubmit}>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+                Your Name <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                  <UserCheck className="w-4 h-4" />
+                </div>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder="Enter your full name"
+                  required
+                  className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+                Department <span className="text-slate-400 font-normal normal-case">(Optional)</span>
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                  <Building2 className="w-4 h-4" />
+                </div>
+                <input
+                  type="text"
+                  value={department}
+                  onChange={e => setDepartment(e.target.value)}
+                  placeholder="e.g. Marketing, Operations, Tech"
+                  className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-slate-900 focus:border-slate-900"
+                />
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
                 Username or Email

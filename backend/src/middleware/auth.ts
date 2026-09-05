@@ -61,6 +61,7 @@ export const authenticateToken = async (
       name: dbUser.name,
       username: dbUser.username,
       role: dbUser.role,
+      department: dbUser.department,
       permissions: permissionsMap,
     };
 

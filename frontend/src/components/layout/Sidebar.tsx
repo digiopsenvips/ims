@@ -191,6 +191,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
                 <div className="text-xs font-bold text-slate-900 truncate leading-tight">
                   {user?.name}
                 </div>
+                {user?.department && (
+                  <div className="text-[10px] text-slate-500 font-medium truncate">
+                    {user.department}
+                  </div>
+                )}
                 <div className="mt-0.5">{getRoleBadge()}</div>
               </div>
             </div>

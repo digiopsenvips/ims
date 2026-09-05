@@ -33,18 +33,8 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // Member flow enforcement: If member hasn't confirmed their name yet, redirect to /member-confirm
-  if (isMember && !isMemberConfirmed && location.pathname !== '/member-confirm') {
-    return <Navigate to="/member-confirm" replace />;
-  }
-
-  // If member is confirmed and trying to view /member-confirm again, redirect to sale entry
-  if (isMember && isMemberConfirmed && location.pathname === '/member-confirm') {
-    return <Navigate to="/sales-entry" replace />;
-  }
-
-  // If member is trying to access restricted admin pages, redirect to sale form
-  if (isMember && location.pathname !== '/sales-entry' && location.pathname !== '/member-confirm') {
+  // Member flow enforcement: Members directly use /sales-entry
+  if (isMember && location.pathname !== '/sales-entry') {
     return <Navigate to="/sales-entry" replace />;
   }
 

@@ -367,7 +367,11 @@ export const MemberSalePortalPage: React.FC = () => {
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
               One bill per person &bull; Sales attributed to:{' '}
-              <span className="font-semibold text-slate-800">{user?.name}</span> &bull; Enactus VIPS-TC
+              <span className="font-semibold text-slate-800">{user?.name}</span>
+              {user?.department && (
+                <span className="text-slate-500 font-medium"> ({user.department})</span>
+              )}{' '}
+              &bull; Enactus VIPS-TC
             </p>
           </div>
 

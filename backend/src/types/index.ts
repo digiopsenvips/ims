@@ -16,6 +16,7 @@ export interface AuthUserPayload {
   name: string;
   username: string;
   role: Role;
+  department?: string | null;
   permissions?: Record<string, boolean>;
 }
 

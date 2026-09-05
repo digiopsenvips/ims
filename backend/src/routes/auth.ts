@@ -64,11 +64,32 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
       }
     }
 
+    // If volunteer/user name provided during login, update their active profile name and department
+    let activeName = user.name;
+    let activeDepartment = user.department;
+
+    if (req.body.name && typeof req.body.name === 'string' && req.body.name.trim()) {
+      activeName = req.body.name.trim();
+      activeDepartment =
+        req.body.department && typeof req.body.department === 'string' && req.body.department.trim()
+          ? req.body.department.trim()
+          : null;
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          name: activeName,
+          department: activeDepartment,
+        },
+      });
+    }
+
     const payload = {
       id: user.id,
-      name: user.name,
+      name: activeName,
       username: user.username,
       role: user.role,
+      department: activeDepartment,
       permissions,
     };
 
@@ -78,10 +99,11 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
       token,
       user: {
         id: user.id,
-        name: user.name,
+        name: activeName,
         username: user.username,
         email: user.email,
         role: user.role,
+        department: activeDepartment,
         permissions,
       },
     });

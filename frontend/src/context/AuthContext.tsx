@@ -64,9 +64,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(newUser);
     localStorage.setItem('enactus_ims_token', newToken);
     localStorage.setItem('enactus_ims_user', JSON.stringify(newUser));
-    // Reset member confirmation on new login
-    setIsMemberConfirmed(false);
-    sessionStorage.removeItem('enactus_member_confirmed');
+    // Member confirms their identity directly at login
+    setIsMemberConfirmed(true);
+    sessionStorage.setItem('enactus_member_confirmed', 'true');
   };
 
   const logout = () => {

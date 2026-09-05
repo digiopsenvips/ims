@@ -10,6 +10,7 @@ export interface User {
   username: string;
   email?: string | null;
   role: Role;
+  department?: string | null;
   permissions?: Record<string, boolean>;
   createdAt?: string;
   updatedAt?: string;
