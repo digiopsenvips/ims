@@ -223,7 +223,7 @@ export const AnalyticsPage: React.FC = () => {
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div>
                   <h3 className="text-sm font-bold text-slate-900">
-                    {pieMode === 'product' ? 'Product Share Distribution' : 'Project Share (Tahsin vs Upcycle)'}
+                    {pieMode === 'product' ? 'Product Share Distribution' : 'Project Share Breakdown'}
                   </h3>
                   <p className="text-[11px] text-slate-500 mt-0.5">
                     Measured by {metricMode === 'revenue' && canViewRevenue ? 'revenue generated' : 'units sold'}

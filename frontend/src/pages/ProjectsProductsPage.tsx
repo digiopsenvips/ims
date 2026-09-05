@@ -224,7 +224,7 @@ export const ProjectsProductsPage: React.FC = () => {
             </h1>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Manage product lines (Tahsin, Upcycle) with auto-generated product IDs (e.g. TAH-001, UPC-001)
+            Manage product lines with auto-generated project-coded product IDs
           </p>
         </div>
 
@@ -420,7 +420,7 @@ export const ProjectsProductsPage: React.FC = () => {
             <form onSubmit={handleCreateProject} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
-                  Project Name (e.g. Tahsin, Upcycle)
+                  Project Name
                 </label>
                 <input
                   type="text"
@@ -431,7 +431,7 @@ export const ProjectsProductsPage: React.FC = () => {
                   className="w-full text-xs p-2.5 border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-slate-900"
                 />
                 <p className="text-[11px] text-slate-500 mt-1">
-                  A unique 3-letter prefix (e.g., TAH, UPC) will be automatically assigned for product ID generation.
+                  A unique 3-letter project code prefix will be automatically assigned for product ID generation.
                 </p>
               </div>
 

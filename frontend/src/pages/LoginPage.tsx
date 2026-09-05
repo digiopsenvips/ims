@@ -54,7 +54,7 @@ export const LoginPage: React.FC = () => {
           Enactus VIPS-TC IMS
         </h2>
         <p className="mt-1 text-center text-xs text-slate-500">
-          Inventory & Sales Management System (Tahsin & Upcycle)
+          Inventory & Sales Management System
         </p>
       </div>
 

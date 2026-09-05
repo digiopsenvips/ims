@@ -240,7 +240,7 @@ export const InventoryPage: React.FC = () => {
             Catalogued SKUs
           </div>
           <div className="text-2xl font-black text-slate-900 mt-1">{inventory.length}</div>
-          <div className="text-[11px] text-slate-500 mt-0.5">Across Tahsin & Upcycle</div>
+          <div className="text-[11px] text-slate-500 mt-0.5">Across all active projects</div>
         </div>
       </div>
 

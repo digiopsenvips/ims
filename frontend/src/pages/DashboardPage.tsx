@@ -203,7 +203,7 @@ export const DashboardPage: React.FC = () => {
                 <div className="text-xs font-bold text-slate-900 group-hover:text-emerald-700 transition-colors">
                   Projects & Products
                 </div>
-                <div className="text-[11px] text-slate-500 mt-0.5">Manage Tahsin & Upcycle</div>
+                <div className="text-[11px] text-slate-500 mt-0.5">Manage projects & products</div>
               </div>
               <FolderTree className="w-4 h-4 text-slate-400 group-hover:text-slate-800 transition-colors" />
             </Link>
