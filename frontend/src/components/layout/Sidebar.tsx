@@ -32,7 +32,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
 
   const navSections = [
     {
-      title: 'Operations',
+      title: 'Sales',
       items: [
         {
           label: 'Dashboard',
@@ -41,14 +41,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           show: !isMember,
         },
         {
-          label: 'Member Sale Form',
+          label: 'New Sale',
           to: '/sales-entry',
           icon: ShoppingCart,
-          badge: 'PWA',
+          badge: 'POS',
           show: true,
         },
         {
-          label: 'Sales Records',
+          label: 'Sales History',
           to: '/sales',
           icon: ReceiptText,
           show: !isMember,
@@ -56,7 +56,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
       ],
     },
     {
-      title: 'Inventory & Events',
+      title: 'Operations',
       items: [
         {
           label: 'Inventory',
@@ -65,13 +65,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           show: isDeveloper || isAdmin || hasPermission('view_inventory'),
         },
         {
-          label: 'Events & Pricing',
+          label: 'Events',
           to: '/events',
           icon: Calendar,
           show: isDeveloper || isAdmin || hasPermission('view_event_breakdown') || hasPermission('edit_events'),
         },
         {
-          label: 'Projects & Products',
+          label: 'Products',
           to: '/projects-products',
           icon: FolderTree,
           show: isDeveloper || isAdmin,
@@ -88,7 +88,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           show: isDeveloper || isAdmin || hasPermission('view_analytics'),
         },
         {
-          label: 'User Management',
+          label: 'Users',
           to: '/users',
           icon: Users,
           show: isDeveloper || isAdmin,

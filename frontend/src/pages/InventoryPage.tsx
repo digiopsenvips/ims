@@ -180,36 +180,36 @@ export const InventoryPage: React.FC = () => {
   const totalAllocated = inventory.reduce((sum, i) => sum + i.activeAllocatedQty, 0);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="bg-white border border-slate-200 rounded-lg p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <Boxes className="w-5 h-5 text-amber-600" />
+            <Boxes className="w-5 h-5 text-emerald-600" />
             <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-              Inventory Management
+              Inventory
             </h1>
             <div
-              className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+              className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
                 isConnected
                   ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                   : 'bg-slate-100 text-slate-500'
               }`}
               title={isConnected ? 'Live WebSocket connected' : 'Connecting WebSocket...'}
             >
-              <Radio className={`w-3 h-3 ${isConnected ? 'animate-pulse' : ''}`} />
+              <Radio className={`w-3 h-3 ${isConnected ? 'animate-pulse text-emerald-500' : ''}`} />
               <span>{isConnected ? 'Live Sync Active' : 'Connecting'}</span>
             </div>
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Real-time stock on hand decremented automatically on sales and returned when events end.
+          <p className="text-xs text-slate-500 mt-1">
+            Real-time warehouse stock decremented automatically on stall sales and returned upon event conclusion.
           </p>
         </div>
 
         {canEditInventory && (
           <button
             onClick={() => setShowBulkModal(true)}
-            className="px-4 py-2 text-xs font-semibold rounded-md bg-slate-900 text-white hover:bg-slate-800 shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+            className="px-4 py-2.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
           >
             <Plus className="w-4 h-4" />
             <span>Bulk Stock Intake</span>
@@ -219,28 +219,28 @@ export const InventoryPage: React.FC = () => {
 
       {/* Metric Highlights */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-            Total Main Stock (Live)
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
+          <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+            Total Warehouse Stock
           </div>
-          <div className="text-2xl font-black text-slate-900 mt-1">{totalMainStock}</div>
-          <div className="text-[11px] text-slate-500 mt-0.5">Units ready for allocation</div>
+          <div className="text-3xl font-black text-slate-900 mt-1.5 tracking-tight">{totalMainStock}</div>
+          <div className="text-[11px] text-slate-500 mt-1">Units available for allocation</div>
         </div>
 
-        <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-            Active Event Allocations
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
+          <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+            Active Stall Allocations
           </div>
-          <div className="text-2xl font-black text-slate-900 mt-1">{totalAllocated}</div>
-          <div className="text-[11px] text-slate-500 mt-0.5">Units deployed at live stalls</div>
+          <div className="text-3xl font-black text-slate-900 mt-1.5 tracking-tight">{totalAllocated}</div>
+          <div className="text-[11px] text-slate-500 mt-1">Units deployed across live events</div>
         </div>
 
-        <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
+          <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
             Catalogued SKUs
           </div>
-          <div className="text-2xl font-black text-slate-900 mt-1">{inventory.length}</div>
-          <div className="text-[11px] text-slate-500 mt-0.5">Across all active projects</div>
+          <div className="text-3xl font-black text-slate-900 mt-1.5 tracking-tight">{inventory.length}</div>
+          <div className="text-[11px] text-slate-500 mt-1">Active products across Tahsin & Upcycle</div>
         </div>
       </div>
 

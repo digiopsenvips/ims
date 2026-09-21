@@ -213,25 +213,25 @@ export const ProjectsProductsPage: React.FC = () => {
       : products.filter(p => p.projectId === selectedProjectId);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="bg-white border border-slate-200 rounded-lg p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <FolderTree className="w-5 h-5 text-slate-800" />
+            <FolderTree className="w-5 h-5 text-emerald-600" />
             <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-              Projects & Products
+              Products
             </h1>
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Manage product lines with auto-generated project-coded product IDs
+          <p className="text-xs text-slate-500 mt-1">
+            Catalog management for Tahsin & Upcycle initiatives with auto-generated coded IDs.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowProjectModal(true)}
-            className="px-3 py-2 text-xs font-semibold rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-1.5 cursor-pointer"
+            className="px-3.5 py-2.5 text-xs font-semibold rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>New Project</span>
@@ -244,7 +244,7 @@ export const ProjectsProductsPage: React.FC = () => {
               }
               setShowProductModal(true);
             }}
-            className="px-3.5 py-2 text-xs font-semibold rounded-md bg-slate-900 text-white hover:bg-slate-800 shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
+            className="px-4 py-2.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Add Product</span>

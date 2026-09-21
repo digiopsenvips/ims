@@ -432,18 +432,18 @@ export const SalesManagementPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="bg-white border border-slate-200 rounded-lg p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <ReceiptText className="w-5 h-5 text-slate-800" />
+            <ReceiptText className="w-5 h-5 text-emerald-600" />
             <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-              Sales Ledger & Tracking
+              Sales History
             </h1>
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Full sequential sales ledger with chronological numbering and real-time updates.
+          <p className="text-xs text-slate-500 mt-1">
+            Official chronological transactions ledger with multi-payment tracking and CSV export.
           </p>
         </div>
 

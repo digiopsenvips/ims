@@ -98,18 +98,18 @@ export const AnalyticsPage: React.FC = () => {
     : [];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="bg-white border border-slate-200 rounded-lg p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <BarChart3 className="w-5 h-5 text-indigo-600" />
+            <BarChart3 className="w-5 h-5 text-emerald-600" />
             <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-              Performance & Analytics
+              Analytics
             </h1>
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Cross-event product distribution, revenue benchmarks, and sales trends.
+          <p className="text-xs text-slate-500 mt-1">
+            Sales trends, project contributions, and product performance analytics.
           </p>
         </div>
 
@@ -117,23 +117,23 @@ export const AnalyticsPage: React.FC = () => {
         {canViewRevenue && (
           <div className="flex items-center gap-2 self-start sm:self-auto">
             <span className="text-xs font-semibold text-slate-500">Metric:</span>
-            <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5 text-xs">
+            <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100/70 p-1 text-xs">
               <button
                 onClick={() => setMetricMode('units')}
-                className={`px-3 py-1 rounded text-xs font-semibold transition-all cursor-pointer ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   metricMode === 'units'
-                    ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-900'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 Units Sold
               </button>
               <button
                 onClick={() => setMetricMode('revenue')}
-                className={`px-3 py-1 rounded text-xs font-semibold transition-all cursor-pointer ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                   metricMode === 'revenue'
-                    ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-500 hover:text-slate-900'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 Revenue (₹)

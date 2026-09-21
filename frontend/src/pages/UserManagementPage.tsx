@@ -229,27 +229,27 @@ export const UserManagementPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="bg-white border border-slate-200 rounded-lg p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <Users className="w-5 h-5 text-purple-600" />
+            <Users className="w-5 h-5 text-emerald-600" />
             <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-              User Accounts & RBAC
+              Users
             </h1>
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-xs text-slate-500 mt-1">
             {isDeveloper
-              ? 'Developer full access: manage accounts, passwords, and configure Head granular permissions.'
-              : 'Admin access: view all system users and permission profiles (account creation/deletion restricted to Developer).'}
+              ? 'Developer administration: manage accounts, credentials, and configure granular role-based permissions.'
+              : 'User accounts and permission profiles across Member, Head, and Admin roles.'}
           </p>
         </div>
 
         {isDeveloper && (
           <button
             onClick={() => setShowCreateModal(true)}
-            className="px-4 py-2 text-xs font-semibold rounded-md bg-slate-900 text-white hover:bg-slate-800 shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+            className="px-4 py-2.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
           >
             <Plus className="w-4 h-4" />
             <span>Create Account</span>

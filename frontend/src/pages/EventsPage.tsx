@@ -465,25 +465,25 @@ export const EventsPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="bg-white border border-slate-200 rounded-lg p-5 sm:p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-blue-600" />
+            <Calendar className="w-5 h-5 text-emerald-600" />
             <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-              Events & Stock Allocations
+              Events
             </h1>
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Configure pop-up stalls, per-event allocations and pricing, and finalize events with auto stock returns.
+          <p className="text-xs text-slate-500 mt-1">
+            Pop-up stalls, per-event inventory allocations, custom pricing, and auto stock return upon completion.
           </p>
         </div>
 
         {canEditEvents && (
           <button
             onClick={handleOpenCreateModal}
-            className="px-4 py-2 text-xs font-semibold rounded-md bg-slate-900 text-white hover:bg-slate-800 shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+            className="px-4 py-2.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
           >
             <Plus className="w-4 h-4" />
             <span>Create New Event</span>
@@ -494,7 +494,7 @@ export const EventsPage: React.FC = () => {
       {/* Notifications */}
       {statusMessage && (
         <div
-          className={`p-3.5 rounded-md text-xs flex items-center justify-between border ${
+          className={`p-3.5 rounded-xl text-xs flex items-center justify-between border ${
             statusMessage.type === 'success'
               ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
               : 'bg-red-50 border-red-200 text-red-800'
@@ -520,8 +520,8 @@ export const EventsPage: React.FC = () => {
       {/* Events List */}
       <div className="space-y-4">
         {events.length === 0 ? (
-          <div className="bg-white p-8 rounded-lg border border-slate-200 text-center text-xs text-slate-500">
-            No events found. Click "Create New Event" to schedule a stall.
+          <div className="bg-white p-12 rounded-2xl border border-slate-200/80 text-center text-xs text-slate-500 shadow-xs">
+            No events found. Click &quot;Create New Event&quot; to schedule a stall.
           </div>
         ) : (
           events.map(event => {
@@ -531,7 +531,7 @@ export const EventsPage: React.FC = () => {
             return (
               <div
                 key={event.id}
-                className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden"
+                className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden"
               >
                 {/* Event Summary Bar */}
                 <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100">
