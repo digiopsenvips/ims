@@ -44,7 +44,10 @@ router.get(
         whereClause.eventId = String(eventId);
       }
       if (productId) {
-        whereClause.productId = String(productId);
+        whereClause.OR = [
+          { productId: String(productId) },
+          { items: { some: { productId: String(productId) } } },
+        ];
       }
       if (memberId) {
         whereClause.memberId = String(memberId);
@@ -70,6 +73,9 @@ router.get(
           { product: { name: { contains: term, mode: 'insensitive' } } },
           { product: { id: { contains: term, mode: 'insensitive' } } },
           { product: { project: { name: { contains: term, mode: 'insensitive' } } } },
+          { items: { some: { product: { name: { contains: term, mode: 'insensitive' } } } } },
+          { items: { some: { productId: { contains: term, mode: 'insensitive' } } } },
+          { items: { some: { product: { project: { name: { contains: term, mode: 'insensitive' } } } } } },
           { member: { name: { contains: term, mode: 'insensitive' } } },
           { member: { username: { contains: term, mode: 'insensitive' } } },
           { event: { name: { contains: term, mode: 'insensitive' } } },
@@ -110,7 +116,7 @@ router.get(
         { id: 'desc' as const },
       ];
 
-      const [totalRecords, sales, summaryAgg] = await Promise.all([
+      const [totalRecords, sales, summaryRevenue, summaryUnits] = await Promise.all([
         prisma.sale.count({ where: whereClause }),
         prisma.sale.findMany({
           where: whereClause,
@@ -134,6 +140,21 @@ router.get(
                 },
               },
             },
+            items: {
+              include: {
+                product: {
+                  include: {
+                    project: {
+                      select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
             member: {
               select: {
                 id: true,
@@ -150,8 +171,16 @@ router.get(
         prisma.sale.aggregate({
           where: whereClause,
           _sum: {
-            quantity: true,
             totalAmount: true,
+            quantity: true,
+          },
+        }),
+        prisma.saleItem.aggregate({
+          where: {
+            sale: whereClause,
+          },
+          _sum: {
+            quantity: true,
           },
         }),
       ]);
@@ -180,22 +209,57 @@ router.get(
       const formatted = sales.map((s, index) => {
         const serialNumber = rankMap.get(s.id) ?? Math.max(1, totalRecords - ((page - 1) * pageSize) - index);
 
+        // Normalize items array
+        const rawItems = (s.items && s.items.length > 0)
+          ? s.items.map(item => ({
+              id: item.id,
+              productId: item.productId,
+              productName: item.product?.name || item.productId,
+              projectId: item.product?.project?.id || '',
+              projectName: item.product?.project?.name || '',
+              quantity: item.quantity,
+              unitPrice: Number(item.unitPrice),
+              lineTotal: Number(item.lineTotal),
+            }))
+          : s.productId
+          ? [{
+              id: s.id,
+              productId: s.productId,
+              productName: s.product?.name || s.productId,
+              projectId: s.product?.project?.id || '',
+              projectName: s.product?.project?.name || '',
+              quantity: s.quantity || 1,
+              unitPrice: Number(s.unitPrice || 0),
+              lineTotal: Number(s.totalAmount || 0),
+            }]
+          : [];
+
+        const totalUnits = rawItems.reduce((sum, item) => sum + item.quantity, 0) || s.quantity || 0;
+        const uniqueProjects = Array.from(new Set(rawItems.map(item => item.projectName).filter(Boolean)));
+        const primaryProject = uniqueProjects.length > 0 ? uniqueProjects.join(' + ') : (s.product?.project?.name || 'Multiple');
+        const productSummary = rawItems.map(item => `${item.productName} × ${item.quantity}`).join(', ') || s.product?.name || 'No Products';
+
+        const firstItem = rawItems[0] || {};
+
         return {
           id: s.id, // Internal database ID
           serialNumber, // Global chronological S.No. (1 = oldest sale, highest = newest)
           clientTxId: s.clientTxId,
           eventId: s.eventId,
           eventName: s.event.name,
-          productId: s.productId,
-          productName: s.product.name,
-          projectId: s.product.project.id,
-          projectName: s.product.project.name,
+          productId: firstItem.productId || s.productId || '',
+          productName: productSummary,
+          projectId: firstItem.projectId || s.product?.project?.id || '',
+          projectName: primaryProject,
+          projectNames: uniqueProjects,
           memberId: s.memberId,
           memberName: s.member.name,
           memberUsername: s.member.username,
           memberDepartment: s.member.department,
-          quantity: s.quantity,
-          unitPrice: Number(s.unitPrice),
+          items: rawItems,
+          totalUnits,
+          quantity: totalUnits, // alias for totalUnits
+          unitPrice: Number(firstItem.unitPrice ?? s.unitPrice ?? 0),
           totalAmount: Number(s.totalAmount),
           paymentMethod: s.paymentMethod,
           customerName: s.customerName,
@@ -216,6 +280,8 @@ router.get(
         req.user?.role === Role.ADMIN ||
         Boolean(req.user?.permissions?.['view_revenue']);
 
+      const totalCalculatedUnits = summaryUnits._sum.quantity ?? summaryRevenue._sum.quantity ?? 0;
+
       res.json({
         sales: sanitized,
         data: sanitized,
@@ -228,8 +294,8 @@ router.get(
           hasPreviousPage: !isAll && page > 1,
         },
         summary: {
-          totalUnits: summaryAgg._sum.quantity || 0,
-          totalRevenue: canViewRevenue ? Number(summaryAgg._sum.totalAmount || 0) : null,
+          totalUnits: totalCalculatedUnits,
+          totalRevenue: canViewRevenue ? Number(summaryRevenue._sum.totalAmount || 0) : null,
         },
         totalCount: totalRecords,
       });
@@ -240,7 +306,7 @@ router.get(
   }
 );
 
-// POST /api/sales: Record a single sale (real-time entry)
+// POST /api/sales: Record a single customer transaction (real-time entry)
 router.post(
   '/',
   authenticateToken,
@@ -257,27 +323,27 @@ router.post(
       saleTime,
     } = req.body;
 
-    // Normalize items to process: supports array of items or single product
-    const itemsToProcess: Array<{ productId: string; quantity: number }> =
-      Array.isArray(items) && items.length > 0
-        ? items.map((i: any) => ({
-            productId: String(i.productId),
-            quantity: parseInt(i.quantity, 10),
-          }))
-        : productId && quantity
-        ? [{ productId: String(productId), quantity: parseInt(quantity, 10) }]
-        : [];
-
-    if (!eventId || itemsToProcess.length === 0 || !paymentMethod) {
-      res.status(400).json({ error: 'Event, at least one product with quantity, and payment method are required' });
-      return;
+    // Normalize and merge duplicate items if selected multiple times
+    const mergedItemsMap = new Map<string, number>();
+    if (Array.isArray(items) && items.length > 0) {
+      for (const item of items) {
+        const pId = String(item.productId || '');
+        const q = parseInt(String(item.quantity || 0), 10);
+        if (pId && !isNaN(q) && q > 0) {
+          mergedItemsMap.set(pId, (mergedItemsMap.get(pId) || 0) + q);
+        }
+      }
+    } else if (productId && quantity) {
+      const pId = String(productId);
+      const q = parseInt(String(quantity), 10);
+      if (pId && !isNaN(q) && q > 0) {
+        mergedItemsMap.set(pId, q);
+      }
     }
 
-    for (const item of itemsToProcess) {
-      if (isNaN(item.quantity) || item.quantity <= 0) {
-        res.status(400).json({ error: `Quantity must be a positive integer for product ${item.productId}` });
-        return;
-      }
+    if (!eventId || mergedItemsMap.size === 0 || !paymentMethod) {
+      res.status(400).json({ error: 'Event, at least one valid product with quantity, and payment method are required' });
+      return;
     }
 
     const normMethod = (paymentMethod as string).toUpperCase() as PaymentMethod;
@@ -292,7 +358,7 @@ router.post(
         where: { id: eventId },
         include: {
           allocations: {
-            include: { product: true },
+            include: { product: { include: { project: true } } },
           },
         },
       });
@@ -308,121 +374,160 @@ router.post(
       }
 
       // Pre-validate all items against remaining allocations
-      for (const item of itemsToProcess) {
-        const allocation = event.allocations.find(a => a.productId === item.productId);
+      const validatedItems: Array<{
+        productId: string;
+        productName: string;
+        projectName: string;
+        quantity: number;
+        unitPrice: number;
+        lineTotal: number;
+      }> = [];
+
+      for (const [pId, requestedQty] of mergedItemsMap.entries()) {
+        const allocation = event.allocations.find(a => a.productId === pId);
         if (!allocation) {
-          res.status(400).json({ error: `Product ${item.productId} is not allocated to this event` });
+          res.status(400).json({ error: `Product ${pId} is not allocated to this event` });
           return;
         }
 
-        const salesCount = await prisma.sale.aggregate({
+        // Calculate sold quantity from sale_items
+        const salesAgg = await prisma.saleItem.aggregate({
           where: {
-            eventId,
-            productId: item.productId,
+            productId: pId,
+            sale: { eventId },
           },
-          _sum: {
-            quantity: true,
-          },
+          _sum: { quantity: true },
         });
 
-        const soldSoFar = salesCount._sum.quantity || 0;
+        const soldSoFar = salesAgg._sum.quantity || 0;
         const remainingAllocated = allocation.allocatedQty - soldSoFar;
 
-        if (item.quantity > remainingAllocated) {
+        if (requestedQty > remainingAllocated) {
           res.status(400).json({
-            error: `Sale quantity (${item.quantity}) exceeds remaining stock allocated for ${allocation.product.name} (${remainingAllocated} remaining).`,
-            productId: item.productId,
+            error: `Sale quantity (${requestedQty}) exceeds remaining stock allocated for ${allocation.product.name} (${remainingAllocated} remaining).`,
+            productId: pId,
             remainingAllocated,
           });
           return;
         }
-      }
 
-      // Create sales in a transaction
-      const createdSales = await prisma.$transaction(async tx => {
-        const list = [];
-        for (let idx = 0; idx < itemsToProcess.length; idx++) {
-          const item = itemsToProcess[idx];
-          const allocation = event.allocations.find(a => a.productId === item.productId)!;
-          const unitPrice = Number(allocation.priceAtEvent);
-          const totalAmount = unitPrice * item.quantity;
+        const unitPrice = Number(allocation.priceAtEvent);
+        const lineTotal = unitPrice * requestedQty;
 
-          const itemTxId = clientTxId
-            ? itemsToProcess.length > 1
-              ? `${clientTxId}-${idx}-${item.productId}`
-              : clientTxId
-            : null;
-
-          if (itemTxId) {
-            const existing = await tx.sale.findUnique({
-              where: { clientTxId: itemTxId },
-              include: {
-                event: true,
-                product: { include: { project: true } },
-                member: true,
-              },
-            });
-            if (existing) {
-              list.push(existing);
-              continue;
-            }
-          }
-
-          const newSale = await tx.sale.create({
-            data: {
-              clientTxId: itemTxId,
-              eventId,
-              productId: item.productId,
-              memberId: req.user!.id,
-              quantity: item.quantity,
-              unitPrice,
-              totalAmount,
-              paymentMethod: normMethod,
-              customerName: customerName ? customerName.trim() : null,
-              customerPhone: customerPhone ? customerPhone.trim() : null,
-              saleTime: saleTime ? new Date(saleTime) : new Date(),
-            },
-            include: {
-              event: true,
-              product: { include: { project: true } },
-              member: true,
-            },
-          });
-          list.push(newSale);
-        }
-        return list;
-      });
-
-      // Broadcast live updates via WebSocket
-      for (const newSale of createdSales) {
-        broadcast('sale:created', {
-          id: newSale.id,
-          eventId: newSale.eventId,
-          eventName: newSale.event.name,
-          productId: newSale.productId,
-          productName: newSale.product.name,
-          quantity: newSale.quantity,
-          totalAmount: Number(newSale.totalAmount),
-          paymentMethod: newSale.paymentMethod,
-          memberName: newSale.member.name,
-          saleTime: newSale.saleTime,
+        validatedItems.push({
+          productId: pId,
+          productName: allocation.product.name,
+          projectName: allocation.product.project.name,
+          quantity: requestedQty,
+          unitPrice,
+          lineTotal,
         });
       }
+
+      const grandTotal = validatedItems.reduce((sum, item) => sum + item.lineTotal, 0);
+
+      // Create single customer transaction in atomic database transaction
+      const newSale = await prisma.$transaction(async tx => {
+        // Idempotency check if clientTxId supplied
+        if (clientTxId) {
+          const existing = await tx.sale.findUnique({
+            where: { clientTxId: String(clientTxId) },
+            include: {
+              event: true,
+              member: true,
+              items: {
+                include: {
+                  product: { include: { project: true } },
+                },
+              },
+            },
+          });
+          if (existing) {
+            return existing;
+          }
+        }
+
+        return await tx.sale.create({
+          data: {
+            clientTxId: clientTxId ? String(clientTxId) : null,
+            eventId,
+            memberId: req.user!.id,
+            totalAmount: grandTotal,
+            paymentMethod: normMethod,
+            customerName: customerName ? String(customerName).trim() : null,
+            customerPhone: customerPhone ? String(customerPhone).trim() : null,
+            saleTime: saleTime ? new Date(saleTime) : new Date(),
+            items: {
+              create: validatedItems.map(item => ({
+                productId: item.productId,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                lineTotal: item.lineTotal,
+              })),
+            },
+          },
+          include: {
+            event: true,
+            member: true,
+            items: {
+              include: {
+                product: { include: { project: true } },
+              },
+            },
+          },
+        });
+      });
+
+      const totalUnits = validatedItems.reduce((sum, i) => sum + i.quantity, 0);
+
+      // WebSocket broadcasts
+      broadcast('sale:created', {
+        id: newSale.id,
+        eventId: newSale.eventId,
+        eventName: newSale.event.name,
+        totalAmount: Number(newSale.totalAmount),
+        paymentMethod: newSale.paymentMethod,
+        memberName: newSale.member.name,
+        saleTime: newSale.saleTime,
+        itemsCount: newSale.items.length,
+        totalUnits,
+      });
 
       broadcast('inventory:updated', {
         action: 'sales_recorded',
         eventId,
-        count: createdSales.length,
+        saleId: newSale.id,
       });
 
-      const sanitizedList = sanitizeSalesListForUser(createdSales, req.user);
+      const formatted = {
+        id: newSale.id,
+        clientTxId: newSale.clientTxId,
+        eventId: newSale.eventId,
+        eventName: newSale.event.name,
+        totalAmount: Number(newSale.totalAmount),
+        paymentMethod: newSale.paymentMethod,
+        customerName: newSale.customerName,
+        customerPhone: newSale.customerPhone,
+        saleTime: newSale.saleTime,
+        createdAt: newSale.createdAt,
+        items: newSale.items.map(item => ({
+          id: item.id,
+          productId: item.productId,
+          productName: item.product.name,
+          projectName: item.product.project.name,
+          quantity: item.quantity,
+          unitPrice: Number(item.unitPrice),
+          lineTotal: Number(item.lineTotal),
+        })),
+        totalUnits,
+        totalOrderAmount: grandTotal,
+      };
 
       res.status(201).json({
-        message: `${createdSales.length} sale item(s) recorded successfully`,
-        sale: sanitizedList[0], // Maintains backward compatibility
-        sales: sanitizedList,
-        totalItems: createdSales.reduce((acc, s) => acc + s.quantity, 0),
-        totalOrderAmount: createdSales.reduce((acc, s) => acc + Number(s.totalAmount), 0),
+        message: 'Customer transaction recorded successfully',
+        sale: sanitizeSaleForUser(formatted, req.user),
+        totalItems: totalUnits,
+        totalOrderAmount: grandTotal,
       });
     } catch (error) {
       console.error('Record sale error:', error);
@@ -436,10 +541,15 @@ router.post(
   '/sync',
   authenticateToken,
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const { sales } = req.body;
+    const { sales, transactions } = req.body;
+    const rawList = Array.isArray(transactions) && transactions.length > 0
+      ? transactions
+      : Array.isArray(sales)
+      ? sales
+      : [];
 
-    if (!Array.isArray(sales) || sales.length === 0) {
-      res.status(400).json({ error: 'Sales array is required' });
+    if (rawList.length === 0) {
+      res.status(400).json({ error: 'Transactions or sales array is required' });
       return;
     }
 
@@ -447,22 +557,24 @@ router.post(
       const results: any[] = [];
       let syncedCount = 0;
 
-      for (const item of sales) {
+      for (const txData of rawList) {
         const {
           clientTxId,
           eventId,
+          items,
           productId,
           quantity,
+          unitPrice: clientUnitPrice,
           paymentMethod,
           customerName,
           customerPhone,
           saleTime,
-        } = item;
+        } = txData;
 
-        // Idempotency check
+        // 1. Idempotency check
         if (clientTxId) {
           const existing = await prisma.sale.findUnique({
-            where: { clientTxId },
+            where: { clientTxId: String(clientTxId) },
           });
           if (existing) {
             results.push({ clientTxId, status: 'already_synced', saleId: existing.id });
@@ -470,51 +582,100 @@ router.post(
           }
         }
 
-        // Validate allocation & pricing
-        const alloc = await prisma.eventAllocation.findUnique({
-          where: {
-            eventId_productId: {
-              eventId,
-              productId,
-            },
-          },
-        });
+        // 2. Normalize items
+        const itemMap = new Map<string, number>();
+        if (Array.isArray(items) && items.length > 0) {
+          for (const item of items) {
+            const pId = String(item.productId || '');
+            const q = parseInt(String(item.quantity || 0), 10);
+            if (pId && !isNaN(q) && q > 0) {
+              itemMap.set(pId, (itemMap.get(pId) || 0) + q);
+            }
+          }
+        } else if (productId && quantity) {
+          const pId = String(productId);
+          const q = parseInt(String(quantity), 10);
+          if (pId && !isNaN(q) && q > 0) {
+            itemMap.set(pId, q);
+          }
+        }
 
-        if (!alloc) {
-          results.push({ clientTxId, status: 'failed', error: 'Product not allocated to event' });
+        if (!eventId || itemMap.size === 0) {
+          results.push({ clientTxId, status: 'failed', error: 'Missing event or items' });
           continue;
         }
 
-        const qty = parseInt(quantity, 10) || 1;
-        const unitPrice = Number(alloc.priceAtEvent);
-        const totalAmount = unitPrice * qty;
+        // 3. Fetch event allocations
+        const event = await prisma.event.findUnique({
+          where: { id: eventId },
+          include: { allocations: true },
+        });
 
+        if (!event || event.isDeleted) {
+          results.push({ clientTxId, status: 'failed', error: 'Event not found or inactive' });
+          continue;
+        }
+
+        const validatedItems: Array<{
+          productId: string;
+          quantity: number;
+          unitPrice: number;
+          lineTotal: number;
+        }> = [];
+
+        let allocError: string | null = null;
+        for (const [pId, qty] of itemMap.entries()) {
+          const alloc = event.allocations.find(a => a.productId === pId);
+          if (!alloc) {
+            allocError = `Product ${pId} not allocated to event`;
+            break;
+          }
+          const price = Number(alloc.priceAtEvent || clientUnitPrice || 0);
+          validatedItems.push({
+            productId: pId,
+            quantity: qty,
+            unitPrice: price,
+            lineTotal: price * qty,
+          });
+        }
+
+        if (allocError) {
+          results.push({ clientTxId, status: 'failed', error: allocError });
+          continue;
+        }
+
+        const grandTotal = validatedItems.reduce((sum, i) => sum + i.lineTotal, 0);
+        const normMethod = paymentMethod === 'UPI' ? PaymentMethod.UPI : PaymentMethod.CASH;
+
+        // 4. Create single transaction record with items
         const created = await prisma.sale.create({
           data: {
-            clientTxId: clientTxId || null,
+            clientTxId: clientTxId ? String(clientTxId) : null,
             eventId,
-            productId,
             memberId: req.user!.id,
-            quantity: qty,
-            unitPrice,
-            totalAmount,
-            paymentMethod: paymentMethod === 'UPI' ? PaymentMethod.UPI : PaymentMethod.CASH,
-            customerName: customerName ? customerName.trim() : null,
-            customerPhone: customerPhone ? customerPhone.trim() : null,
+            totalAmount: grandTotal,
+            paymentMethod: normMethod,
+            customerName: customerName ? String(customerName).trim() : null,
+            customerPhone: customerPhone ? String(customerPhone).trim() : null,
             saleTime: saleTime ? new Date(saleTime) : new Date(),
+            items: {
+              create: validatedItems.map(item => ({
+                productId: item.productId,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                lineTotal: item.lineTotal,
+              })),
+            },
           },
         });
 
         syncedCount++;
         results.push({ clientTxId, status: 'success', saleId: created.id });
 
-        // Broadcast to listeners
         broadcast('sale:created', {
           id: created.id,
           eventId: created.eventId,
-          productId: created.productId,
-          quantity: created.quantity,
-          totalAmount,
+          totalAmount: Number(created.totalAmount),
           saleTime: created.saleTime,
         });
       }
@@ -524,7 +685,7 @@ router.post(
       }
 
       res.json({
-        message: `Successfully processed sync for ${sales.length} items (${syncedCount} newly recorded)`,
+        message: `Successfully processed sync for ${rawList.length} transaction(s) (${syncedCount} newly recorded)`,
         syncedCount,
         results,
       });
@@ -580,6 +741,11 @@ router.put(
           product: { include: { project: true } },
           event: true,
           member: true,
+          items: {
+            include: {
+              product: { include: { project: true } },
+            },
+          },
         },
       });
 
@@ -608,9 +774,11 @@ router.put(
         updateData.unitPrice = newPrice;
       }
 
-      const effectiveQty = updateData.quantity !== undefined ? updateData.quantity : existing.quantity;
-      const effectivePrice = updateData.unitPrice !== undefined ? updateData.unitPrice : Number(existing.unitPrice);
-      updateData.totalAmount = effectiveQty * effectivePrice;
+      const effectiveQty = updateData.quantity !== undefined ? updateData.quantity : (existing.quantity || 1);
+      const effectivePrice = updateData.unitPrice !== undefined ? updateData.unitPrice : Number(existing.unitPrice || 0);
+      if (updateData.quantity !== undefined || updateData.unitPrice !== undefined) {
+        updateData.totalAmount = effectiveQty * effectivePrice;
+      }
 
       if (paymentMethod !== undefined) {
         const normMethod = (paymentMethod as string).toUpperCase();
@@ -640,26 +808,65 @@ router.put(
           product: { include: { project: true } },
           event: true,
           member: true,
+          items: {
+            include: {
+              product: { include: { project: true } },
+            },
+          },
         },
       });
 
       broadcast('inventory:updated', { action: 'sale_updated', id });
+
+      const rawItems = (updated.items && updated.items.length > 0)
+        ? updated.items.map(item => ({
+            id: item.id,
+            productId: item.productId,
+            productName: item.product?.name || item.productId,
+            projectId: item.product?.project?.id || '',
+            projectName: item.product?.project?.name || '',
+            quantity: item.quantity,
+            unitPrice: Number(item.unitPrice),
+            lineTotal: Number(item.lineTotal),
+          }))
+        : updated.productId
+        ? [{
+            id: updated.id,
+            productId: updated.productId,
+            productName: updated.product?.name || updated.productId,
+            projectId: updated.product?.project?.id || '',
+            projectName: updated.product?.project?.name || '',
+            quantity: updated.quantity || 1,
+            unitPrice: Number(updated.unitPrice || 0),
+            lineTotal: Number(updated.totalAmount || 0),
+          }]
+        : [];
+
+      const totalUnits = rawItems.reduce((sum, item) => sum + item.quantity, 0) || updated.quantity || 0;
+      const uniqueProjects = Array.from(new Set(rawItems.map(item => item.projectName).filter(Boolean)));
+      const primaryProject = uniqueProjects.length > 0 ? uniqueProjects.join(' + ') : (updated.product?.project?.name || 'Multiple');
+      const productSummary = rawItems.map(item => `${item.productName} × ${item.quantity}`).join(', ') || updated.product?.name || 'No Products';
+
+      const firstItem = rawItems[0] || {};
 
       const formatted = {
         id: updated.id,
         clientTxId: updated.clientTxId,
         eventId: updated.eventId,
         eventName: updated.event.name,
-        productId: updated.productId,
-        productName: updated.product.name,
-        projectId: updated.product.project.id,
-        projectName: updated.product.project.name,
+        productId: firstItem.productId || updated.productId || '',
+        productName: productSummary,
+        projectId: firstItem.projectId || updated.product?.project?.id || '',
+        projectName: primaryProject,
+        projectNames: uniqueProjects,
         memberId: updated.memberId,
         memberName: updated.member.name,
         memberUsername: updated.member.username,
         memberDepartment: updated.member.department,
-        quantity: updated.quantity,
-        unitPrice: Number(updated.unitPrice),
+        items: rawItems,
+        totalUnits,
+        quantity: totalUnits,
+        unitPrice: Number(firstItem.unitPrice ?? updated.unitPrice ?? 0),
         totalAmount: Number(updated.totalAmount),
         paymentMethod: updated.paymentMethod,
         customerName: updated.customerName,

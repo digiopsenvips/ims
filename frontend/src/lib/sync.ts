@@ -114,41 +114,46 @@ class SyncManager {
     }>;
   }): Promise<{ orderId: string; syncedImmediately: boolean; count: number }> {
     const orderId = crypto.randomUUID();
-    const queuedSales: QueuedSale[] = orderData.items.map((item, idx) => ({
-      clientTxId: `${orderId}-${idx}-${item.productId}`,
+    const totalUnits = orderData.items.reduce((sum, i) => sum + i.quantity, 0);
+    const totalAmount = orderData.items.reduce((sum, i) => sum + i.totalAmount, 0);
+
+    const queuedTransaction: QueuedSale = {
+      clientTxId: orderId,
       eventId: orderData.eventId,
       eventName: orderData.eventName,
-      productId: item.productId,
-      productName: item.productName,
-      quantity: item.quantity,
-      unitPrice: item.unitPrice,
-      totalAmount: item.totalAmount,
       paymentMethod: orderData.paymentMethod,
       customerName: orderData.customerName,
       customerPhone: orderData.customerPhone,
       saleTime: orderData.saleTime,
-      queuedAt: Date.now() + idx,
+      totalUnits,
+      totalAmount,
+      items: orderData.items.map(item => ({
+        productId: item.productId,
+        productName: item.productName,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        lineTotal: item.totalAmount,
+      })),
+      queuedAt: Date.now(),
       syncStatus: 'pending',
-    }));
+    };
 
-    // 1. Write all items to local IndexedDB immediately
-    for (const s of queuedSales) {
-      await queueOfflineSale(s);
-    }
+    // 1. Write the transaction to local IndexedDB immediately
+    await queueOfflineSale(queuedTransaction);
     await this.refreshCount();
 
-    // 2. If online, attempt instant sync for the entire order
+    // 2. If online, attempt instant sync for the entire transaction
     let syncedImmediately = false;
     if (this.isOnline) {
       try {
-        const res = await api.post('/sales/sync', { sales: queuedSales });
+        const res = await api.post('/sales/sync', { transactions: [queuedTransaction] });
         if (res && Array.isArray(res.results)) {
           const successIds = res.results
             .filter((r: any) => r.status === 'success' || r.status === 'already_synced')
             .map((r: any) => r.clientTxId);
-          if (successIds.length > 0) {
-            await removeSyncedSales(successIds);
-            syncedImmediately = successIds.length === queuedSales.length;
+          if (successIds.includes(orderId)) {
+            await removeSyncedSales([orderId]);
+            syncedImmediately = true;
             await this.refreshCount();
           }
         }
@@ -157,7 +162,7 @@ class SyncManager {
       }
     }
 
-    return { orderId, syncedImmediately, count: queuedSales.length };
+    return { orderId, syncedImmediately, count: 1 };
   }
 
   public async triggerSync(): Promise<void> {
@@ -174,7 +179,7 @@ class SyncManager {
       this.isSyncing = true;
       this.notify();
 
-      const response = await api.post('/sales/sync', { sales: pending });
+      const response = await api.post('/sales/sync', { transactions: pending });
 
       if (response && Array.isArray(response.results)) {
         const successfulIds: string[] = [];

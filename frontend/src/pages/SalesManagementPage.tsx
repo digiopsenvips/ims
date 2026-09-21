@@ -628,15 +628,40 @@ export const SalesManagementPage: React.FC = () => {
                         {displaySerial}
                       </td>
                       <td className="px-4 py-3 text-slate-700">
-                        <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 border border-slate-200">
-                          {sale.projectName}
-                        </span>
+                        <div className="flex flex-wrap gap-1">
+                          {(sale.projectNames && sale.projectNames.length > 0
+                            ? sale.projectNames
+                            : [sale.projectName]
+                          ).map((proj, pIdx) => (
+                            <span key={pIdx} className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 border border-slate-200">
+                              {proj}
+                            </span>
+                          ))}
+                        </div>
                       </td>
-                      <td className="px-4 py-3 font-semibold text-slate-900">
-                        {sale.productName}
-                        <span className="block text-[10px] text-slate-400 font-normal font-mono">
-                          {sale.productId}
-                        </span>
+                      <td className="px-4 py-3 text-slate-900">
+                        {sale.items && sale.items.length > 0 ? (
+                          <div className="space-y-1">
+                            {sale.items.map((item, itIdx) => (
+                              <div key={itIdx} className="text-xs flex items-center gap-1.5">
+                                <span className="font-semibold text-slate-900">{item.productName}</span>
+                                <span className="font-bold text-slate-700">× {item.quantity}</span>
+                                {canViewRevenue && item.unitPrice ? (
+                                  <span className="text-[10px] text-slate-400">(@ ₹{item.unitPrice})</span>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div>
+                            <span className="font-semibold text-slate-900">{sale.productName}</span>
+                            {sale.productId && (
+                              <span className="block text-[10px] text-slate-400 font-normal font-mono">
+                                {sale.productId}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 font-medium text-slate-800">
                         {sale.memberName}
@@ -645,7 +670,7 @@ export const SalesManagementPage: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-right font-black text-slate-900">
-                        {sale.quantity}
+                        {sale.totalUnits ?? sale.quantity}
                       </td>
                       {canViewRevenue && (
                         <td className="px-4 py-3 text-right font-black text-slate-900">

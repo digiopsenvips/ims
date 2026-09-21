@@ -25,7 +25,10 @@ router.get(
       if (eventId) whereClause.eventId = String(eventId);
       if (memberId) whereClause.memberId = String(memberId);
       if (projectId) {
-        whereClause.product = { projectId: String(projectId) };
+        whereClause.OR = [
+          { product: { projectId: String(projectId) } },
+          { items: { some: { product: { projectId: String(projectId) } } } },
+        ];
       }
       if (startDate || endDate) {
         whereClause.saleTime = {};
@@ -33,7 +36,7 @@ router.get(
         if (endDate) whereClause.saleTime.lte = new Date(String(endDate));
       }
 
-      // Fetch all matched sales with product and event details
+      // Fetch all matched sales with items, product, and event details
       const sales = await prisma.sale.findMany({
         where: whereClause,
         include: {
@@ -41,6 +44,15 @@ router.get(
           product: {
             include: {
               project: true,
+            },
+          },
+          items: {
+            include: {
+              product: {
+                include: {
+                  project: true,
+                },
+              },
             },
           },
           member: {
@@ -53,10 +65,6 @@ router.get(
       // 1. Overview KPIs
       let totalUnitsSold = 0;
       let totalRevenue = 0;
-      for (const s of sales) {
-        totalUnitsSold += s.quantity;
-        totalRevenue += Number(s.totalAmount);
-      }
 
       // 2. Product Share (Pie Chart data)
       const productMap: Record<
@@ -83,53 +91,76 @@ router.get(
       const dateMap: Record<string, { date: string; units: number; revenue: number }> = {};
 
       for (const s of sales) {
-        const pId = s.productId;
-        const pName = s.product.name;
-        const prjName = s.product.project.name;
-        const rev = Number(s.totalAmount);
+        totalRevenue += Number(s.totalAmount);
 
-        // Product
-        if (!productMap[pId]) {
-          productMap[pId] = { name: pName, project: prjName, units: 0, revenue: 0 };
-        }
-        productMap[pId].units += s.quantity;
-        productMap[pId].revenue += rev;
+        const lineItems = (s.items && s.items.length > 0)
+          ? s.items.map(item => ({
+              productId: item.productId,
+              productName: item.product.name,
+              projectName: item.product.project.name,
+              quantity: item.quantity,
+              revenue: Number(item.lineTotal),
+            }))
+          : s.product
+          ? [{
+              productId: s.productId!,
+              productName: s.product.name,
+              projectName: s.product.project.name,
+              quantity: s.quantity || 1,
+              revenue: Number(s.totalAmount),
+            }]
+          : [];
 
-        // Project
-        if (!projectMap[prjName]) {
-          projectMap[prjName] = { name: prjName, units: 0, revenue: 0 };
-        }
-        projectMap[prjName].units += s.quantity;
-        projectMap[prjName].revenue += rev;
+        for (const item of lineItems) {
+          totalUnitsSold += item.quantity;
+          const pId = item.productId;
+          const pName = item.productName;
+          const prjName = item.projectName;
+          const rev = item.revenue;
 
-        // Event
-        if (canViewEventBreakdown) {
-          const eId = s.eventId;
-          const eName = s.event.name;
-          if (!eventMap[eId]) {
-            eventMap[eId] = {
-              eventId: eId,
-              eventName: eName,
-              totalUnits: 0,
-              totalRevenue: 0,
-              productUnits: {},
-            };
+          // Product
+          if (!productMap[pId]) {
+            productMap[pId] = { name: pName, project: prjName, units: 0, revenue: 0 };
           }
-          eventMap[eId].totalUnits += s.quantity;
-          eventMap[eId].totalRevenue += rev;
-          if (!eventMap[eId].productUnits[pId]) {
-            eventMap[eId].productUnits[pId] = { name: pName, count: 0 };
-          }
-          eventMap[eId].productUnits[pId].count += s.quantity;
-        }
+          productMap[pId].units += item.quantity;
+          productMap[pId].revenue += rev;
 
-        // Time trend (YYYY-MM-DD)
-        const dateKey = s.saleTime.toISOString().split('T')[0];
-        if (!dateMap[dateKey]) {
-          dateMap[dateKey] = { date: dateKey, units: 0, revenue: 0 };
+          // Project
+          if (!projectMap[prjName]) {
+            projectMap[prjName] = { name: prjName, units: 0, revenue: 0 };
+          }
+          projectMap[prjName].units += item.quantity;
+          projectMap[prjName].revenue += rev;
+
+          // Event
+          if (canViewEventBreakdown) {
+            const eId = s.eventId;
+            const eName = s.event.name;
+            if (!eventMap[eId]) {
+              eventMap[eId] = {
+                eventId: eId,
+                eventName: eName,
+                totalUnits: 0,
+                totalRevenue: 0,
+                productUnits: {},
+              };
+            }
+            eventMap[eId].totalUnits += item.quantity;
+            eventMap[eId].totalRevenue += rev;
+            if (!eventMap[eId].productUnits[pId]) {
+              eventMap[eId].productUnits[pId] = { name: pName, count: 0 };
+            }
+            eventMap[eId].productUnits[pId].count += item.quantity;
+          }
+
+          // Time trend (YYYY-MM-DD)
+          const dateKey = s.saleTime.toISOString().split('T')[0];
+          if (!dateMap[dateKey]) {
+            dateMap[dateKey] = { date: dateKey, units: 0, revenue: 0 };
+          }
+          dateMap[dateKey].units += item.quantity;
+          dateMap[dateKey].revenue += rev;
         }
-        dateMap[dateKey].units += s.quantity;
-        dateMap[dateKey].revenue += rev;
       }
 
       // Convert product share to array

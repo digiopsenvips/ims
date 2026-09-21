@@ -30,6 +30,13 @@ router.get(
               productId: true,
               quantity: true,
               totalAmount: true,
+              items: {
+                select: {
+                  productId: true,
+                  quantity: true,
+                  lineTotal: true,
+                },
+              },
             },
           },
         },
@@ -43,13 +50,24 @@ router.get(
         let totalSold = 0;
 
         for (const s of event.sales) {
-          if (!salesByProduct[s.productId]) {
-            salesByProduct[s.productId] = { count: 0, revenue: 0 };
-          }
-          salesByProduct[s.productId].count += s.quantity;
-          salesByProduct[s.productId].revenue += Number(s.totalAmount);
-          totalSold += s.quantity;
           totalRevenue += Number(s.totalAmount);
+          if (s.items && s.items.length > 0) {
+            for (const item of s.items) {
+              if (!salesByProduct[item.productId]) {
+                salesByProduct[item.productId] = { count: 0, revenue: 0 };
+              }
+              salesByProduct[item.productId].count += item.quantity;
+              salesByProduct[item.productId].revenue += Number(item.lineTotal);
+              totalSold += item.quantity;
+            }
+          } else if (s.productId && s.quantity) {
+            if (!salesByProduct[s.productId]) {
+              salesByProduct[s.productId] = { count: 0, revenue: 0 };
+            }
+            salesByProduct[s.productId].count += s.quantity;
+            salesByProduct[s.productId].revenue += Number(s.totalAmount);
+            totalSold += s.quantity;
+          }
         }
 
         const enrichedAllocations = event.allocations.map(alloc => {
@@ -113,6 +131,7 @@ router.get(
           },
           sales: {
             include: {
+              items: true,
               product: true,
               member: { select: { id: true, name: true } },
             },
@@ -129,7 +148,13 @@ router.get(
       // Group sales by product
       const salesByProduct: Record<string, number> = {};
       for (const s of event.sales) {
-        salesByProduct[s.productId] = (salesByProduct[s.productId] || 0) + s.quantity;
+        if (s.items && s.items.length > 0) {
+          for (const item of s.items) {
+            salesByProduct[item.productId] = (salesByProduct[item.productId] || 0) + item.quantity;
+          }
+        } else if (s.productId) {
+          salesByProduct[s.productId] = (salesByProduct[s.productId] || 0) + (s.quantity || 1);
+        }
       }
 
       const enrichedAllocations = event.allocations.map(alloc => {
@@ -259,7 +284,9 @@ router.put(
         where: { id },
         include: {
           allocations: true,
-          sales: true,
+          sales: {
+            include: { items: true },
+          },
         },
       });
 
@@ -276,7 +303,13 @@ router.put(
       // Group sales count by product for this event
       const salesByProduct: Record<string, number> = {};
       for (const s of existingEvent.sales) {
-        salesByProduct[s.productId] = (salesByProduct[s.productId] || 0) + s.quantity;
+        if (s.items && s.items.length > 0) {
+          for (const item of s.items) {
+            salesByProduct[item.productId] = (salesByProduct[item.productId] || 0) + item.quantity;
+          }
+        } else if (s.productId) {
+          salesByProduct[s.productId] = (salesByProduct[s.productId] || 0) + (s.quantity || 1);
+        }
       }
 
       // Handle allocations update in transaction
@@ -402,10 +435,15 @@ router.post(
         return;
       }
 
-      // Count sold quantities
+      // Count sold quantities from sale_items
       const soldMap: Record<string, number> = {};
-      for (const sale of event.sales) {
-        soldMap[sale.productId] = (soldMap[sale.productId] || 0) + sale.quantity;
+      const soldItems = await prisma.saleItem.groupBy({
+        by: ['productId'],
+        where: { sale: { eventId: id } },
+        _sum: { quantity: true },
+      });
+      for (const item of soldItems) {
+        soldMap[item.productId] = (soldMap[item.productId] || 0) + (item._sum.quantity || 0);
       }
 
       // Return unsold quantities to main inventory
@@ -481,9 +519,9 @@ router.delete(
 
       // If event is not ENDED, return any unsold allocated stock back to main inventory
       if (event.status !== EventStatus.ENDED) {
-        const salesCount = await prisma.sale.groupBy({
+        const salesCount = await prisma.saleItem.groupBy({
           by: ['productId'],
-          where: { eventId: id },
+          where: { sale: { eventId: id } },
           _sum: { quantity: true },
         });
 

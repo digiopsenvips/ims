@@ -18,6 +18,13 @@ export const sanitizeSaleForUser = (sale: any, user?: AuthUserPayload) => {
     delete sanitized.totalAmount;
     sanitized.unitPrice = null;
     sanitized.totalAmount = null;
+    if (Array.isArray(sanitized.items)) {
+      sanitized.items = sanitized.items.map((i: any) => ({
+        ...i,
+        unitPrice: null,
+        lineTotal: null,
+      }));
+    }
   }
 
   return sanitized;

@@ -78,6 +78,7 @@ model Product {
   inventory   Inventory?
   allocations EventAllocation[]
   sales       Sale[]
+  saleItems   SaleItem[]
 
   @@index([projectId])
   @@map("products")
@@ -133,23 +134,43 @@ model Sale {
   id            Int           @id @default(autoincrement()) // Serial No.
   clientTxId    String?       @unique @map("client_tx_id") // For offline sync idempotency
   eventId       String        @map("event_id")
-  productId     String        @map("product_id")
   memberId      String        @map("member_id")
-  quantity      Int
-  unitPrice     Decimal       @map("unit_price") @db.Decimal(10, 2)
   totalAmount   Decimal       @map("total_amount") @db.Decimal(10, 2)
   paymentMethod PaymentMethod @map("payment_method")
   customerName  String?       @map("customer_name")
   customerPhone String?       @map("customer_phone")
   saleTime      DateTime      @default(now()) @map("sale_time")
   createdAt     DateTime      @default(now()) @map("created_at")
+
+  // Legacy fields for backward compatibility
+  productId     String?       @map("product_id")
+  quantity      Int?
+  unitPrice     Decimal?      @map("unit_price") @db.Decimal(10, 2)
+
   event         Event         @relation(fields: [eventId], references: [id], onDelete: Restrict)
-  product       Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
   member        User          @relation(fields: [memberId], references: [id], onDelete: Restrict)
+  product       Product?      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  items         SaleItem[]
 
   @@index([eventId])
-  @@index([productId])
   @@index([saleTime])
   @@index([memberId])
   @@map("sales")
+}
+
+model SaleItem {
+  id        Int      @id @default(autoincrement())
+  saleId    Int      @map("sale_id")
+  productId String   @map("product_id")
+  quantity  Int
+  unitPrice Decimal  @map("unit_price") @db.Decimal(10, 2)
+  lineTotal Decimal  @map("line_total") @db.Decimal(10, 2)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  sale    Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([saleId])
+  @@index([productId])
+  @@map("sale_items")
 }

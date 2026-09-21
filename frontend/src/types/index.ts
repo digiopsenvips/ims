@@ -83,19 +83,34 @@ export interface AppEvent {
   createdAt: string;
 }
 
+export interface SaleItem {
+  id: number;
+  productId: string;
+  productName: string;
+  projectId?: string;
+  projectName?: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+}
+
 export interface Sale {
   id: number; // Internal database ID
-  serialNumber?: number; // Global chronological S.No. (1 = oldest sale)
+  serialNumber?: number; // Global chronological S.No. (1 = oldest transaction)
   clientTxId?: string | null;
   eventId: string;
   eventName: string;
-  productId: string;
+  productId?: string;
   productName: string;
-  projectId: string;
+  projectId?: string;
   projectName: string;
+  projectNames?: string[];
   memberId: string;
   memberName: string;
   memberUsername: string;
+  memberDepartment?: string | null;
+  items?: SaleItem[];
+  totalUnits?: number;
   quantity: number;
   unitPrice?: number | null;
   totalAmount?: number | null;
@@ -126,15 +141,25 @@ export interface SalesResponse {
   totalCount: number;
 }
 
+export interface QueuedSaleItem {
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+}
+
 export interface QueuedSale {
   clientTxId: string;
   eventId: string;
   eventName?: string;
-  productId: string;
+  productId?: string;
   productName?: string;
-  quantity: number;
+  quantity?: number;
   unitPrice?: number;
   totalAmount?: number;
+  items?: QueuedSaleItem[];
+  totalUnits?: number;
   paymentMethod: PaymentMethod;
   customerName?: string;
   customerPhone?: string;
