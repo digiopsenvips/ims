@@ -1,4 +1,4 @@
-const CACHE_NAME = 'enactus-ims-cache-v2';
+const CACHE_NAME = 'enactus-ims-cache-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -10,7 +10,7 @@ const STATIC_ASSETS = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('[SW] Precaching app shell (v2)');
+      console.log('[SW] Precaching app shell (v3)');
       return cache.addAll(STATIC_ASSETS);
     })
   );

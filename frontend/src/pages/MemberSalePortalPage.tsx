@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { api } from '../lib/api';
@@ -22,6 +22,8 @@ import {
   Copy,
   X,
   ArrowRight,
+  Search,
+  ChevronDown,
 } from 'lucide-react';
 
 const generateBillNumber = () =>
@@ -38,6 +40,10 @@ export const MemberSalePortalPage: React.FC = () => {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('UPI');
   const [customerName, setCustomerName] = useState<string>('');
   const [customerPhone, setCustomerPhone] = useState<string>('');
+
+  // Product catalog discovery: Project filter & search
+  const [selectedProject, setSelectedProject] = useState<string>('ALL');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -63,7 +69,7 @@ export const MemberSalePortalPage: React.FC = () => {
     if ('caches' in window) {
       caches.keys().then(keys => {
         keys.forEach(k => {
-          if (k === 'enactus-ims-cache-v1') {
+          if (k !== 'enactus-ims-cache-v3') {
             caches.delete(k);
           }
         });
@@ -162,6 +168,69 @@ export const MemberSalePortalPage: React.FC = () => {
 
   // Allocations for current event
   const allocations: EventAllocation[] = currentEvent?.allocations || [];
+
+  // Dynamic list of projects available in current event's allocations
+  const availableProjects = useMemo(() => {
+    const set = new Set<string>();
+    allocations.forEach(a => {
+      if (a.projectName && a.projectName.trim()) {
+        set.add(a.projectName.trim());
+      }
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [allocations]);
+
+  // Clean formatting for project labels (e.g. TAHSIN -> Tahsin, UPCYCLE -> Upcycle)
+  const formatProjectLabel = (name: string) => {
+    if (!name) return name;
+    return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
+  };
+
+  // Filter allocations combining project selector and search query
+  const filteredAllocations = useMemo(() => {
+    const term = searchQuery.trim().toLowerCase();
+
+    return allocations.filter(item => {
+      // 1. Project filter
+      if (selectedProject !== 'ALL') {
+        if ((item.projectName || '').toUpperCase() !== selectedProject.toUpperCase()) {
+          return false;
+        }
+      }
+
+      // 2. Search filter across Product Name, Product ID, and Project Name
+      if (term) {
+        const matchName = item.productName.toLowerCase().includes(term);
+        const matchId = item.productId.toLowerCase().includes(term);
+        const matchProject = (item.projectName || '').toLowerCase().includes(term);
+        if (!matchName && !matchId && !matchProject) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [allocations, selectedProject, searchQuery]);
+
+  // Predictable sorting: Project ascending -> Product ID ascending (numeric-aware: TAH-001, TAH-002, UPC-001)
+  const sortedAllocations = useMemo(() => {
+    return [...filteredAllocations].sort((a, b) => {
+      const projA = (a.projectName || '').toUpperCase();
+      const projB = (b.projectName || '').toUpperCase();
+      if (projA !== projB) {
+        return projA.localeCompare(projB);
+      }
+      return a.productId.localeCompare(b.productId, undefined, { numeric: true });
+    });
+  }, [filteredAllocations]);
+
+  // Reset all filters back to default (All Projects, empty search)
+  const handleClearFilters = () => {
+    setSelectedProject('ALL');
+    setSearchQuery('');
+  };
+
+  const isFilterActive = selectedProject !== 'ALL' || searchQuery.trim() !== '';
 
   // Synchronize cart remaining stocks if allocations change
   useEffect(() => {
@@ -438,6 +507,8 @@ export const MemberSalePortalPage: React.FC = () => {
               onChange={e => {
                 setSelectedEventId(e.target.value);
                 setCart([]); // Clear bill when switching events
+                setSelectedProject('ALL');
+                setSearchQuery('');
                 setErrorMessage(null);
                 setSuccessMessage(null);
               }}
@@ -509,7 +580,7 @@ export const MemberSalePortalPage: React.FC = () => {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Left Column: Available Products Catalog */}
           <div className="lg:col-span-7 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <div>
                 <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700">
                   Available Stall Products
@@ -518,18 +589,153 @@ export const MemberSalePortalPage: React.FC = () => {
                   Click "+ Add to Bill" on each item the person is buying
                 </p>
               </div>
-              <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full">
-                {allocations.length} products available
-              </span>
+              <div className="flex items-center gap-2">
+                {isFilterActive ? (
+                  <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-full">
+                    {sortedAllocations.length} of {allocations.length} shown
+                  </span>
+                ) : (
+                  <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full">
+                    {allocations.length} products available
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Project Filter & Product Search Box */}
+            <div className="bg-white border border-slate-200 rounded-lg p-3 shadow-2xs space-y-2">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                {/* 1. Project Selector Dropdown */}
+                <div className="relative w-full sm:w-48 shrink-0">
+                  <select
+                    value={selectedProject}
+                    onChange={e => setSelectedProject(e.target.value)}
+                    aria-label="Filter products by project"
+                    className="w-full text-xs font-semibold bg-slate-50 hover:bg-slate-100/70 border border-slate-300 rounded-md py-2 pl-3 pr-8 text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900 transition-colors cursor-pointer appearance-none min-h-[38px]"
+                  >
+                    <option value="ALL">All Projects ({allocations.length})</option>
+                    {availableProjects.map(proj => {
+                      const count = allocations.filter(
+                        a => (a.projectName || '').toUpperCase() === proj.toUpperCase()
+                      ).length;
+                      return (
+                        <option key={proj} value={proj}>
+                          {formatProjectLabel(proj)} ({count})
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
+
+                {/* 2. Product Search Input */}
+                <div className="relative flex-1">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="Search products..."
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className="w-full text-xs bg-slate-50 focus:bg-white border border-slate-300 rounded-md py-2 pl-8.5 pr-8 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-900 transition-colors min-h-[38px]"
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="w-6 h-6 flex items-center justify-center text-slate-400 hover:text-slate-700 absolute right-2 top-1/2 -translate-y-1/2 rounded cursor-pointer"
+                      title="Clear search"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* 3. Clear filters button if filter/search is active */}
+                {isFilterActive && (
+                  <button
+                    type="button"
+                    onClick={handleClearFilters}
+                    className="px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-md transition-colors cursor-pointer flex items-center justify-center gap-1.5 shrink-0 min-h-[38px]"
+                    title="Clear project filter and search"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Clear</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Active filter summary feedback bar */}
+              {isFilterActive && (
+                <div className="flex items-center justify-between text-[11px] pt-1 text-slate-500">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span>Showing</span>
+                    <span className="font-bold text-slate-900">
+                      {sortedAllocations.length} of {allocations.length}
+                    </span>
+                    <span>products</span>
+                    {selectedProject !== 'ALL' && (
+                      <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[10px] font-medium">
+                        Project: <strong className="font-bold">{formatProjectLabel(selectedProject)}</strong>
+                      </span>
+                    )}
+                    {searchQuery.trim() && (
+                      <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[10px] font-medium">
+                        Search: <strong className="font-bold">&ldquo;{searchQuery.trim()}&rdquo;</strong>
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleClearFilters}
+                    className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer ml-2 shrink-0"
+                  >
+                    Clear filters
+                  </button>
+                </div>
+              )}
             </div>
 
             {allocations.length === 0 ? (
               <div className="bg-white p-8 rounded-lg border border-slate-200 text-center text-xs text-slate-500">
                 No products allocated to this event yet.
               </div>
+            ) : sortedAllocations.length === 0 ? (
+              <div className="bg-white p-8 rounded-lg border border-slate-200 text-center space-y-3">
+                <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-400">
+                  <Search className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800">No products found</h3>
+                  <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                    {selectedProject !== 'ALL' && searchQuery.trim() ? (
+                      <>
+                        No products found in <strong className="text-slate-700">{formatProjectLabel(selectedProject)}</strong> matching &ldquo;<strong className="text-slate-700">{searchQuery.trim()}</strong>&rdquo;.
+                      </>
+                    ) : selectedProject !== 'ALL' ? (
+                      <>
+                        No products found for project <strong className="text-slate-700">{formatProjectLabel(selectedProject)}</strong>.
+                      </>
+                    ) : (
+                      <>
+                        No products matching &ldquo;<strong className="text-slate-700">{searchQuery.trim()}</strong>&rdquo;.
+                      </>
+                    )}
+                    <br />
+                    Try a different product name or clear the filters.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleClearFilters}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Clear filters</span>
+                </button>
+              </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {allocations.map(item => {
+                {sortedAllocations.map(item => {
                   const inCartItem = cart.find(c => c.productId === item.productId);
                   const inCartQty = inCartItem ? inCartItem.quantity : 0;
                   const isOutOfStock = item.remainingQty <= 0;
