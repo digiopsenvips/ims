@@ -375,7 +375,7 @@ export const SalesManagementPage: React.FC = () => {
       ];
 
       const rows = exportList.map((s, idx) => [
-        s.serialNumber ?? idx + 1,
+        s.serialNumber ?? (exportList.length - idx),
         s.id,
         s.eventId,
         `"${(s.eventName || '').replace(/"/g, '""')}"`,
@@ -619,8 +619,8 @@ export const SalesManagementPage: React.FC = () => {
                 </tr>
               ) : (
                 sales.map((sale, index) => {
-                  // Chronological S.No.: 1 = oldest sale in ledger
-                  const displaySerial = sale.serialNumber ?? ((currentPage - 1) * pageSize + index + 1);
+                  // Chronological S.No.: 1 = oldest sale in ledger, highest = newest sale
+                  const displaySerial = sale.serialNumber ?? Math.max(1, totalRecords - ((currentPage - 1) * pageSize) - index);
 
                   return (
                     <tr key={sale.id} className="hover:bg-slate-50/50">

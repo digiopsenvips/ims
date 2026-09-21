@@ -103,11 +103,11 @@ router.get(
       const skip = isAll ? undefined : (page - 1) * pageSize;
       const take = isAll ? undefined : pageSize;
 
-      // Deterministic chronological ordering: OLDEST first (S.No. 1 is oldest sale)
+      // Deterministic reverse chronological ordering: NEWEST first (highest S.No. is newest sale)
       const orderBy = [
-        { saleTime: 'asc' as const },
-        { createdAt: 'asc' as const },
-        { id: 'asc' as const },
+        { saleTime: 'desc' as const },
+        { createdAt: 'desc' as const },
+        { id: 'desc' as const },
       ];
 
       const [totalRecords, sales, summaryAgg] = await Promise.all([
@@ -178,11 +178,11 @@ router.get(
 
       // Format and sanitize for permissions
       const formatted = sales.map((s, index) => {
-        const serialNumber = rankMap.get(s.id) ?? (page - 1) * pageSize + index + 1;
+        const serialNumber = rankMap.get(s.id) ?? Math.max(1, totalRecords - ((page - 1) * pageSize) - index);
 
         return {
           id: s.id, // Internal database ID
-          serialNumber, // Global chronological S.No. (1 = oldest sale)
+          serialNumber, // Global chronological S.No. (1 = oldest sale, highest = newest)
           clientTxId: s.clientTxId,
           eventId: s.eventId,
           eventName: s.event.name,
