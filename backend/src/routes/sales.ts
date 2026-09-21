@@ -5,7 +5,7 @@ import { AuthenticatedRequest } from '../types';
 import { sanitizeSaleForUser, sanitizeSalesListForUser } from '../middleware/piiSanitizer';
 import { requireRoles } from '../middleware/rbac';
 import { broadcast } from '../sockets';
-import { PaymentMethod, Role } from '@prisma/client';
+import { PaymentMethod, Role, Prisma } from '@prisma/client';
 
 const router = Router();
 
@@ -79,6 +79,20 @@ router.get(
         const num = parseInt(term.replace(/^#/, ''), 10);
         if (!isNaN(num)) {
           searchConditions.push({ id: num });
+          try {
+            const rankedMatch: Array<{ id: number }> = await prisma.$queryRaw`
+              WITH ranked_sales AS (
+                SELECT id, ROW_NUMBER() OVER (ORDER BY sale_time ASC, created_at ASC, id ASC)::int as serial_number
+                FROM sales
+              )
+              SELECT id FROM ranked_sales WHERE serial_number = ${num}
+            `;
+            if (rankedMatch && rankedMatch.length > 0) {
+              searchConditions.push({ id: rankedMatch[0].id });
+            }
+          } catch (e) {
+            // Ignore search ranking error if raw query fails
+          }
         }
         whereClause.AND = whereClause.AND ? [...whereClause.AND, { OR: searchConditions }] : [{ OR: searchConditions }];
       }
@@ -89,11 +103,11 @@ router.get(
       const skip = isAll ? undefined : (page - 1) * pageSize;
       const take = isAll ? undefined : pageSize;
 
-      // Deterministic ordering: saleTime DESC, createdAt DESC, id DESC
+      // Deterministic chronological ordering: OLDEST first (S.No. 1 is oldest sale)
       const orderBy = [
-        { saleTime: 'desc' as const },
-        { createdAt: 'desc' as const },
-        { id: 'desc' as const },
+        { saleTime: 'asc' as const },
+        { createdAt: 'asc' as const },
+        { id: 'asc' as const },
       ];
 
       const [totalRecords, sales, summaryAgg] = await Promise.all([
@@ -142,29 +156,54 @@ router.get(
         }),
       ]);
 
+      // Calculate each returned sale's global chronological serial number
+      const rankMap = new Map<number, number>();
+      if (sales.length > 0) {
+        try {
+          const saleIds = sales.map(s => s.id);
+          const rankedRows: Array<{ id: number; serial_number: number }> = await prisma.$queryRaw`
+            WITH ranked_sales AS (
+              SELECT id, ROW_NUMBER() OVER (ORDER BY sale_time ASC, created_at ASC, id ASC)::int as serial_number
+              FROM sales
+            )
+            SELECT id, serial_number FROM ranked_sales WHERE id IN (${Prisma.join(saleIds)})
+          `;
+          for (const row of rankedRows) {
+            rankMap.set(row.id, Number(row.serial_number));
+          }
+        } catch (rankErr) {
+          console.error('Failed to query sales rank CTE:', rankErr);
+        }
+      }
+
       // Format and sanitize for permissions
-      const formatted = sales.map(s => ({
-        id: s.id, // Internal database ID
-        clientTxId: s.clientTxId,
-        eventId: s.eventId,
-        eventName: s.event.name,
-        productId: s.productId,
-        productName: s.product.name,
-        projectId: s.product.project.id,
-        projectName: s.product.project.name,
-        memberId: s.memberId,
-        memberName: s.member.name,
-        memberUsername: s.member.username,
-        memberDepartment: s.member.department,
-        quantity: s.quantity,
-        unitPrice: Number(s.unitPrice),
-        totalAmount: Number(s.totalAmount),
-        paymentMethod: s.paymentMethod,
-        customerName: s.customerName,
-        customerPhone: s.customerPhone,
-        saleTime: s.saleTime,
-        createdAt: s.createdAt,
-      }));
+      const formatted = sales.map((s, index) => {
+        const serialNumber = rankMap.get(s.id) ?? (page - 1) * pageSize + index + 1;
+
+        return {
+          id: s.id, // Internal database ID
+          serialNumber, // Global chronological S.No. (1 = oldest sale)
+          clientTxId: s.clientTxId,
+          eventId: s.eventId,
+          eventName: s.event.name,
+          productId: s.productId,
+          productName: s.product.name,
+          projectId: s.product.project.id,
+          projectName: s.product.project.name,
+          memberId: s.memberId,
+          memberName: s.member.name,
+          memberUsername: s.member.username,
+          memberDepartment: s.member.department,
+          quantity: s.quantity,
+          unitPrice: Number(s.unitPrice),
+          totalAmount: Number(s.totalAmount),
+          paymentMethod: s.paymentMethod,
+          customerName: s.customerName,
+          customerPhone: s.customerPhone,
+          saleTime: s.saleTime,
+          createdAt: s.createdAt,
+        };
+      });
 
       // Apply PII & revenue sanitization based on user permissions
       const sanitized = sanitizeSalesListForUser(formatted, req.user);

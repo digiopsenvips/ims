@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { api } from '../lib/api';
-import { Sale, AppEvent, PaginationInfo, SalesResponse } from '../types';
+import { Sale, AppEvent } from '../types';
 import {
   ReceiptText,
   Download,
@@ -42,36 +42,25 @@ export const SalesManagementPage: React.FC = () => {
   const { socket } = useSocket();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Read URL query parameters
-  const pageFromUrl = parseInt(searchParams.get('page') || '1', 10) || 1;
-  const pageSizeFromUrl = parseInt(searchParams.get('pageSize') || '10', 10) || 10;
-  const tabFromUrl = searchParams.get('tab') === 'per-event' ? 'per-event' : 'all-time';
-  const eventIdFromUrl = searchParams.get('eventId') || '';
-  const paymentFromUrl = (searchParams.get('payment') as 'ALL' | 'UPI' | 'CASH') || 'ALL';
+  // URL searchParams as Single Source of Truth for pagination & filters
+  const currentPage = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1);
+  const rawPageSize = parseInt(searchParams.get('pageSize') || '10', 10) || 10;
+  const pageSize = [10, 25, 50, 100].includes(rawPageSize) ? rawPageSize : 10;
+  const activeTab = (searchParams.get('tab') === 'per-event' ? 'per-event' : 'all-time') as 'all-time' | 'per-event';
+  const selectedEventId = searchParams.get('eventId') || '';
+  const paymentFilter = ((searchParams.get('payment') as 'ALL' | 'UPI' | 'CASH') || 'ALL');
   const searchFromUrl = searchParams.get('search') || '';
 
+  // Local state
   const [sales, setSales] = useState<Sale[]>([]);
   const [events, setEvents] = useState<AppEvent[]>([]);
-  const [activeTab, setActiveTab] = useState<'all-time' | 'per-event'>(tabFromUrl);
-  const [selectedEventId, setSelectedEventId] = useState<string>(eventIdFromUrl);
-  const [searchQuery, setSearchQuery] = useState(searchFromUrl);
-  const [debouncedSearch, setDebouncedSearch] = useState(searchFromUrl);
-  const [paymentFilter, setPaymentFilter] = useState<'ALL' | 'UPI' | 'CASH'>(paymentFromUrl);
-
-  const [pagination, setPagination] = useState<PaginationInfo>({
-    page: pageFromUrl,
-    pageSize: pageSizeFromUrl,
-    totalRecords: 0,
-    totalPages: 1,
-    hasNextPage: false,
-    hasPreviousPage: false,
-  });
-
+  const [totalRecords, setTotalRecords] = useState<number>(0);
   const [summary, setSummary] = useState<{ totalUnits: number; totalRevenue: number | null }>({
     totalUnits: 0,
     totalRevenue: 0,
   });
 
+  const [searchQuery, setSearchQuery] = useState(searchFromUrl);
   const [isLoading, setIsLoading] = useState(true);
   const [isFetching, setIsFetching] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -93,20 +82,7 @@ export const SalesManagementPage: React.FC = () => {
   const canViewPII = isDeveloper || isAdmin || hasPermission('view_customer_pii');
   const canExport = isDeveloper || isAdmin || hasPermission('export_data');
 
-  // Debounce search input by 300ms
-  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setSearchQuery(val);
-    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    searchTimeoutRef.current = setTimeout(() => {
-      setDebouncedSearch(val);
-      // Reset to page 1 on new search
-      updateUrlState({ page: 1, search: val });
-    }, 300);
-  };
-
-  // Sync state to URL search parameters
+  // Synchronize URL search params helper
   const updateUrlState = useCallback(
     (updates: {
       page?: number;
@@ -118,12 +94,12 @@ export const SalesManagementPage: React.FC = () => {
     }) => {
       const newParams = new URLSearchParams(searchParams);
 
-      const targetPage = updates.page ?? pagination.page;
-      const targetPageSize = updates.pageSize ?? pagination.pageSize;
-      const targetTab = updates.tab ?? activeTab;
-      const targetEventId = updates.eventId ?? selectedEventId;
-      const targetPayment = updates.payment ?? paymentFilter;
-      const targetSearch = updates.search !== undefined ? updates.search : debouncedSearch;
+      const targetPage = updates.page !== undefined ? updates.page : currentPage;
+      const targetPageSize = updates.pageSize !== undefined ? updates.pageSize : pageSize;
+      const targetTab = updates.tab !== undefined ? updates.tab : activeTab;
+      const targetEventId = updates.eventId !== undefined ? updates.eventId : selectedEventId;
+      const targetPayment = updates.payment !== undefined ? updates.payment : paymentFilter;
+      const targetSearch = updates.search !== undefined ? updates.search : searchFromUrl;
 
       if (targetPage > 1) newParams.set('page', String(targetPage));
       else newParams.delete('page');
@@ -145,69 +121,83 @@ export const SalesManagementPage: React.FC = () => {
 
       setSearchParams(newParams, { replace: true });
     },
-    [searchParams, pagination.page, pagination.pageSize, activeTab, selectedEventId, paymentFilter, debouncedSearch, setSearchParams]
+    [searchParams, currentPage, pageSize, activeTab, selectedEventId, paymentFilter, searchFromUrl, setSearchParams]
   );
 
-  // Core data fetch function with server-side pagination and filters
-  const fetchSalesData = useCallback(
-    async (
-      overrideParams?: {
-        page?: number;
-        pageSize?: number;
-        tab?: 'all-time' | 'per-event';
-        eventId?: string;
-        payment?: 'ALL' | 'UPI' | 'CASH';
-        search?: string;
+  // Debounced search input handler
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setSearchQuery(val);
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = setTimeout(() => {
+      updateUrlState({ page: 1, search: val });
+    }, 300);
+  };
+
+  // Keep search input in sync if URL changes externally
+  useEffect(() => {
+    setSearchQuery(searchFromUrl);
+  }, [searchFromUrl]);
+
+  // Core data fetch function
+  const fetchSalesData = useCallback(async () => {
+    setIsFetching(true);
+    setErrorMessage(null);
+
+    try {
+      const query = new URLSearchParams();
+      query.set('page', String(currentPage));
+      query.set('pageSize', String(pageSize));
+
+      if (activeTab === 'per-event' && selectedEventId) {
+        query.set('eventId', selectedEventId);
       }
-    ) => {
-      const currentPage = overrideParams?.page ?? pagination.page;
-      const currentPageSize = overrideParams?.pageSize ?? pagination.pageSize;
-      const currentTab = overrideParams?.tab ?? activeTab;
-      const currentEventId = overrideParams?.eventId ?? selectedEventId;
-      const currentPayment = overrideParams?.payment ?? paymentFilter;
-      const currentSearch = overrideParams?.search !== undefined ? overrideParams.search : debouncedSearch;
-
-      setIsFetching(true);
-      setErrorMessage(null);
-
-      try {
-        const query = new URLSearchParams();
-        query.set('page', String(currentPage));
-        query.set('pageSize', String(currentPageSize));
-
-        if (currentTab === 'per-event' && currentEventId) {
-          query.set('eventId', currentEventId);
-        }
-        if (currentPayment !== 'ALL') {
-          query.set('paymentMethod', currentPayment);
-        }
-        if (currentSearch.trim()) {
-          query.set('search', currentSearch.trim());
-        }
-
-        const res: SalesResponse = await api.get(`/sales?${query.toString()}`);
-
-        if (res?.sales) {
-          setSales(res.sales);
-        }
-        if (res?.pagination) {
-          setPagination(res.pagination);
-        }
-        if (res?.summary) {
-          setSummary(res.summary);
-        }
-      } catch (err: any) {
-        console.error('Failed to load sales records:', err);
-        setErrorMessage('Unable to load sales records. Please try again.');
-      } finally {
-        setIsLoading(false);
-        setIsFetching(false);
+      if (paymentFilter !== 'ALL') {
+        query.set('paymentMethod', paymentFilter);
       }
-    },
-    [pagination.page, pagination.pageSize, activeTab, selectedEventId, paymentFilter, debouncedSearch]
-  );
+      if (searchFromUrl.trim()) {
+        query.set('search', searchFromUrl.trim());
+      }
 
-  // Initial load: Fetch events list and first page of sales
+      const res: any = await api.get(`/sales?${query.toString()}`);
+
+      const salesList = Array.isArray(res?.sales) ? res.sales : Array.isArray(res?.data) ? res.data : [];
+      setSales(salesList);
+
+      // Defensively determine total count so footer is never 0 when sales exist
+      const count =
+        typeof res?.pagination?.totalRecords === 'number'
+          ? res.pagination.totalRecords
+          : typeof res?.totalRecords === 'number'
+          ? res.totalRecords
+          : typeof res?.totalCount === 'number'
+          ? res.totalCount
+          : salesList.length;
+
+      setTotalRecords(count);
+
+      if (res?.summary) {
+        setSummary({
+          totalUnits: res.summary.totalUnits ?? 0,
+          totalRevenue: res.summary.totalRevenue ?? null,
+        });
+      } else {
+        setSummary({
+          totalUnits: salesList.reduce((acc: number, s: any) => acc + (s.quantity || 0), 0),
+          totalRevenue: salesList.reduce((acc: number, s: any) => acc + (s.totalAmount || 0), 0),
+        });
+      }
+    } catch (err: any) {
+      console.error('Failed to load sales records:', err);
+      setErrorMessage('Unable to load sales records. Please try again.');
+    } finally {
+      setIsLoading(false);
+      setIsFetching(false);
+    }
+  }, [currentPage, pageSize, activeTab, selectedEventId, paymentFilter, searchFromUrl]);
+
+  // Initial load: Fetch events list
   useEffect(() => {
     let isMounted = true;
 
@@ -216,8 +206,8 @@ export const SalesManagementPage: React.FC = () => {
         const eventsRes = await api.get('/events');
         if (isMounted && eventsRes?.events) {
           setEvents(eventsRes.events);
-          if (!selectedEventId && eventsRes.events.length > 0) {
-            setSelectedEventId(eventsRes.events[0].id);
+          if (!selectedEventId && eventsRes.events.length > 0 && activeTab === 'per-event') {
+            updateUrlState({ eventId: eventsRes.events[0].id });
           }
         }
       } catch (err) {
@@ -231,19 +221,12 @@ export const SalesManagementPage: React.FC = () => {
     };
   }, []);
 
-  // Fetch sales when filters, tab, event, or debounced search changes
+  // Fetch sales whenever pagination or filter URL params change
   useEffect(() => {
-    fetchSalesData({
-      page: pageFromUrl,
-      pageSize: pageSizeFromUrl,
-      tab: activeTab,
-      eventId: selectedEventId,
-      payment: paymentFilter,
-      search: debouncedSearch,
-    });
-  }, [pageFromUrl, pageSizeFromUrl, activeTab, selectedEventId, paymentFilter, debouncedSearch]);
+    fetchSalesData();
+  }, [fetchSalesData]);
 
-  // Listen for real-time sales: reload current page without resetting state
+  // Real-time sales updates
   useEffect(() => {
     if (!socket) return;
     const handleNewSale = () => {
@@ -256,9 +239,17 @@ export const SalesManagementPage: React.FC = () => {
     };
   }, [socket, fetchSalesData]);
 
-  // Page navigation handlers
+  // Derived pagination metrics
+  const totalPages = Math.max(1, Math.ceil(totalRecords / pageSize));
+  const hasNextPage = currentPage < totalPages;
+  const hasPreviousPage = currentPage > 1;
+
+  const fromRecord = totalRecords === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const toRecord = Math.min(currentPage * pageSize, totalRecords);
+
+  // Pagination navigation handlers
   const handlePageChange = (newPage: number) => {
-    if (newPage < 1 || newPage > pagination.totalPages || newPage === pagination.page) return;
+    if (newPage < 1 || newPage > totalPages || newPage === currentPage) return;
     updateUrlState({ page: newPage });
   };
 
@@ -267,17 +258,15 @@ export const SalesManagementPage: React.FC = () => {
   };
 
   const handleTabChange = (tab: 'all-time' | 'per-event') => {
-    setActiveTab(tab);
-    updateUrlState({ page: 1, tab });
+    const eventId = tab === 'per-event' && !selectedEventId && events.length > 0 ? events[0].id : selectedEventId;
+    updateUrlState({ page: 1, tab, eventId });
   };
 
   const handleEventChange = (eventId: string) => {
-    setSelectedEventId(eventId);
     updateUrlState({ page: 1, eventId });
   };
 
   const handlePaymentChange = (payment: 'ALL' | 'UPI' | 'CASH') => {
-    setPaymentFilter(payment);
     updateUrlState({ page: 1, payment });
   };
 
@@ -306,11 +295,11 @@ export const SalesManagementPage: React.FC = () => {
         saleTime: editSaleTime ? new Date(editSaleTime).toISOString() : undefined,
       });
       if (res?.sale) {
-        setSales(prev => prev.map(s => (s.id === editingSale.id ? res.sale : s)));
+        setSales(prev => prev.map(s => (s.id === editingSale.id ? { ...s, ...res.sale } : s)));
       }
       await fetchSalesData();
       setEditingSale(null);
-      setActionMessage(`Sale #${editingSale.id} updated successfully!`);
+      setActionMessage(`Sale (DB ID: #${editingSale.id}) updated successfully!`);
       setTimeout(() => setActionMessage(null), 3500);
     } catch (err: any) {
       alert(err.message || 'Failed to update sale record');
@@ -320,12 +309,12 @@ export const SalesManagementPage: React.FC = () => {
   };
 
   const handleDeleteSale = async (id: number) => {
-    if (!window.confirm(`Are you sure you want to delete Sale #${id}? This will permanently remove this transaction.`)) {
+    if (!window.confirm(`Are you sure you want to delete Sale (DB ID: #${id})? This will permanently remove this transaction.`)) {
       return;
     }
     try {
       await api.delete(`/sales/${id}`);
-      setActionMessage(`Sale #${id} deleted successfully!`);
+      setActionMessage(`Sale (DB ID: #${id}) deleted successfully!`);
       await fetchSalesData();
       setTimeout(() => setActionMessage(null), 3500);
     } catch (err: any) {
@@ -340,7 +329,7 @@ export const SalesManagementPage: React.FC = () => {
       setSales([]);
       setShowClearModal(false);
       setActionMessage(res?.message || 'All sales records cleared successfully!');
-      await fetchSalesData({ page: 1 });
+      updateUrlState({ page: 1 });
       setTimeout(() => setActionMessage(null), 4000);
     } catch (err: any) {
       alert(err.message || 'Failed to clear sales');
@@ -349,9 +338,9 @@ export const SalesManagementPage: React.FC = () => {
     }
   };
 
-  // Export CSV Handler (fetches ALL matching records for the current filter criteria)
+  // Export CSV Handler (fetches ALL matching records with chronological S.No.)
   const handleExportCSV = async () => {
-    if (!canExport || pagination.totalRecords === 0) return;
+    if (!canExport || totalRecords === 0) return;
 
     try {
       const query = new URLSearchParams();
@@ -362,16 +351,16 @@ export const SalesManagementPage: React.FC = () => {
       if (paymentFilter !== 'ALL') {
         query.set('paymentMethod', paymentFilter);
       }
-      if (debouncedSearch.trim()) {
-        query.set('search', debouncedSearch.trim());
+      if (searchFromUrl.trim()) {
+        query.set('search', searchFromUrl.trim());
       }
 
-      const res: SalesResponse = await api.get(`/sales?${query.toString()}`);
-      const exportList = res?.sales || sales;
+      const res: any = await api.get(`/sales?${query.toString()}`);
+      const exportList: Sale[] = Array.isArray(res?.sales) ? res.sales : Array.isArray(res?.data) ? res.data : sales;
 
       const headers = [
         'S.No.',
-        'Sale ID',
+        'Sale ID (DB)',
         'Event ID',
         'Event Name',
         'Project',
@@ -386,7 +375,7 @@ export const SalesManagementPage: React.FC = () => {
       ];
 
       const rows = exportList.map((s, idx) => [
-        idx + 1,
+        s.serialNumber ?? idx + 1,
         s.id,
         s.eventId,
         `"${(s.eventName || '').replace(/"/g, '""')}"`,
@@ -428,7 +417,7 @@ export const SalesManagementPage: React.FC = () => {
             </h1>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Full audit log of recorded transactions with server-side pagination and real-time updates.
+            Full sequential sales ledger with chronological numbering and real-time updates.
           </p>
         </div>
 
@@ -447,7 +436,7 @@ export const SalesManagementPage: React.FC = () => {
           {canExport && (
             <button
               onClick={handleExportCSV}
-              disabled={pagination.totalRecords === 0}
+              disabled={totalRecords === 0}
               className="px-3.5 py-2 text-xs font-semibold rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
             >
               <Download className="w-3.5 h-3.5" />
@@ -531,7 +520,7 @@ export const SalesManagementPage: React.FC = () => {
           <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-400" />
           <input
             type="text"
-            placeholder="Search product, serial #, member..."
+            placeholder="Search product, S.No., member..."
             value={searchQuery}
             onChange={handleSearchInputChange}
             className="w-full pl-9 pr-8 py-2 text-xs border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-slate-900"
@@ -564,13 +553,7 @@ export const SalesManagementPage: React.FC = () => {
           <div>
             <span className="text-slate-500">Showing:</span>{' '}
             <span className="font-bold text-slate-900">
-              {pagination.totalRecords === 0
-                ? '0'
-                : `${(pagination.page - 1) * pagination.pageSize + 1}–${Math.min(
-                    pagination.page * pagination.pageSize,
-                    pagination.totalRecords
-                  )}`}{' '}
-              of {pagination.totalRecords} sales
+              {fromRecord}–{toRecord} of {totalRecords} sales
             </span>
           </div>
           <div>
@@ -636,8 +619,8 @@ export const SalesManagementPage: React.FC = () => {
                 </tr>
               ) : (
                 sales.map((sale, index) => {
-                  // S.No. formula: ((currentPage - 1) * pageSize) + rowIndex + 1
-                  const displaySerial = (pagination.page - 1) * pagination.pageSize + index + 1;
+                  // Chronological S.No.: 1 = oldest sale in ledger
+                  const displaySerial = sale.serialNumber ?? ((currentPage - 1) * pageSize + index + 1);
 
                   return (
                     <tr key={sale.id} className="hover:bg-slate-50/50">
@@ -740,22 +723,16 @@ export const SalesManagementPage: React.FC = () => {
           <div className="flex flex-wrap items-center gap-3 text-slate-600">
             <span>
               Showing{' '}
-              <span className="font-bold text-slate-900">
-                {pagination.totalRecords === 0
-                  ? 0
-                  : (pagination.page - 1) * pagination.pageSize + 1}
-              </span>
+              <span className="font-bold text-slate-900">{fromRecord}</span>
               –
-              <span className="font-bold text-slate-900">
-                {Math.min(pagination.page * pagination.pageSize, pagination.totalRecords)}
-              </span>{' '}
-              of <span className="font-bold text-slate-900">{pagination.totalRecords}</span> sales
+              <span className="font-bold text-slate-900">{toRecord}</span>{' '}
+              of <span className="font-bold text-slate-900">{totalRecords}</span> sales
             </span>
 
             <div className="flex items-center gap-1.5 border-l border-slate-200 pl-3">
               <span className="text-slate-500 font-medium">Rows per page:</span>
               <select
-                value={pagination.pageSize}
+                value={pageSize}
                 onChange={e => handlePageSizeChange(Number(e.target.value))}
                 className="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900 cursor-pointer"
               >
@@ -771,8 +748,8 @@ export const SalesManagementPage: React.FC = () => {
             {/* Previous button */}
             <button
               type="button"
-              onClick={() => handlePageChange(pagination.page - 1)}
-              disabled={!pagination.hasPreviousPage || isFetching}
+              onClick={() => handlePageChange(currentPage - 1)}
+              disabled={!hasPreviousPage || isFetching}
               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-slate-300 bg-white font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               <ChevronLeft className="w-3.5 h-3.5" />
@@ -780,7 +757,7 @@ export const SalesManagementPage: React.FC = () => {
             </button>
 
             {/* Page number buttons */}
-            {getPageNumbers(pagination.page, pagination.totalPages).map((p, idx) =>
+            {getPageNumbers(currentPage, totalPages).map((p, idx) =>
               p === '...' ? (
                 <span key={`ellipsis-${idx}`} className="px-2 py-1 text-slate-400">
                   …
@@ -792,7 +769,7 @@ export const SalesManagementPage: React.FC = () => {
                   onClick={() => handlePageChange(Number(p))}
                   disabled={isFetching}
                   className={`min-w-[32px] px-2 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
-                    pagination.page === p
+                    currentPage === p
                       ? 'bg-slate-900 text-white shadow-sm'
                       : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                   }`}
@@ -805,8 +782,8 @@ export const SalesManagementPage: React.FC = () => {
             {/* Next button */}
             <button
               type="button"
-              onClick={() => handlePageChange(pagination.page + 1)}
-              disabled={!pagination.hasNextPage || isFetching}
+              onClick={() => handlePageChange(currentPage + 1)}
+              disabled={!hasNextPage || isFetching}
               className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-slate-300 bg-white font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
             >
               <span>Next</span>

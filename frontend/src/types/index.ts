@@ -85,6 +85,7 @@ export interface AppEvent {
 
 export interface Sale {
   id: number; // Internal database ID
+  serialNumber?: number; // Global chronological S.No. (1 = oldest sale)
   clientTxId?: string | null;
   eventId: string;
   eventName: string;
