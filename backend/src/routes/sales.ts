@@ -51,7 +51,12 @@ router.get(
         ];
       }
       if (memberId) {
-        whereClause.memberId = String(memberId);
+        const memId = String(memberId);
+        const memberCond = [
+          { memberId: memId },
+          { sellerUserIdAtSale: memId },
+        ];
+        whereClause.AND = whereClause.AND ? [...whereClause.AND, { OR: memberCond }] : [{ OR: memberCond }];
       }
       if (paymentMethod && (paymentMethod === 'CASH' || paymentMethod === 'UPI')) {
         whereClause.paymentMethod = paymentMethod as PaymentMethod;
@@ -64,7 +69,11 @@ router.get(
 
       // If user is MEMBER, they can only view sales they recorded
       if (req.user?.role === Role.MEMBER) {
-        whereClause.memberId = req.user.id;
+        const memberCond = [
+          { memberId: req.user.id },
+          { sellerUserIdAtSale: req.user.id },
+        ];
+        whereClause.AND = whereClause.AND ? [...whereClause.AND, { OR: memberCond }] : [{ OR: memberCond }];
       }
 
       // Server-side search filter across product, project, member, event, customer, and ID
@@ -79,6 +88,8 @@ router.get(
           { items: { some: { product: { project: { name: { contains: term, mode: 'insensitive' } } } } } },
           { member: { name: { contains: term, mode: 'insensitive' } } },
           { member: { username: { contains: term, mode: 'insensitive' } } },
+          { sellerNameAtSale: { contains: term, mode: 'insensitive' } },
+          { sellerUsernameAtSale: { contains: term, mode: 'insensitive' } },
           { event: { name: { contains: term, mode: 'insensitive' } } },
           { customerName: { contains: term, mode: 'insensitive' } },
           { customerPhone: { contains: term, mode: 'insensitive' } },
@@ -253,10 +264,13 @@ router.get(
           projectId: firstItem.projectId || s.product?.project?.id || '',
           projectName: primaryProject,
           projectNames: uniqueProjects,
-          memberId: s.memberId,
-          memberName: s.member.name,
-          memberUsername: s.member.username,
-          memberDepartment: s.member.department,
+          memberId: s.sellerUserIdAtSale || s.memberId || '',
+          memberName: s.sellerNameAtSale || s.member?.name || 'Unknown Member',
+          memberUsername: s.sellerUsernameAtSale || s.member?.username || '',
+          memberDepartment: s.member?.department || null,
+          sellerUserIdAtSale: s.sellerUserIdAtSale || s.memberId || undefined,
+          sellerUsernameAtSale: s.sellerUsernameAtSale || s.member?.username || undefined,
+          sellerNameAtSale: s.sellerNameAtSale || s.member?.name || undefined,
           items: rawItems,
           totalUnits,
           quantity: totalUnits, // alias for totalUnits
@@ -466,6 +480,9 @@ router.post(
             clientTxId: clientTxId ? String(clientTxId) : null,
             eventId,
             memberId: req.user!.id,
+            sellerUserIdAtSale: req.user!.id,
+            sellerUsernameAtSale: req.user!.username,
+            sellerNameAtSale: req.user!.name,
             totalAmount: grandTotal,
             paymentMethod: normMethod,
             customerName: customerName ? String(customerName).trim() : null,
@@ -501,7 +518,8 @@ router.post(
         eventName: newSale.event.name,
         totalAmount: Number(newSale.totalAmount),
         paymentMethod: newSale.paymentMethod,
-        memberName: newSale.member.name,
+        memberName: newSale.sellerNameAtSale || newSale.member?.name || req.user!.name,
+        memberUsername: newSale.sellerUsernameAtSale || newSale.member?.username || req.user!.username,
         saleTime: newSale.saleTime,
         itemsCount: newSale.items.length,
         totalUnits,
@@ -689,6 +707,9 @@ router.post(
             clientTxId: clientTxId ? String(clientTxId) : null,
             eventId,
             memberId: req.user!.id,
+            sellerUserIdAtSale: req.user!.id,
+            sellerUsernameAtSale: req.user!.username,
+            sellerNameAtSale: req.user!.name,
             totalAmount: grandTotal,
             paymentMethod: normMethod,
             customerName: customerName ? String(customerName).trim() : null,
@@ -895,10 +916,13 @@ router.put(
         projectId: firstItem.projectId || updated.product?.project?.id || '',
         projectName: primaryProject,
         projectNames: uniqueProjects,
-        memberId: updated.memberId,
-        memberName: updated.member.name,
-        memberUsername: updated.member.username,
-        memberDepartment: updated.member.department,
+        memberId: updated.sellerUserIdAtSale || updated.memberId || '',
+        memberName: updated.sellerNameAtSale || updated.member?.name || 'Unknown Member',
+        memberUsername: updated.sellerUsernameAtSale || updated.member?.username || '',
+        memberDepartment: updated.member?.department || null,
+        sellerUserIdAtSale: updated.sellerUserIdAtSale || updated.memberId || undefined,
+        sellerUsernameAtSale: updated.sellerUsernameAtSale || updated.member?.username || undefined,
+        sellerNameAtSale: updated.sellerNameAtSale || updated.member?.name || undefined,
         items: rawItems,
         totalUnits,
         quantity: totalUnits,

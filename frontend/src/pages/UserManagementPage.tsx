@@ -91,6 +91,9 @@ export const UserManagementPage: React.FC = () => {
   const [resetTargetUser, setResetTargetUser] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState('');
 
+  // Delete User Confirmation Modal
+  const [deleteTargetUser, setDeleteTargetUser] = useState<User | null>(null);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const fetchUsers = async () => {
@@ -200,17 +203,28 @@ export const UserManagementPage: React.FC = () => {
     }
   };
 
-  const handleDeleteUser = async (target: User) => {
-    if (!window.confirm(`Are you sure you want to delete user account '${target.name}' (@${target.username})?`)) {
-      return;
-    }
+  const handleDeleteUser = (target: User) => {
+    setDeleteTargetUser(target);
+  };
+
+  const handleConfirmDeleteUser = async () => {
+    if (!deleteTargetUser) return;
+
+    setIsSubmitting(true);
+    setStatusMessage(null);
 
     try {
-      await api.delete(`/users/${target.id}`);
-      setStatusMessage({ type: 'success', text: `User @${target.username} deleted successfully.` });
+      await api.delete(`/users/${deleteTargetUser.id}`);
+      setStatusMessage({
+        type: 'success',
+        text: `User @${deleteTargetUser.username} deleted successfully. Historical sales records preserved.`,
+      });
+      setDeleteTargetUser(null);
       fetchUsers();
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message || 'Failed to delete user' });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -636,6 +650,57 @@ export const UserManagementPage: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Delete User Confirmation */}
+      {deleteTargetUser && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg border border-slate-200 shadow-xl max-w-md w-full p-6">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="text-base font-bold text-slate-900">
+                Delete Account
+              </h3>
+              <button
+                onClick={() => setDeleteTargetUser(null)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <p className="text-xs text-slate-700 leading-relaxed font-medium">
+                Delete this account? This will prevent the account from logging in and remove it from active users. Historical sales made using this account will be preserved.
+              </p>
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-md text-xs text-slate-600 flex items-center gap-2">
+                <span className="font-semibold text-slate-800">{deleteTargetUser.name}</span>
+                <span className="font-mono text-purple-700">(@{deleteTargetUser.username})</span>
+                <span className="ml-auto text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-slate-200 text-slate-700">
+                  {deleteTargetUser.role}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 mt-4 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setDeleteTargetUser(null)}
+                disabled={isSubmitting}
+                className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-md cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={handleConfirmDeleteUser}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-md cursor-pointer shadow-sm disabled:opacity-50"
+              >
+                {isSubmitting ? 'Deleting...' : 'Delete Account'}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -110,6 +110,9 @@ export interface Sale {
   memberName: string;
   memberUsername: string;
   memberDepartment?: string | null;
+  sellerUserIdAtSale?: string;
+  sellerUsernameAtSale?: string;
+  sellerNameAtSale?: string;
   items?: SaleItem[];
   totalUnits?: number;
   quantity: number;

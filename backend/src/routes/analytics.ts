@@ -23,7 +23,14 @@ router.get(
     try {
       const whereClause: any = {};
       if (eventId) whereClause.eventId = String(eventId);
-      if (memberId) whereClause.memberId = String(memberId);
+      if (memberId) {
+        const memId = String(memberId);
+        const memberCond = [
+          { memberId: memId },
+          { sellerUserIdAtSale: memId },
+        ];
+        whereClause.AND = whereClause.AND ? [...whereClause.AND, { OR: memberCond }] : [{ OR: memberCond }];
+      }
       if (projectId) {
         whereClause.OR = [
           { product: { projectId: String(projectId) } },

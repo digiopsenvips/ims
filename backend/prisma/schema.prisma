@@ -132,26 +132,29 @@ model EventAllocation {
 }
 
 model Sale {
-  id            Int           @id @default(autoincrement()) // Serial No.
-  clientTxId    String?       @unique @map("client_tx_id") // For offline sync idempotency
-  eventId       String        @map("event_id")
-  memberId      String        @map("member_id")
-  totalAmount   Decimal       @map("total_amount") @db.Decimal(10, 2)
-  paymentMethod PaymentMethod @map("payment_method")
-  customerName  String?       @map("customer_name")
-  customerPhone String?       @map("customer_phone")
-  saleTime      DateTime      @default(now()) @map("sale_time")
-  createdAt     DateTime      @default(now()) @map("created_at")
+  id                   Int           @id @default(autoincrement()) // Serial No.
+  clientTxId           String?       @unique @map("client_tx_id") // For offline sync idempotency
+  eventId              String        @map("event_id")
+  memberId             String?       @map("member_id")
+  sellerUserIdAtSale   String?       @map("seller_user_id_at_sale")
+  sellerUsernameAtSale String?       @map("seller_username_at_sale")
+  sellerNameAtSale     String?       @map("seller_name_at_sale")
+  totalAmount          Decimal       @map("total_amount") @db.Decimal(10, 2)
+  paymentMethod        PaymentMethod @map("payment_method")
+  customerName         String?       @map("customer_name")
+  customerPhone        String?       @map("customer_phone")
+  saleTime             DateTime      @default(now()) @map("sale_time")
+  createdAt            DateTime      @default(now()) @map("created_at")
 
   // Legacy fields for backward compatibility
-  productId     String?       @map("product_id")
-  quantity      Int?
-  unitPrice     Decimal?      @map("unit_price") @db.Decimal(10, 2)
+  productId            String?       @map("product_id")
+  quantity             Int?
+  unitPrice            Decimal?      @map("unit_price") @db.Decimal(10, 2)
 
-  event         Event         @relation(fields: [eventId], references: [id], onDelete: Restrict)
-  member        User          @relation(fields: [memberId], references: [id], onDelete: Restrict)
-  product       Product?      @relation(fields: [productId], references: [id], onDelete: Restrict)
-  items         SaleItem[]
+  event                Event         @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  member               User?         @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  product              Product?      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  items                SaleItem[]
 
   @@index([eventId])
   @@index([saleTime])
