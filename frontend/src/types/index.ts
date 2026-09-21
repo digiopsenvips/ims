@@ -84,7 +84,7 @@ export interface AppEvent {
 }
 
 export interface Sale {
-  id: number; // Serial No.
+  id: number; // Internal database ID
   clientTxId?: string | null;
   eventId: string;
   eventName: string;
@@ -103,6 +103,26 @@ export interface Sale {
   customerPhone?: string | null;
   saleTime: string;
   createdAt: string;
+}
+
+export interface PaginationInfo {
+  page: number;
+  pageSize: number;
+  totalRecords: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+}
+
+export interface SalesResponse {
+  sales: Sale[];
+  data?: Sale[];
+  pagination: PaginationInfo;
+  summary: {
+    totalUnits: number;
+    totalRevenue: number | null;
+  };
+  totalCount: number;
 }
 
 export interface QueuedSale {

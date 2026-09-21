@@ -32,7 +32,7 @@ export const DashboardPage: React.FC = () => {
   const loadDashboardData = async () => {
     try {
       const [salesRes, eventsRes] = await Promise.all([
-        api.get('/sales'),
+        api.get('/sales?all=true'),
         api.get('/events'),
       ]);
 

@@ -9,12 +9,23 @@ import { PaymentMethod, Role } from '@prisma/client';
 
 const router = Router();
 
-// GET /api/sales: Full sales table (supports all-time or per-event filter)
+// GET /api/sales: Full sales table with server-side pagination, deterministic sorting, and filtering
 router.get(
   '/',
   authenticateToken,
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const { eventId, productId, memberId, startDate, endDate, paymentMethod, search } = req.query;
+    const {
+      eventId,
+      productId,
+      memberId,
+      startDate,
+      endDate,
+      paymentMethod,
+      search,
+      page: rawPage,
+      pageSize: rawPageSize,
+      all,
+    } = req.query;
 
     // Check permission: if user is HEAD and doesn't have view_event_breakdown when filtering by event
     if (
@@ -52,43 +63,88 @@ router.get(
         whereClause.memberId = req.user.id;
       }
 
-      const sales = await prisma.sale.findMany({
-        where: whereClause,
-        include: {
-          event: {
-            select: {
-              id: true,
-              name: true,
-              location: true,
-              status: true,
+      // Server-side search filter across product, project, member, event, customer, and ID
+      if (search && typeof search === 'string' && search.trim() !== '') {
+        const term = search.trim();
+        const searchConditions: any[] = [
+          { product: { name: { contains: term, mode: 'insensitive' } } },
+          { product: { id: { contains: term, mode: 'insensitive' } } },
+          { product: { project: { name: { contains: term, mode: 'insensitive' } } } },
+          { member: { name: { contains: term, mode: 'insensitive' } } },
+          { member: { username: { contains: term, mode: 'insensitive' } } },
+          { event: { name: { contains: term, mode: 'insensitive' } } },
+          { customerName: { contains: term, mode: 'insensitive' } },
+          { customerPhone: { contains: term, mode: 'insensitive' } },
+        ];
+        const num = parseInt(term.replace(/^#/, ''), 10);
+        if (!isNaN(num)) {
+          searchConditions.push({ id: num });
+        }
+        whereClause.AND = whereClause.AND ? [...whereClause.AND, { OR: searchConditions }] : [{ OR: searchConditions }];
+      }
+
+      const isAll = all === 'true' || all === '1';
+      const page = Math.max(1, parseInt(String(rawPage || '1'), 10) || 1);
+      const pageSize = Math.max(1, Math.min(100, parseInt(String(rawPageSize || '10'), 10) || 10));
+      const skip = isAll ? undefined : (page - 1) * pageSize;
+      const take = isAll ? undefined : pageSize;
+
+      // Deterministic ordering: saleTime DESC, createdAt DESC, id DESC
+      const orderBy = [
+        { saleTime: 'desc' as const },
+        { createdAt: 'desc' as const },
+        { id: 'desc' as const },
+      ];
+
+      const [totalRecords, sales, summaryAgg] = await Promise.all([
+        prisma.sale.count({ where: whereClause }),
+        prisma.sale.findMany({
+          where: whereClause,
+          include: {
+            event: {
+              select: {
+                id: true,
+                name: true,
+                location: true,
+                status: true,
+              },
             },
-          },
-          product: {
-            include: {
-              project: {
-                select: {
-                  id: true,
-                  name: true,
-                  code: true,
+            product: {
+              include: {
+                project: {
+                  select: {
+                    id: true,
+                    name: true,
+                    code: true,
+                  },
                 },
               },
             },
-          },
-          member: {
-            select: {
-              id: true,
-              name: true,
-              username: true,
-              department: true,
+            member: {
+              select: {
+                id: true,
+                name: true,
+                username: true,
+                department: true,
+              },
             },
           },
-        },
-        orderBy: { saleTime: 'desc' },
-      });
+          orderBy,
+          skip,
+          take,
+        }),
+        prisma.sale.aggregate({
+          where: whereClause,
+          _sum: {
+            quantity: true,
+            totalAmount: true,
+          },
+        }),
+      ]);
 
       // Format and sanitize for permissions
       const formatted = sales.map(s => ({
-        id: s.id, // Serial No.
+        id: s.id, // Internal database ID
         clientTxId: s.clientTxId,
         eventId: s.eventId,
         eventName: s.event.name,
@@ -113,9 +169,30 @@ router.get(
       // Apply PII & revenue sanitization based on user permissions
       const sanitized = sanitizeSalesListForUser(formatted, req.user);
 
+      const effectivePageSize = isAll ? (totalRecords || 1) : pageSize;
+      const totalPages = Math.max(1, Math.ceil(totalRecords / effectivePageSize));
+
+      const canViewRevenue =
+        req.user?.role === Role.DEVELOPER ||
+        req.user?.role === Role.ADMIN ||
+        Boolean(req.user?.permissions?.['view_revenue']);
+
       res.json({
         sales: sanitized,
-        totalCount: sanitized.length,
+        data: sanitized,
+        pagination: {
+          page: isAll ? 1 : page,
+          pageSize: isAll ? totalRecords : pageSize,
+          totalRecords,
+          totalPages,
+          hasNextPage: !isAll && page < totalPages,
+          hasPreviousPage: !isAll && page > 1,
+        },
+        summary: {
+          totalUnits: summaryAgg._sum.quantity || 0,
+          totalRevenue: canViewRevenue ? Number(summaryAgg._sum.totalAmount || 0) : null,
+        },
+        totalCount: totalRecords,
       });
     } catch (error) {
       console.error('Fetch sales error:', error);
