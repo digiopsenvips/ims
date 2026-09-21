@@ -683,7 +683,7 @@ export const MemberSalePortalPage: React.FC = () => {
                     placeholder="Search products..."
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
-                    className="w-full text-xs bg-slate-50 focus:bg-white border border-slate-300 rounded-md py-2 pl-8.5 pr-8 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-900 transition-colors min-h-[38px]"
+                    className="w-full text-xs bg-slate-50 focus:bg-white border border-slate-300 rounded-md py-2 pl-9 pr-8 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-900 transition-colors min-h-[38px]"
                   />
                   {searchQuery && (
                     <button
