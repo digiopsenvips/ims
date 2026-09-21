@@ -2,7 +2,7 @@ export type Role = 'DEVELOPER' | 'ADMIN' | 'HEAD' | 'MEMBER';
 
 export type EventStatus = 'UPCOMING' | 'ACTIVE' | 'ENDED';
 
-export type PaymentMethod = 'CASH' | 'UPI';
+export type PaymentMethod = 'CASH' | 'UPI' | 'CASH_UPI';
 
 export interface User {
   id: string;
@@ -119,6 +119,8 @@ export interface Sale {
   unitPrice?: number | null;
   totalAmount?: number | null;
   paymentMethod: PaymentMethod;
+  cashAmount?: number | null;
+  upiAmount?: number | null;
   customerName?: string | null;
   customerPhone?: string | null;
   saleTime: string;
@@ -142,18 +144,17 @@ export interface SalesResponse {
     totalUnits: number;
     totalRevenue: number | null;
   };
-  totalCount: number;
 }
 
 export interface QueuedSaleItem {
   productId: string;
-  productName: string;
+  productName?: string;
   quantity: number;
   unitPrice: number;
-  lineTotal: number;
+  lineTotal?: number;
 }
 
-export interface QueuedSale {
+export interface QueuedTransaction {
   clientTxId: string;
   eventId: string;
   eventName?: string;
@@ -165,12 +166,16 @@ export interface QueuedSale {
   items?: QueuedSaleItem[];
   totalUnits?: number;
   paymentMethod: PaymentMethod;
+  cashAmount?: number;
+  upiAmount?: number;
   customerName?: string;
   customerPhone?: string;
   saleTime: string;
   queuedAt: number;
   syncStatus: 'pending' | 'syncing' | 'failed';
 }
+
+export type QueuedSale = QueuedTransaction;
 
 export interface AnalyticsData {
   canViewRevenue: boolean;

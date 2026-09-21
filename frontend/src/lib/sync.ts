@@ -102,6 +102,8 @@ class SyncManager {
     eventId: string;
     eventName?: string;
     paymentMethod: any;
+    cashAmount?: number;
+    upiAmount?: number;
     customerName?: string;
     customerPhone?: string;
     saleTime: string;
@@ -122,6 +124,8 @@ class SyncManager {
       eventId: orderData.eventId,
       eventName: orderData.eventName,
       paymentMethod: orderData.paymentMethod,
+      cashAmount: orderData.cashAmount,
+      upiAmount: orderData.upiAmount,
       customerName: orderData.customerName,
       customerPhone: orderData.customerPhone,
       saleTime: orderData.saleTime,

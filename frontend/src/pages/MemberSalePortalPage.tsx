@@ -38,6 +38,8 @@ export const MemberSalePortalPage: React.FC = () => {
   const [billNumber, setBillNumber] = useState<string>(generateBillNumber());
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('UPI');
+  const [splitCash, setSplitCash] = useState<string>('');
+  const [splitUpi, setSplitUpi] = useState<string>('');
   const [customerName, setCustomerName] = useState<string>('');
   const [customerPhone, setCustomerPhone] = useState<string>('');
 
@@ -59,6 +61,8 @@ export const MemberSalePortalPage: React.FC = () => {
     totalAmount: number;
     totalUnits: number;
     paymentMethod: PaymentMethod;
+    cashAmount?: number | null;
+    upiAmount?: number | null;
     time: string;
     syncedImmediately: boolean;
   } | null>(null);
@@ -255,6 +259,20 @@ export const MemberSalePortalPage: React.FC = () => {
   const totalUnits = cart.reduce((acc, item) => acc + item.quantity, 0);
   const totalAmount = cart.reduce((acc, item) => acc + item.priceAtEvent * item.quantity, 0);
 
+  // Split payment calculations
+  const cashNum = parseFloat(splitCash) || 0;
+  const upiNum = parseFloat(splitUpi) || 0;
+  const splitTotalPaid = Math.round((cashNum + upiNum) * 100) / 100;
+  const splitRemaining = Math.round((totalAmount - splitTotalPaid) * 100) / 100;
+  const isSplitValid =
+    paymentMethod === 'CASH_UPI'
+      ? Math.abs(splitRemaining) < 0.01 &&
+        cashNum >= 0 &&
+        upiNum >= 0 &&
+        (splitCash.trim() !== '' || splitUpi.trim() !== '') &&
+        totalAmount > 0
+      : true;
+
   // Add item or increment quantity in this customer's bill
   const handleAddToCart = (alloc: EventAllocation) => {
     setErrorMessage(null);
@@ -329,6 +347,8 @@ export const MemberSalePortalPage: React.FC = () => {
   // Clear bill
   const handleClearCart = () => {
     setCart([]);
+    setSplitCash('');
+    setSplitUpi('');
     setErrorMessage(null);
   };
 
@@ -336,6 +356,8 @@ export const MemberSalePortalPage: React.FC = () => {
   const handleStartNextBill = () => {
     setLastCompletedBill(null);
     setCart([]);
+    setSplitCash('');
+    setSplitUpi('');
     setCustomerName('');
     setCustomerPhone('');
     setBillNumber(generateBillNumber());
@@ -346,12 +368,17 @@ export const MemberSalePortalPage: React.FC = () => {
   // Copy receipt text to clipboard for WhatsApp
   const handleCopyReceipt = () => {
     if (!lastCompletedBill) return;
+    const paymentDisplay =
+      lastCompletedBill.paymentMethod === 'CASH_UPI'
+        ? `Cash + UPI (Cash: ₹${(lastCompletedBill.cashAmount ?? 0).toFixed(2)} | UPI: ₹${(lastCompletedBill.upiAmount ?? 0).toFixed(2)})`
+        : lastCompletedBill.paymentMethod;
+
     const lines = [
       `🧾 *Enactus VIPS-TC Receipt*`,
       `*Bill No:* ${lastCompletedBill.billNo}`,
       `*Stall / Event:* ${currentEvent?.name || 'College Stall'}`,
       `*Customer:* ${lastCompletedBill.customerName}`,
-      `*Payment:* ${lastCompletedBill.paymentMethod}`,
+      `*Payment:* ${paymentDisplay}`,
       `*Date/Time:* ${lastCompletedBill.time}`,
       `---------------------------------`,
       ...lastCompletedBill.items.map(
@@ -390,6 +417,20 @@ export const MemberSalePortalPage: React.FC = () => {
       return;
     }
 
+    // Validate split payment balance
+    if (paymentMethod === 'CASH_UPI') {
+      if (!isSplitValid) {
+        if (splitRemaining > 0) {
+          setErrorMessage(`Split payment is incomplete. Remaining unpaid balance: ₹${splitRemaining.toFixed(2)}.`);
+        } else if (splitRemaining < 0) {
+          setErrorMessage(`Split payment exceeds bill total. Overpaid by ₹${(-splitRemaining).toFixed(2)}.`);
+        } else {
+          setErrorMessage('Please enter valid Cash and UPI amounts totaling the bill.');
+        }
+        return;
+      }
+    }
+
     // Validate quantities against current stock
     for (const item of cart) {
       if (item.quantity <= 0) {
@@ -414,6 +455,8 @@ export const MemberSalePortalPage: React.FC = () => {
         eventId: selectedEventId,
         eventName: currentEvent?.name,
         paymentMethod,
+        cashAmount: paymentMethod === 'CASH_UPI' ? cashNum : paymentMethod === 'CASH' ? totalAmount : 0,
+        upiAmount: paymentMethod === 'CASH_UPI' ? upiNum : paymentMethod === 'UPI' ? totalAmount : 0,
         customerName: customerName.trim() || undefined,
         customerPhone: customerPhone.trim() || undefined,
         saleTime,
@@ -459,12 +502,16 @@ export const MemberSalePortalPage: React.FC = () => {
         totalAmount,
         totalUnits,
         paymentMethod,
+        cashAmount: paymentMethod === 'CASH_UPI' ? cashNum : paymentMethod === 'CASH' ? totalAmount : 0,
+        upiAmount: paymentMethod === 'CASH_UPI' ? upiNum : paymentMethod === 'UPI' ? totalAmount : 0,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         syncedImmediately,
       });
 
       // Clear the current form for the next customer
       setCart([]);
+      setSplitCash('');
+      setSplitUpi('');
       setCustomerName('');
       setCustomerPhone('');
       setBillNumber(generateBillNumber());
@@ -1019,11 +1066,11 @@ export const MemberSalePortalPage: React.FC = () => {
                   <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
                     Payment Method for this Bill
                   </label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     <button
                       type="button"
                       onClick={() => setPaymentMethod('UPI')}
-                      className={`py-2 px-3 text-xs font-semibold rounded-md border flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      className={`py-2 px-2 text-xs font-semibold rounded-md border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                         paymentMethod === 'UPI'
                           ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
                           : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
@@ -1031,12 +1078,12 @@ export const MemberSalePortalPage: React.FC = () => {
                     >
                       <CreditCard className="w-3.5 h-3.5" />
                       <span>UPI / QR</span>
-                      {paymentMethod === 'UPI' && <Check className="w-3.5 h-3.5 text-emerald-400 ml-auto" />}
+                      {paymentMethod === 'UPI' && <Check className="w-3 h-3 text-emerald-400 ml-auto" />}
                     </button>
                     <button
                       type="button"
                       onClick={() => setPaymentMethod('CASH')}
-                      className={`py-2 px-3 text-xs font-semibold rounded-md border flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      className={`py-2 px-2 text-xs font-semibold rounded-md border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                         paymentMethod === 'CASH'
                           ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
                           : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
@@ -1044,9 +1091,127 @@ export const MemberSalePortalPage: React.FC = () => {
                     >
                       <Banknote className="w-3.5 h-3.5" />
                       <span>Cash</span>
-                      {paymentMethod === 'CASH' && <Check className="w-3.5 h-3.5 text-emerald-400 ml-auto" />}
+                      {paymentMethod === 'CASH' && <Check className="w-3 h-3 text-emerald-400 ml-auto" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('CASH_UPI')}
+                      className={`py-2 px-2 text-xs font-semibold rounded-md border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        paymentMethod === 'CASH_UPI'
+                          ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="flex items-center gap-0.5">
+                        <Banknote className="w-3 h-3" />
+                        <span>+</span>
+                        <CreditCard className="w-3 h-3" />
+                      </span>
+                      <span>Cash + UPI</span>
+                      {paymentMethod === 'CASH_UPI' && <Check className="w-3 h-3 text-emerald-400 ml-auto" />}
                     </button>
                   </div>
+
+                  {/* Split Payment inputs when Cash + UPI is selected */}
+                  {paymentMethod === 'CASH_UPI' && (
+                    <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2.5">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                        <span>Split Payment Breakdown</span>
+                        <span className="text-[10px] font-medium text-slate-500">Bill Total: ₹{totalAmount.toFixed(2)}</span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-[10px] font-semibold text-slate-600">
+                              Cash Amount (₹)
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const rem = Math.max(0, Math.round((totalAmount - upiNum) * 100) / 100);
+                                setSplitCash(rem.toString());
+                              }}
+                              className="text-[9px] text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
+                            >
+                              Fill remaining
+                            </button>
+                          </div>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-2 text-xs font-bold text-slate-400">₹</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              placeholder="0.00"
+                              value={splitCash}
+                              onChange={e => setSplitCash(e.target.value)}
+                              className="w-full pl-6 pr-2 py-1.5 text-xs font-semibold rounded border border-slate-300 focus:ring-1 focus:ring-slate-900 focus:border-slate-900 bg-white text-slate-900"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-[10px] font-semibold text-slate-600">
+                              UPI Amount (₹)
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const rem = Math.max(0, Math.round((totalAmount - cashNum) * 100) / 100);
+                                setSplitUpi(rem.toString());
+                              }}
+                              className="text-[9px] text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
+                            >
+                              Fill remaining
+                            </button>
+                          </div>
+                          <div className="relative">
+                            <span className="absolute left-2.5 top-2 text-xs font-bold text-slate-400">₹</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              placeholder="0.00"
+                              value={splitUpi}
+                              onChange={e => setSplitUpi(e.target.value)}
+                              className="w-full pl-6 pr-2 py-1.5 text-xs font-semibold rounded border border-slate-300 focus:ring-1 focus:ring-slate-900 focus:border-slate-900 bg-white text-slate-900"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Real-time Status and Validation */}
+                      <div className="pt-2 border-t border-slate-200 text-xs">
+                        <div className="flex items-center justify-between text-[11px] mb-1.5 text-slate-600">
+                          <span>Total Entered: <strong>₹{splitTotalPaid.toFixed(2)}</strong></span>
+                          <span>Remaining: <strong>₹{splitRemaining.toFixed(2)}</strong></span>
+                        </div>
+
+                        {totalAmount > 0 && (
+                          <>
+                            {Math.abs(splitRemaining) < 0.01 && (splitCash.trim() !== '' || splitUpi.trim() !== '') ? (
+                              <div className="flex items-center gap-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded text-[11px] font-semibold">
+                                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>Payment balanced (₹{cashNum.toFixed(2)} Cash + ₹{upiNum.toFixed(2)} UPI)</span>
+                              </div>
+                            ) : splitRemaining > 0 ? (
+                              <div className="flex items-center gap-1.5 text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1.5 rounded text-[11px] font-semibold">
+                                <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                <span>Underpaid by ₹{splitRemaining.toFixed(2)}</span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5 text-rose-700 bg-rose-50 border border-rose-200 px-2.5 py-1.5 rounded text-[11px] font-semibold">
+                                <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                <span>Overpaid by ₹{(-splitRemaining).toFixed(2)}</span>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* 4. Grand Total Summary */}
@@ -1065,7 +1230,13 @@ export const MemberSalePortalPage: React.FC = () => {
                 {/* 5. Complete Sale Button */}
                 <button
                   type="submit"
-                  disabled={cart.length === 0 || isSubmitting || isEventEnded || isEventUpcoming}
+                  disabled={
+                    cart.length === 0 ||
+                    isSubmitting ||
+                    isEventEnded ||
+                    isEventUpcoming ||
+                    (paymentMethod === 'CASH_UPI' && !isSplitValid)
+                  }
                   className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-sm rounded-md shadow-sm transition-colors cursor-pointer flex items-center justify-center gap-2"
                 >
                   <Receipt className="w-4 h-4" />
@@ -1078,6 +1249,10 @@ export const MemberSalePortalPage: React.FC = () => {
                       ? 'Event Not Started'
                       : cart.length === 0
                       ? 'Add Products to Generate Bill'
+                      : paymentMethod === 'CASH_UPI' && !isSplitValid
+                      ? splitRemaining > 0
+                        ? `Underpaid by ₹${splitRemaining.toFixed(2)}`
+                        : `Overpaid by ₹${(-splitRemaining).toFixed(2)}`
                       : `Record Bill & Complete Sale • ₹${totalAmount.toFixed(2)}`}
                   </span>
                 </button>
@@ -1123,8 +1298,16 @@ export const MemberSalePortalPage: React.FC = () => {
                 )}
                 <div className="flex justify-between">
                   <span className="text-slate-500">Payment:</span>
-                  <span className="font-bold text-slate-800">{lastCompletedBill.paymentMethod}</span>
+                  <span className="font-bold text-slate-800">
+                    {lastCompletedBill.paymentMethod === 'CASH_UPI' ? 'Cash + UPI' : lastCompletedBill.paymentMethod}
+                  </span>
                 </div>
+                {lastCompletedBill.paymentMethod === 'CASH_UPI' && (
+                  <div className="flex justify-between text-[11px] text-slate-600 bg-slate-100 px-2 py-1 rounded">
+                    <span>Cash: <strong>₹{(lastCompletedBill.cashAmount ?? 0).toFixed(2)}</strong></span>
+                    <span>UPI: <strong>₹{(lastCompletedBill.upiAmount ?? 0).toFixed(2)}</strong></span>
+                  </div>
+                )}
               </div>
 
               {/* Items Table */}

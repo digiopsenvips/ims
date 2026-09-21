@@ -23,6 +23,7 @@ enum EventStatus {
 enum PaymentMethod {
   CASH
   UPI
+  CASH_UPI
 }
 
 model User {
@@ -141,6 +142,8 @@ model Sale {
   sellerNameAtSale     String?       @map("seller_name_at_sale")
   totalAmount          Decimal       @map("total_amount") @db.Decimal(10, 2)
   paymentMethod        PaymentMethod @map("payment_method")
+  cashAmount           Decimal?      @map("cash_amount") @db.Decimal(10, 2)
+  upiAmount            Decimal?      @map("upi_amount") @db.Decimal(10, 2)
   customerName         String?       @map("customer_name")
   customerPhone        String?       @map("customer_phone")
   saleTime             DateTime      @default(now()) @map("sale_time")

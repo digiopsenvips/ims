@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { api } from '../lib/api';
-import { Sale, AppEvent } from '../types';
+import { Sale, AppEvent, PaymentMethod } from '../types';
 import {
   ReceiptText,
   Download,
@@ -48,7 +48,7 @@ export const SalesManagementPage: React.FC = () => {
   const pageSize = [10, 25, 50, 100].includes(rawPageSize) ? rawPageSize : 10;
   const activeTab = (searchParams.get('tab') === 'per-event' ? 'per-event' : 'all-time') as 'all-time' | 'per-event';
   const selectedEventId = searchParams.get('eventId') || '';
-  const paymentFilter = ((searchParams.get('payment') as 'ALL' | 'UPI' | 'CASH') || 'ALL');
+  const paymentFilter = ((searchParams.get('payment') as 'ALL' | 'UPI' | 'CASH' | 'CASH_UPI') || 'ALL');
   const searchFromUrl = searchParams.get('search') || '';
 
   // Local state
@@ -69,7 +69,9 @@ export const SalesManagementPage: React.FC = () => {
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
   const [editQty, setEditQty] = useState<number>(1);
   const [editPrice, setEditPrice] = useState<number>(0);
-  const [editPaymentMethod, setEditPaymentMethod] = useState<'CASH' | 'UPI'>('CASH');
+  const [editPaymentMethod, setEditPaymentMethod] = useState<PaymentMethod>('CASH');
+  const [editCashAmount, setEditCashAmount] = useState<string>('');
+  const [editUpiAmount, setEditUpiAmount] = useState<string>('');
   const [editCustomerName, setEditCustomerName] = useState<string>('');
   const [editCustomerPhone, setEditCustomerPhone] = useState<string>('');
   const [editSaleTime, setEditSaleTime] = useState<string>('');
@@ -89,7 +91,7 @@ export const SalesManagementPage: React.FC = () => {
       pageSize?: number;
       tab?: 'all-time' | 'per-event';
       eventId?: string;
-      payment?: 'ALL' | 'UPI' | 'CASH';
+      payment?: 'ALL' | 'UPI' | 'CASH' | 'CASH_UPI';
       search?: string;
     }) => {
       const newParams = new URLSearchParams(searchParams);
@@ -266,7 +268,7 @@ export const SalesManagementPage: React.FC = () => {
     updateUrlState({ page: 1, eventId });
   };
 
-  const handlePaymentChange = (payment: 'ALL' | 'UPI' | 'CASH') => {
+  const handlePaymentChange = (payment: 'ALL' | 'UPI' | 'CASH' | 'CASH_UPI') => {
     updateUrlState({ page: 1, payment });
   };
 
@@ -276,6 +278,8 @@ export const SalesManagementPage: React.FC = () => {
     setEditQty(sale.quantity);
     setEditPrice(sale.unitPrice || 0);
     setEditPaymentMethod(sale.paymentMethod);
+    setEditCashAmount(sale.cashAmount != null ? sale.cashAmount.toString() : '');
+    setEditUpiAmount(sale.upiAmount != null ? sale.upiAmount.toString() : '');
     setEditCustomerName(sale.customerName || '');
     setEditCustomerPhone(sale.customerPhone || '');
     setEditSaleTime(sale.saleTime ? new Date(sale.saleTime).toISOString().slice(0, 16) : '');
@@ -284,12 +288,34 @@ export const SalesManagementPage: React.FC = () => {
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingSale) return;
+
+    const lineTotal = editQty * editPrice;
+    let cashVal: number | undefined;
+    let upiVal: number | undefined;
+
+    if (editPaymentMethod === 'CASH_UPI') {
+      cashVal = parseFloat(editCashAmount) || 0;
+      upiVal = parseFloat(editUpiAmount) || 0;
+      if (Math.abs(lineTotal - (cashVal + upiVal)) > 0.01) {
+        alert(`Split amounts (Cash ₹${cashVal} + UPI ₹${upiVal}) must equal total amount ₹${lineTotal.toFixed(2)}.`);
+        return;
+      }
+    } else if (editPaymentMethod === 'CASH') {
+      cashVal = lineTotal;
+      upiVal = 0;
+    } else if (editPaymentMethod === 'UPI') {
+      cashVal = 0;
+      upiVal = lineTotal;
+    }
+
     setIsSavingEdit(true);
     try {
       const res = await api.put(`/sales/${editingSale.id}`, {
         quantity: editQty,
         unitPrice: editPrice,
         paymentMethod: editPaymentMethod,
+        cashAmount: cashVal,
+        upiAmount: upiVal,
         customerName: editCustomerName.trim() || null,
         customerPhone: editCustomerPhone.trim() || null,
         saleTime: editSaleTime ? new Date(editSaleTime).toISOString() : undefined,
@@ -534,7 +560,7 @@ export const SalesManagementPage: React.FC = () => {
         <div className="flex items-center gap-2 w-full md:w-auto">
           <span className="text-xs font-semibold text-slate-500">Payment:</span>
           <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5 text-xs">
-            {(['ALL', 'UPI', 'CASH'] as const).map(p => (
+            {(['ALL', 'UPI', 'CASH', 'CASH_UPI'] as const).map(p => (
               <button
                 key={p}
                 onClick={() => handlePaymentChange(p)}
@@ -542,7 +568,7 @@ export const SalesManagementPage: React.FC = () => {
                   paymentFilter === p ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
                 }`}
               >
-                {p}
+                {p === 'CASH_UPI' ? 'CASH + UPI' : p}
               </button>
             ))}
           </div>
@@ -684,11 +710,18 @@ export const SalesManagementPage: React.FC = () => {
                           className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
                             sale.paymentMethod === 'UPI'
                               ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                              : sale.paymentMethod === 'CASH_UPI'
+                              ? 'bg-purple-50 text-purple-700 border border-purple-200'
                               : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                           }`}
                         >
-                          {sale.paymentMethod}
+                          {sale.paymentMethod === 'CASH_UPI' ? 'CASH + UPI' : sale.paymentMethod}
                         </span>
+                        {sale.paymentMethod === 'CASH_UPI' && (
+                          <div className="text-[10px] text-slate-500 font-medium mt-0.5 whitespace-nowrap">
+                            ₹{sale.cashAmount != null ? Number(sale.cashAmount).toFixed(0) : '0'} Cash • ₹{sale.upiAmount != null ? Number(sale.upiAmount).toFixed(0) : '0'} UPI
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-slate-500 text-[11px] whitespace-nowrap">
                         {new Date(sale.saleTime).toLocaleDateString([], {
@@ -883,7 +916,7 @@ export const SalesManagementPage: React.FC = () => {
                 <label className="block text-slate-600 font-semibold mb-1">
                   Payment Method
                 </label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => setEditPaymentMethod('CASH')}
@@ -906,7 +939,56 @@ export const SalesManagementPage: React.FC = () => {
                   >
                     📱 UPI
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditPaymentMethod('CASH_UPI')}
+                    className={`py-2 px-3 rounded-md font-bold text-center border transition-all cursor-pointer ${
+                      editPaymentMethod === 'CASH_UPI'
+                        ? 'border-purple-600 bg-purple-50 text-purple-800 ring-1 ring-purple-600'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    💵+📱 SPLIT
+                  </button>
                 </div>
+
+                {editPaymentMethod === 'CASH_UPI' && (
+                  <div className="mt-2.5 p-3 bg-purple-50/50 border border-purple-200 rounded-md space-y-2">
+                    <div className="text-xs font-bold text-purple-900">
+                      Split Amounts (Total: ₹{(editQty * editPrice).toFixed(2)})
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-0.5">
+                          Cash Portion (₹)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={editCashAmount}
+                          onChange={e => setEditCashAmount(e.target.value)}
+                          placeholder="0.00"
+                          className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-purple-600"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-0.5">
+                          UPI Portion (₹)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={editUpiAmount}
+                          onChange={e => setEditUpiAmount(e.target.value)}
+                          placeholder="0.00"
+                          className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-purple-600"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">

@@ -58,7 +58,7 @@ router.get(
         ];
         whereClause.AND = whereClause.AND ? [...whereClause.AND, { OR: memberCond }] : [{ OR: memberCond }];
       }
-      if (paymentMethod && (paymentMethod === 'CASH' || paymentMethod === 'UPI')) {
+      if (paymentMethod && (paymentMethod === 'CASH' || paymentMethod === 'UPI' || paymentMethod === 'CASH_UPI')) {
         whereClause.paymentMethod = paymentMethod as PaymentMethod;
       }
       if (startDate || endDate) {
@@ -277,6 +277,16 @@ router.get(
           unitPrice: Number(firstItem.unitPrice ?? s.unitPrice ?? 0),
           totalAmount: Number(s.totalAmount),
           paymentMethod: s.paymentMethod,
+          cashAmount: s.cashAmount !== null && s.cashAmount !== undefined
+            ? Number(s.cashAmount)
+            : s.paymentMethod === 'CASH'
+            ? Number(s.totalAmount)
+            : 0,
+          upiAmount: s.upiAmount !== null && s.upiAmount !== undefined
+            ? Number(s.upiAmount)
+            : s.paymentMethod === 'UPI'
+            ? Number(s.totalAmount)
+            : 0,
           customerName: s.customerName,
           customerPhone: s.customerPhone,
           saleTime: s.saleTime,
@@ -332,6 +342,8 @@ router.post(
       quantity,
       items,
       paymentMethod,
+      cashAmount,
+      upiAmount,
       customerName,
       customerPhone,
       clientTxId,
@@ -361,9 +373,16 @@ router.post(
       return;
     }
 
-    const normMethod = (paymentMethod as string).toUpperCase() as PaymentMethod;
-    if (!['CASH', 'UPI'].includes(normMethod)) {
-      res.status(400).json({ error: 'Payment method must be CASH or UPI' });
+    let normMethod: PaymentMethod;
+    const rawMethod = String(paymentMethod || '').toUpperCase().replace(/[\s\+]/g, '_');
+    if (rawMethod === 'CASH') {
+      normMethod = PaymentMethod.CASH;
+    } else if (rawMethod === 'UPI') {
+      normMethod = PaymentMethod.UPI;
+    } else if (rawMethod === 'CASH_UPI' || rawMethod === 'CASH_AND_UPI' || rawMethod === 'SPLIT') {
+      normMethod = PaymentMethod.CASH_UPI;
+    } else {
+      res.status(400).json({ error: 'Payment method must be CASH, UPI, or CASH + UPI' });
       return;
     }
 
@@ -454,6 +473,44 @@ router.post(
 
       const grandTotal = validatedItems.reduce((sum, item) => sum + item.lineTotal, 0);
 
+      // Validate payment method amounts
+      let resolvedCashAmount: number;
+      let resolvedUpiAmount: number;
+
+      if (normMethod === PaymentMethod.CASH_UPI) {
+        const cashVal = parseFloat(String(cashAmount ?? ''));
+        const upiVal = parseFloat(String(upiAmount ?? ''));
+
+        if (isNaN(cashVal) || isNaN(upiVal) || cashVal < 0 || upiVal < 0) {
+          res.status(400).json({
+            error: 'Cash and UPI amounts must be non-negative numbers for split payment',
+          });
+          return;
+        }
+
+        const totalSplitCents = Math.round((cashVal + upiVal) * 100);
+        const grandTotalCents = Math.round(grandTotal * 100);
+
+        if (totalSplitCents !== grandTotalCents) {
+          res.status(400).json({
+            error: `Split payment total (₹${(totalSplitCents / 100).toFixed(2)}) must exactly match bill total (₹${(grandTotalCents / 100).toFixed(2)})`,
+            cashAmount: cashVal,
+            upiAmount: upiVal,
+            billTotal: grandTotalCents / 100,
+          });
+          return;
+        }
+
+        resolvedCashAmount = Math.round(cashVal * 100) / 100;
+        resolvedUpiAmount = Math.round(upiVal * 100) / 100;
+      } else if (normMethod === PaymentMethod.CASH) {
+        resolvedCashAmount = grandTotal;
+        resolvedUpiAmount = 0;
+      } else {
+        resolvedCashAmount = 0;
+        resolvedUpiAmount = grandTotal;
+      }
+
       // Create single customer transaction in atomic database transaction
       const newSale = await prisma.$transaction(async tx => {
         // Idempotency check if clientTxId supplied
@@ -485,6 +542,8 @@ router.post(
             sellerNameAtSale: req.user!.name,
             totalAmount: grandTotal,
             paymentMethod: normMethod,
+            cashAmount: resolvedCashAmount,
+            upiAmount: resolvedUpiAmount,
             customerName: customerName ? String(customerName).trim() : null,
             customerPhone: customerPhone ? String(customerPhone).trim() : null,
             saleTime: saleTime ? new Date(saleTime) : new Date(),
@@ -518,6 +577,8 @@ router.post(
         eventName: newSale.event.name,
         totalAmount: Number(newSale.totalAmount),
         paymentMethod: newSale.paymentMethod,
+        cashAmount: Number(newSale.cashAmount ?? resolvedCashAmount),
+        upiAmount: Number(newSale.upiAmount ?? resolvedUpiAmount),
         memberName: newSale.sellerNameAtSale || newSale.member?.name || req.user!.name,
         memberUsername: newSale.sellerUsernameAtSale || newSale.member?.username || req.user!.username,
         saleTime: newSale.saleTime,
@@ -538,6 +599,8 @@ router.post(
         eventName: newSale.event.name,
         totalAmount: Number(newSale.totalAmount),
         paymentMethod: newSale.paymentMethod,
+        cashAmount: Number(newSale.cashAmount ?? resolvedCashAmount),
+        upiAmount: Number(newSale.upiAmount ?? resolvedUpiAmount),
         customerName: newSale.customerName,
         customerPhone: newSale.customerPhone,
         saleTime: newSale.saleTime,
@@ -598,6 +661,8 @@ router.post(
           quantity,
           unitPrice: clientUnitPrice,
           paymentMethod,
+          cashAmount,
+          upiAmount,
           customerName,
           customerPhone,
           saleTime,
@@ -699,7 +764,36 @@ router.post(
         }
 
         const grandTotal = validatedItems.reduce((sum, i) => sum + i.lineTotal, 0);
-        const normMethod = paymentMethod === 'UPI' ? PaymentMethod.UPI : PaymentMethod.CASH;
+        const rawMethod = String(paymentMethod || '').toUpperCase().replace(/[\s\+]/g, '_');
+        let normMethod: PaymentMethod;
+        if (rawMethod === 'CASH') {
+          normMethod = PaymentMethod.CASH;
+        } else if (rawMethod === 'CASH_UPI' || rawMethod === 'CASH_AND_UPI' || rawMethod === 'SPLIT') {
+          normMethod = PaymentMethod.CASH_UPI;
+        } else {
+          normMethod = PaymentMethod.UPI;
+        }
+
+        let resolvedCashAmount: number;
+        let resolvedUpiAmount: number;
+
+        if (normMethod === PaymentMethod.CASH_UPI) {
+          const cashVal = parseFloat(String(cashAmount ?? ''));
+          const upiVal = parseFloat(String(upiAmount ?? ''));
+          if (!isNaN(cashVal) && !isNaN(upiVal) && cashVal >= 0 && upiVal >= 0) {
+            resolvedCashAmount = Math.round(cashVal * 100) / 100;
+            resolvedUpiAmount = Math.round(upiVal * 100) / 100;
+          } else {
+            resolvedCashAmount = Math.round((grandTotal / 2) * 100) / 100;
+            resolvedUpiAmount = Math.round((grandTotal - resolvedCashAmount) * 100) / 100;
+          }
+        } else if (normMethod === PaymentMethod.CASH) {
+          resolvedCashAmount = grandTotal;
+          resolvedUpiAmount = 0;
+        } else {
+          resolvedCashAmount = 0;
+          resolvedUpiAmount = grandTotal;
+        }
 
         // 4. Create single transaction record with items
         const created = await prisma.sale.create({
@@ -712,6 +806,8 @@ router.post(
             sellerNameAtSale: req.user!.name,
             totalAmount: grandTotal,
             paymentMethod: normMethod,
+            cashAmount: resolvedCashAmount,
+            upiAmount: resolvedUpiAmount,
             customerName: customerName ? String(customerName).trim() : null,
             customerPhone: customerPhone ? String(customerPhone).trim() : null,
             saleTime: saleTime ? new Date(saleTime) : new Date(),
@@ -733,6 +829,9 @@ router.post(
           id: created.id,
           eventId: created.eventId,
           totalAmount: Number(created.totalAmount),
+          paymentMethod: created.paymentMethod,
+          cashAmount: Number(created.cashAmount ?? resolvedCashAmount),
+          upiAmount: Number(created.upiAmount ?? resolvedUpiAmount),
           saleTime: created.saleTime,
         });
       }
@@ -786,6 +885,8 @@ router.put(
       quantity,
       unitPrice,
       paymentMethod,
+      cashAmount,
+      upiAmount,
       customerName,
       customerPhone,
       saleTime,
@@ -838,12 +939,25 @@ router.put(
       }
 
       if (paymentMethod !== undefined) {
-        const normMethod = (paymentMethod as string).toUpperCase();
-        if (!['CASH', 'UPI'].includes(normMethod)) {
-          res.status(400).json({ error: 'Payment method must be CASH or UPI' });
+        const rawMethod = String(paymentMethod).toUpperCase().replace(/[\s\+]/g, '_');
+        if (rawMethod === 'CASH') {
+          updateData.paymentMethod = PaymentMethod.CASH;
+          updateData.cashAmount = updateData.totalAmount !== undefined ? updateData.totalAmount : existing.totalAmount;
+          updateData.upiAmount = 0;
+        } else if (rawMethod === 'UPI') {
+          updateData.paymentMethod = PaymentMethod.UPI;
+          updateData.cashAmount = 0;
+          updateData.upiAmount = updateData.totalAmount !== undefined ? updateData.totalAmount : existing.totalAmount;
+        } else if (rawMethod === 'CASH_UPI' || rawMethod === 'CASH_AND_UPI' || rawMethod === 'SPLIT') {
+          updateData.paymentMethod = PaymentMethod.CASH_UPI;
+          if (cashAmount !== undefined && upiAmount !== undefined) {
+            updateData.cashAmount = parseFloat(cashAmount);
+            updateData.upiAmount = parseFloat(upiAmount);
+          }
+        } else {
+          res.status(400).json({ error: 'Payment method must be CASH, UPI, or CASH + UPI' });
           return;
         }
-        updateData.paymentMethod = normMethod as PaymentMethod;
       }
 
       if (customerName !== undefined) {
@@ -929,6 +1043,16 @@ router.put(
         unitPrice: Number(firstItem.unitPrice ?? updated.unitPrice ?? 0),
         totalAmount: Number(updated.totalAmount),
         paymentMethod: updated.paymentMethod,
+        cashAmount: updated.cashAmount !== null && updated.cashAmount !== undefined
+          ? Number(updated.cashAmount)
+          : updated.paymentMethod === 'CASH'
+          ? Number(updated.totalAmount)
+          : 0,
+        upiAmount: updated.upiAmount !== null && updated.upiAmount !== undefined
+          ? Number(updated.upiAmount)
+          : updated.paymentMethod === 'UPI'
+          ? Number(updated.totalAmount)
+          : 0,
         customerName: updated.customerName,
         customerPhone: updated.customerPhone,
         saleTime: updated.saleTime,
