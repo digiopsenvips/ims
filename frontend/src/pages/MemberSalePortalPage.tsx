@@ -79,9 +79,19 @@ export const MemberSalePortalPage: React.FC = () => {
         setEvents(data.events);
         await cacheEvents(data.events);
 
-        // Auto-select active event if available
+        // Auto-select active non-expired event if available
         if (!selectedEventId && data.events.length > 0) {
-          const active = data.events.find((e: AppEvent) => e.status === 'ACTIVE') || data.events[0];
+          const now = Date.now();
+          const active =
+            data.events.find(
+              (e: AppEvent) =>
+                e.status === 'ACTIVE' && now < new Date(e.endDatetime).getTime()
+            ) ||
+            data.events.find(
+              (e: AppEvent) =>
+                e.status !== 'ENDED' && now < new Date(e.endDatetime).getTime()
+            ) ||
+            data.events[0];
           setSelectedEventId(active.id);
         }
       }
@@ -127,6 +137,29 @@ export const MemberSalePortalPage: React.FC = () => {
   // Current selected event object
   const currentEvent = events.find(e => e.id === selectedEventId);
 
+  // Periodic ticker to automatically update event status if end time passes while portal is open
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (currentEvent && currentEvent.status !== 'ENDED') {
+        const now = Date.now();
+        if (now >= new Date(currentEvent.endDatetime).getTime()) {
+          fetchEvents();
+        }
+      }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [currentEvent]);
+
+  const isEventEnded =
+    !currentEvent ||
+    currentEvent.status === 'ENDED' ||
+    new Date().getTime() >= new Date(currentEvent.endDatetime).getTime();
+
+  const isEventUpcoming =
+    !!currentEvent &&
+    currentEvent.status === 'UPCOMING' &&
+    new Date().getTime() < new Date(currentEvent.startDatetime).getTime();
+
   // Allocations for current event
   const allocations: EventAllocation[] = currentEvent?.allocations || [];
 
@@ -157,6 +190,16 @@ export const MemberSalePortalPage: React.FC = () => {
   const handleAddToCart = (alloc: EventAllocation) => {
     setErrorMessage(null);
     setSuccessMessage(null);
+
+    if (isEventEnded) {
+      setErrorMessage('This event has ended and is no longer accepting sales.');
+      return;
+    }
+
+    if (isEventUpcoming) {
+      setErrorMessage('This event has not started yet.');
+      return;
+    }
 
     if (alloc.remainingQty <= 0) {
       setErrorMessage(`${alloc.productName} is currently out of stock.`);
@@ -260,6 +303,16 @@ export const MemberSalePortalPage: React.FC = () => {
     e.preventDefault();
     if (!selectedEventId) {
       setErrorMessage('Please select an active stall / event');
+      return;
+    }
+
+    if (isEventEnded) {
+      setErrorMessage('This event has ended and is no longer accepting sales.');
+      return;
+    }
+
+    if (isEventUpcoming) {
+      setErrorMessage('This event has not started yet.');
       return;
     }
 
@@ -415,7 +468,45 @@ export const MemberSalePortalPage: React.FC = () => {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <div className="space-y-4">
+          {/* Event Ended Banner */}
+          {isEventEnded && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3 text-red-800 text-xs shadow-xs">
+              <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
+              <div>
+                <div className="font-bold text-red-900 text-sm">
+                  This event has ended and is no longer accepting sales.
+                </div>
+                <p className="text-red-700 text-xs mt-0.5">
+                  The event end time has passed. Unsold allocated inventory has been reconciled and returned to main inventory.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Event Upcoming Banner */}
+          {isEventUpcoming && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center gap-3 text-blue-800 text-xs shadow-xs">
+              <AlertCircle className="w-5 h-5 text-blue-600 shrink-0" />
+              <div>
+                <div className="font-bold text-blue-900 text-sm">
+                  This event has not started yet.
+                </div>
+                <p className="text-blue-700 text-xs mt-0.5">
+                  Scheduled to start at{' '}
+                  {new Date(currentEvent.startDatetime).toLocaleString('en-IN', {
+                    timeZone: 'Asia/Kolkata',
+                    day: 'numeric',
+                    month: 'short',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}. Sales cannot be submitted until the event begins.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Left Column: Available Products Catalog */}
           <div className="lg:col-span-7 space-y-3">
             <div className="flex items-center justify-between">
@@ -529,11 +620,22 @@ export const MemberSalePortalPage: React.FC = () => {
                         ) : (
                           <button
                             type="button"
+                            disabled={isEventEnded || isEventUpcoming}
                             onClick={() => handleAddToCart(item)}
-                            className="text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded flex items-center gap-1 transition-all cursor-pointer"
+                            className={`text-xs font-bold px-2.5 py-1 rounded flex items-center gap-1 transition-all ${
+                              isEventEnded || isEventUpcoming
+                                ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                                : 'text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 cursor-pointer'
+                            }`}
                           >
                             <Plus className="w-3.5 h-3.5" />
-                            <span>Add to Bill</span>
+                            <span>
+                              {isEventEnded
+                                ? 'Event Ended'
+                                : isEventUpcoming
+                                ? 'Not Started'
+                                : 'Add to Bill'}
+                            </span>
                           </button>
                         )}
                       </div>
@@ -757,13 +859,17 @@ export const MemberSalePortalPage: React.FC = () => {
                 {/* 5. Complete Sale Button */}
                 <button
                   type="submit"
-                  disabled={cart.length === 0 || isSubmitting}
+                  disabled={cart.length === 0 || isSubmitting || isEventEnded || isEventUpcoming}
                   className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-sm rounded-md shadow-sm transition-colors cursor-pointer flex items-center justify-center gap-2"
                 >
                   <Receipt className="w-4 h-4" />
                   <span>
                     {isSubmitting
                       ? 'Recording Bill...'
+                      : isEventEnded
+                      ? 'Event Ended (Sales Closed)'
+                      : isEventUpcoming
+                      ? 'Event Not Started'
                       : cart.length === 0
                       ? 'Add Products to Generate Bill'
                       : `Record Bill & Complete Sale • ₹${totalAmount.toFixed(2)}`}
@@ -772,6 +878,7 @@ export const MemberSalePortalPage: React.FC = () => {
               </form>
             </div>
           </div>
+        </div>
         </div>
       )}
 

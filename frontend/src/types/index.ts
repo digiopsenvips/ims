@@ -75,6 +75,7 @@ export interface AppEvent {
   startDatetime: string;
   endDatetime: string;
   status: EventStatus;
+  reconciledAt?: string | null;
   totalAllocated: number;
   totalSold: number;
   totalRemaining: number;

@@ -103,6 +103,7 @@ model Event {
   startDatetime DateTime          @map("start_datetime")
   endDatetime   DateTime          @map("end_datetime")
   status        EventStatus       @default(UPCOMING)
+  reconciledAt  DateTime?         @map("reconciled_at")
   isDeleted     Boolean           @default(false) @map("is_deleted")
   createdAt     DateTime          @default(now()) @map("created_at")
   updatedAt     DateTime          @updatedAt @map("updated_at")

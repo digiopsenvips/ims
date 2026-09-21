@@ -55,9 +55,27 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   });
 });
 
+import { reconcileAllExpiredEvents } from './services/eventLifecycle';
+
 server.listen(ENV.PORT, () => {
   console.log(`🚀 Enactus IMS Backend running on http://localhost:${ENV.PORT}`);
   console.log(`📡 WebSocket server mounted and ready`);
+
+  // Initial event lifecycle reconciliation on boot
+  reconcileAllExpiredEvents()
+    .then(count => {
+      if (count > 0) {
+        console.log(`[EventLifecycle] Reconciled ${count} expired/transitioned event(s) on startup.`);
+      }
+    })
+    .catch(err => console.error('[EventLifecycle] Startup reconciliation error:', err));
+
+  // Periodic lifecycle check every 30 seconds
+  setInterval(() => {
+    reconcileAllExpiredEvents().catch(err =>
+      console.error('[EventLifecycle] Periodic reconciliation error:', err)
+    );
+  }, 30000);
 });
 
 export { app, server };

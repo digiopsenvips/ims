@@ -27,6 +27,41 @@ interface AllocationInput {
   priceAtEvent: number;
 }
 
+function toISTDateString(iso: string): string {
+  const d = new Date(iso);
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return formatter.format(d);
+}
+
+function toISTTimeString(iso: string): string {
+  const d = new Date(iso);
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  return formatter.format(d);
+}
+
+function formatISTDateTime(iso: string): string {
+  const d = new Date(iso);
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }).format(d);
+}
+
 export const EventsPage: React.FC = () => {
   const { isDeveloper, isAdmin, hasPermission } = useAuth();
   const { socket } = useSocket();
@@ -108,22 +143,61 @@ export const EventsPage: React.FC = () => {
     };
   }, [socket]);
 
+  // Periodic 10-second ticker to automatically update event status if end/start time passes while page is open
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = new Date().getTime();
+      let stateChanged = false;
+
+      setEvents(prevEvents =>
+        prevEvents.map(ev => {
+          const startMs = new Date(ev.startDatetime).getTime();
+          const endMs = new Date(ev.endDatetime).getTime();
+          let newStatus: EventStatus = ev.status;
+
+          if (ev.status === 'ENDED') {
+            newStatus = 'ENDED';
+          } else if (now >= endMs) {
+            newStatus = 'ENDED';
+          } else if (now >= startMs) {
+            newStatus = 'ACTIVE';
+          } else {
+            newStatus = 'UPCOMING';
+          }
+
+          if (newStatus !== ev.status) {
+            stateChanged = true;
+            return { ...ev, status: newStatus };
+          }
+          return ev;
+        })
+      );
+
+      if (stateChanged) {
+        // Silently re-sync with backend to ensure authoritative server state & stock return
+        fetchEventsAndProducts();
+      }
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   // Open Create Event Modal
   const handleOpenCreateModal = () => {
     setEditingEventId(null);
     setNameInput('');
     setLocationInput('');
 
-    const todayStr = new Date().toISOString().split('T')[0];
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+    const now = new Date();
+    const todayStr = toISTDateString(now.toISOString());
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const tomorrowStr = toISTDateString(tomorrow.toISOString());
 
     setStartDateInput(todayStr);
     setStartTimeInput('10:00');
     setEndDateInput(tomorrowStr);
     setEndTimeInput('20:00');
-    setEventStatusInput('ACTIVE');
+    setEventStatusInput('UPCOMING');
 
     // Build allocations grid with all products
     const initialGrid: AllocationInput[] = products.map(p => ({
@@ -145,13 +219,10 @@ export const EventsPage: React.FC = () => {
     setNameInput(event.name);
     setLocationInput(event.location);
 
-    const start = new Date(event.startDatetime);
-    const end = new Date(event.endDatetime);
-
-    setStartDateInput(start.toISOString().split('T')[0]);
-    setStartTimeInput(start.toTimeString().slice(0, 5));
-    setEndDateInput(end.toISOString().split('T')[0]);
-    setEndTimeInput(end.toTimeString().slice(0, 5));
+    setStartDateInput(toISTDateString(event.startDatetime));
+    setStartTimeInput(toISTTimeString(event.startDatetime));
+    setEndDateInput(toISTDateString(event.endDatetime));
+    setEndTimeInput(toISTTimeString(event.endDatetime));
     setEventStatusInput(event.status);
 
     // Map existing allocations
@@ -194,8 +265,17 @@ export const EventsPage: React.FC = () => {
       return;
     }
 
-    const startDatetime = new Date(`${startDateInput}T${startTimeInput || '00:00'}:00`).toISOString();
-    const endDatetime = new Date(`${endDateInput}T${endTimeInput || '23:59'}:00`).toISOString();
+    // Combine date and time in Asia/Kolkata (+05:30)
+    const startDatetime = new Date(`${startDateInput}T${startTimeInput || '00:00'}:00+05:30`).toISOString();
+    const endDatetime = new Date(`${endDateInput}T${endTimeInput || '23:59'}:00+05:30`).toISOString();
+
+    if (new Date(endDatetime).getTime() <= new Date(startDatetime).getTime()) {
+      setStatusMessage({
+        type: 'error',
+        text: 'End date and time must be after the start date and time.',
+      });
+      return;
+    }
 
     // Check allocations against available stock
     for (const row of allocationsGrid) {
@@ -338,7 +418,7 @@ export const EventsPage: React.FC = () => {
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
                           isActive
                             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                             : isEnded
@@ -356,18 +436,14 @@ export const EventsPage: React.FC = () => {
                         <MapPin className="w-3.5 h-3.5 text-slate-400" />
                         <span>{event.location}</span>
                       </span>
-                      <span className="flex items-center gap-1">
+                      <span className="flex items-center gap-1.5">
                         <Clock className="w-3.5 h-3.5 text-slate-400" />
-                        <span>
-                          {new Date(event.startDatetime).toLocaleDateString([], {
-                            month: 'short',
-                            day: 'numeric',
-                          })}{' '}
-                          to{' '}
-                          {new Date(event.endDatetime).toLocaleDateString([], {
-                            month: 'short',
-                            day: 'numeric',
-                          })}
+                        <span className="text-slate-700 font-medium">
+                          {formatISTDateTime(event.startDatetime)}
+                        </span>
+                        <span className="text-slate-400 font-normal">to</span>
+                        <span className="text-slate-700 font-medium">
+                          {formatISTDateTime(event.endDatetime)}
                         </span>
                       </span>
                     </div>

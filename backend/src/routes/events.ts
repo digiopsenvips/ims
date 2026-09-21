@@ -5,6 +5,11 @@ import { requirePermission, requireRoles } from '../middleware/rbac';
 import { AuthenticatedRequest } from '../types';
 import { broadcast } from '../sockets';
 import { EventStatus, Role } from '@prisma/client';
+import {
+  computeEventStatus,
+  reconcileSingleEvent,
+  reconcileAllExpiredEvents,
+} from '../services/eventLifecycle';
 
 const router = Router();
 
@@ -14,6 +19,9 @@ router.get(
   authenticateToken,
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
+      // Reconcile any expired events first so status is 100% authoritative
+      await reconcileAllExpiredEvents();
+
       const events = await prisma.event.findMany({
         where: { isDeleted: false },
         include: {
@@ -87,13 +95,16 @@ router.get(
 
         const totalAllocated = enrichedAllocations.reduce((sum, a) => sum + a.allocatedQty, 0);
 
+        const computedStatus = computeEventStatus(event.startDatetime, event.endDatetime, event.status);
+
         return {
           id: event.id,
           name: event.name,
           location: event.location,
           startDatetime: event.startDatetime,
           endDatetime: event.endDatetime,
-          status: event.status,
+          status: computedStatus,
+          reconciledAt: event.reconciledAt,
           totalAllocated,
           totalSold,
           totalRemaining: Math.max(0, totalAllocated - totalSold),
@@ -119,6 +130,9 @@ router.get(
     const { id } = req.params;
 
     try {
+      // Reconcile status/inventory if expired
+      await reconcileSingleEvent(id);
+
       const event = await prisma.event.findUnique({
         where: { id },
         include: {
@@ -171,9 +185,12 @@ router.get(
         };
       });
 
+      const computedStatus = computeEventStatus(event.startDatetime, event.endDatetime, event.status);
+
       res.json({
         event: {
           ...event,
+          status: computedStatus,
           allocations: enrichedAllocations,
         },
       });
@@ -196,6 +213,25 @@ router.post(
       res.status(400).json({ error: 'Name, location, start date/time, and end date/time are required' });
       return;
     }
+
+    const parsedStart = new Date(startDatetime);
+    const parsedEnd = new Date(endDatetime);
+
+    if (isNaN(parsedStart.getTime()) || isNaN(parsedEnd.getTime())) {
+      res.status(400).json({ error: 'Valid start date/time and end date/time are required' });
+      return;
+    }
+
+    if (parsedEnd.getTime() <= parsedStart.getTime()) {
+      res.status(400).json({ error: 'End date and time must be after the start date and time.' });
+      return;
+    }
+
+    const initialStatus = computeEventStatus(
+      parsedStart,
+      parsedEnd,
+      status ? (status.toUpperCase() as EventStatus) : undefined
+    );
 
     try {
       const validAllocations = Array.isArray(allocations) ? allocations : [];
@@ -224,9 +260,9 @@ router.post(
           data: {
             name: name.trim(),
             location: location.trim(),
-            startDatetime: new Date(startDatetime),
-            endDatetime: new Date(endDatetime),
-            status: status ? (status.toUpperCase() as EventStatus) : EventStatus.UPCOMING,
+            startDatetime: parsedStart,
+            endDatetime: parsedEnd,
+            status: initialStatus,
           },
         });
 
@@ -295,10 +331,24 @@ router.put(
         return;
       }
 
-      if (existingEvent.status === EventStatus.ENDED && status !== EventStatus.ACTIVE) {
-        res.status(400).json({ error: 'Cannot modify ended events' });
+      const parsedStart = startDatetime ? new Date(startDatetime) : existingEvent.startDatetime;
+      const parsedEnd = endDatetime ? new Date(endDatetime) : existingEvent.endDatetime;
+
+      if (isNaN(parsedStart.getTime()) || isNaN(parsedEnd.getTime())) {
+        res.status(400).json({ error: 'Valid start date/time and end date/time are required' });
         return;
       }
+
+      if (parsedEnd.getTime() <= parsedStart.getTime()) {
+        res.status(400).json({ error: 'End date and time must be after the start date and time.' });
+        return;
+      }
+
+      const computedStatus = computeEventStatus(
+        parsedStart,
+        parsedEnd,
+        status ? (status.toUpperCase() as EventStatus) : existingEvent.status
+      );
 
       // Group sales count by product for this event
       const salesByProduct: Record<string, number> = {};
@@ -319,9 +369,9 @@ router.put(
           data: {
             name: name ? name.trim() : undefined,
             location: location ? location.trim() : undefined,
-            startDatetime: startDatetime ? new Date(startDatetime) : undefined,
-            endDatetime: endDatetime ? new Date(endDatetime) : undefined,
-            status: status ? (status.toUpperCase() as EventStatus) : undefined,
+            startDatetime: parsedStart,
+            endDatetime: parsedEnd,
+            status: computedStatus,
           },
         });
 
@@ -430,7 +480,7 @@ router.post(
         return;
       }
 
-      if (event.status === EventStatus.ENDED) {
+      if (event.status === EventStatus.ENDED && event.reconciledAt) {
         res.status(400).json({ error: 'Event has already been finalized and ended.' });
         return;
       }
@@ -471,11 +521,12 @@ router.post(
           }
         }
 
-        // Mark event as ENDED
+        // Mark event as ENDED and set reconciledAt
         await tx.event.update({
           where: { id },
           data: {
             status: EventStatus.ENDED,
+            reconciledAt: new Date(),
           },
         });
       });

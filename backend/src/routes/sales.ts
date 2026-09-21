@@ -6,6 +6,7 @@ import { sanitizeSaleForUser, sanitizeSalesListForUser } from '../middleware/pii
 import { requireRoles } from '../middleware/rbac';
 import { broadcast } from '../sockets';
 import { PaymentMethod, Role, Prisma } from '@prisma/client';
+import { computeEventStatus, reconcileSingleEvent } from '../services/eventLifecycle';
 
 const router = Router();
 
@@ -368,8 +369,21 @@ router.post(
         return;
       }
 
-      if (event.status === 'ENDED') {
-        res.status(400).json({ error: 'Cannot record sales for an ended event.' });
+      const eventStatus = computeEventStatus(event.startDatetime, event.endDatetime, event.status);
+      const isPastEnd = new Date().getTime() >= new Date(event.endDatetime).getTime();
+
+      if (eventStatus === 'ENDED' || event.status === 'ENDED' || isPastEnd) {
+        if (!event.reconciledAt) {
+          reconcileSingleEvent(event.id).catch(err =>
+            console.error('Failed to reconcile ended event on sale:', err)
+          );
+        }
+        res.status(400).json({ error: 'This event has ended and is no longer accepting sales.' });
+        return;
+      }
+
+      if (eventStatus === 'UPCOMING' || new Date().getTime() < new Date(event.startDatetime).getTime()) {
+        res.status(400).json({ error: 'This event has not started yet.' });
         return;
       }
 
@@ -613,6 +627,28 @@ router.post(
 
         if (!event || event.isDeleted) {
           results.push({ clientTxId, status: 'failed', error: 'Event not found or inactive' });
+          continue;
+        }
+
+        const eventStatus = computeEventStatus(event.startDatetime, event.endDatetime, event.status);
+        const isPastEnd = new Date().getTime() >= new Date(event.endDatetime).getTime();
+
+        if (eventStatus === 'ENDED' || event.status === 'ENDED' || isPastEnd) {
+          if (!event.reconciledAt) {
+            reconcileSingleEvent(event.id).catch(err =>
+              console.error('Failed to reconcile ended event on sync:', err)
+            );
+          }
+          results.push({
+            clientTxId,
+            status: 'failed',
+            error: 'This event has ended and is no longer accepting sales.',
+          });
+          continue;
+        }
+
+        if (eventStatus === 'UPCOMING' || new Date().getTime() < new Date(event.startDatetime).getTime()) {
+          results.push({ clientTxId, status: 'failed', error: 'This event has not started yet.' });
           continue;
         }
 
