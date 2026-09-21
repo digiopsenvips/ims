@@ -23,6 +23,7 @@ interface AllocationInput {
   productName: string;
   projectName: string;
   availableStock: number;
+  maxAllocatable: number;
   initialAllocatedQty: number;
   allocatedQty: number;
   soldQty: number;
@@ -221,6 +222,7 @@ export const EventsPage: React.FC = () => {
         productName: p.name,
         projectName: p.project?.name || '—',
         availableStock: stock,
+        maxAllocatable: stock,
         initialAllocatedQty: 0,
         allocatedQty: 0,
         soldQty: 0,
@@ -257,17 +259,19 @@ export const EventsPage: React.FC = () => {
         ? Number(p.basePrice)
         : 0;
       const mainInventoryStock = p.inventory ? p.inventory.quantityOnHand : 0;
-      const availableStock = mainInventoryStock + allocatedQty;
+      const remainingInEvent = Math.max(0, allocatedQty - soldQty);
+      const maxAllocatable = mainInventoryStock + remainingInEvent;
 
       return {
         productId: p.id,
         productName: p.name,
         projectName: p.project?.name || '—',
-        availableStock,
+        availableStock: maxAllocatable,
+        maxAllocatable,
         initialAllocatedQty: allocatedQty,
         allocatedQty,
         soldQty,
-        remainingQty: Math.max(0, allocatedQty - soldQty),
+        remainingQty: remainingInEvent,
         initialPriceAtEvent: priceAtEvent,
         priceAtEvent,
       };
@@ -275,6 +279,20 @@ export const EventsPage: React.FC = () => {
 
     setAllocationsGrid(grid);
     setShowEventModal(true);
+  };
+
+  const handleSetMaxAllocation = (productId: string) => {
+    setAllocationsGrid(prev =>
+      prev.map(row => {
+        if (row.productId !== productId) return row;
+        const newAlloc = row.maxAllocatable;
+        return {
+          ...row,
+          allocatedQty: newAlloc,
+          remainingQty: Math.max(0, newAlloc - row.soldQty),
+        };
+      })
+    );
   };
 
   const handleAllocationChange = (
@@ -328,10 +346,10 @@ export const EventsPage: React.FC = () => {
         });
         return;
       }
-      if (row.allocatedQty > row.availableStock) {
+      if (row.allocatedQty > row.maxAllocatable) {
         setStatusMessage({
           type: 'error',
-          text: `Allocation for ${row.productName} (${row.allocatedQty}) exceeds available stock (${row.availableStock}).`,
+          text: `Maximum available quantity for ${row.productName} is ${row.maxAllocatable}.`,
         });
         return;
       }
@@ -786,9 +804,10 @@ export const EventsPage: React.FC = () => {
                       <tr>
                         <th className="px-3 py-2.5">Product</th>
                         <th className="px-3 py-2.5">Project</th>
-                        <th className="px-3 py-2.5 w-36 text-right">Current Allocation</th>
-                        <th className="px-3 py-2.5 text-right">Sold</th>
-                        <th className="px-3 py-2.5 text-right">Remaining</th>
+                        <th className="px-3 py-2.5 text-right">Available Stock</th>
+                        <th className="px-3 py-2.5 text-right min-w-[150px]">Quantity Allocated</th>
+                        {editingEventId && <th className="px-3 py-2.5 text-right">Sold</th>}
+                        {editingEventId && <th className="px-3 py-2.5 text-right">Remaining</th>}
                         <th className="px-3 py-2.5 w-36 text-right">Event Price (₹)</th>
                       </tr>
                     </thead>
@@ -800,33 +819,51 @@ export const EventsPage: React.FC = () => {
                             <span className="font-mono text-[10px] text-slate-400">{row.productId}</span>
                           </td>
                           <td className="px-3 py-2 text-slate-600">{row.projectName}</td>
+                          <td className="px-3 py-2 text-right font-medium text-slate-700">
+                            {row.maxAllocatable}
+                          </td>
                           <td className="px-3 py-1.5 text-right">
-                            <input
-                              type="number"
-                              min={row.soldQty}
-                              max={row.availableStock}
-                              value={row.allocatedQty}
-                              onChange={e =>
-                                handleAllocationChange(
-                                  row.productId,
-                                  'allocatedQty',
-                                  parseInt(e.target.value, 10) || 0
-                                )
-                              }
-                              className="w-24 text-right p-1.5 border border-slate-300 rounded font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-                            />
+                            <div className="flex items-center justify-end gap-1.5">
+                              <input
+                                type="number"
+                                min={editingEventId ? row.soldQty : 0}
+                                max={row.maxAllocatable}
+                                value={row.allocatedQty}
+                                onChange={e =>
+                                  handleAllocationChange(
+                                    row.productId,
+                                    'allocatedQty',
+                                    parseInt(e.target.value, 10) || 0
+                                  )
+                                }
+                                className="w-20 text-right p-1.5 border border-slate-300 rounded font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleSetMaxAllocation(row.productId)}
+                                disabled={row.maxAllocatable <= 0}
+                                title="Allocate the maximum available quantity"
+                                className="px-2 py-1 text-[10px] font-bold uppercase rounded border border-slate-300 bg-slate-50 text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                              >
+                                MAX
+                              </button>
+                            </div>
                             {editingEventId && row.soldQty > 0 && (
                               <div className="text-[10px] text-slate-400 mt-0.5">
                                 Min: {row.soldQty} (sold)
                               </div>
                             )}
                           </td>
-                          <td className="px-3 py-2 text-right font-semibold text-emerald-700">
-                            {row.soldQty}
-                          </td>
-                          <td className="px-3 py-2 text-right font-black text-slate-900">
-                            {row.remainingQty}
-                          </td>
+                          {editingEventId && (
+                            <td className="px-3 py-2 text-right font-semibold text-emerald-700">
+                              {row.soldQty}
+                            </td>
+                          )}
+                          {editingEventId && (
+                            <td className="px-3 py-2 text-right font-black text-slate-900">
+                              {row.remainingQty}
+                            </td>
+                          )}
                           <td className="px-3 py-1.5 text-right">
                             <div className="flex items-center justify-end gap-1">
                               <span className="text-slate-400 text-xs">₹</span>

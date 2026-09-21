@@ -236,24 +236,6 @@ router.post(
     try {
       const validAllocations = Array.isArray(allocations) ? allocations : [];
 
-      // Validate stock availability in main inventory for each allocation
-      for (const alloc of validAllocations) {
-        const qty = parseInt(alloc.allocatedQty, 10) || 0;
-        if (qty > 0) {
-          const inv = await prisma.inventory.findUnique({
-            where: { productId: alloc.productId },
-            include: { product: true },
-          });
-
-          if (!inv || inv.quantityOnHand < qty) {
-            res.status(400).json({
-              error: `Insufficient inventory for ${inv?.product.name || alloc.productId}. Available: ${inv?.quantityOnHand || 0}, Requested: ${qty}`,
-            });
-            return;
-          }
-        }
-      }
-
       // Execute in Prisma Transaction
       const result = await prisma.$transaction(async tx => {
         const newEvent = await tx.event.create({
@@ -270,13 +252,30 @@ router.post(
           const qty = parseInt(alloc.allocatedQty, 10) || 0;
           const price = parseFloat(alloc.priceAtEvent);
 
-          if (qty > 0 && !isNaN(price) && price >= 0) {
+          if (qty < 0) {
+            throw new Error(`Allocated quantity cannot be negative for product ${alloc.productId}.`);
+          }
+
+          if (qty > 0) {
+            const inv = await tx.inventory.findUnique({
+              where: { productId: alloc.productId },
+              include: { product: true },
+            });
+
+            if (!inv || inv.quantityOnHand < qty) {
+              const avail = inv ? inv.quantityOnHand : 0;
+              const prodName = inv?.product?.name || alloc.productId;
+              throw new Error(
+                `Inventory changed while you were creating this event. Only ${avail} units are currently available for ${prodName}. Please review the allocation.`
+              );
+            }
+
             await tx.eventAllocation.create({
               data: {
                 eventId: newEvent.id,
                 productId: alloc.productId,
                 allocatedQty: qty,
-                priceAtEvent: price,
+                priceAtEvent: !isNaN(price) && price >= 0 ? price : 0,
               },
             });
 
@@ -299,9 +298,9 @@ router.post(
       broadcast('inventory:updated', { action: 'event_allocated', eventId: result.id });
 
       res.status(201).json({ event: result });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Create event error:', error);
-      res.status(500).json({ error: 'Failed to create event' });
+      res.status(400).json({ error: error.message || 'Failed to create event' });
     }
   }
 );
@@ -385,6 +384,10 @@ router.put(
             const newPrice = parseFloat(alloc.priceAtEvent);
             const soldSoFar = salesByProduct[alloc.productId] || 0;
 
+            if (newQty < 0) {
+              throw new Error(`Allocated quantity cannot be negative for product ${alloc.productId}.`);
+            }
+
             if (newQty < soldSoFar) {
               throw new Error(
                 `Allocation cannot be lower than the quantity already sold. Product has already sold ${soldSoFar} unit(s).`
@@ -399,10 +402,15 @@ router.put(
               const diff = newQty - existingAlloc.allocatedQty;
               if (diff > 0) {
                 // Needs more from main inventory
-                const inv = await tx.inventory.findUnique({ where: { productId: alloc.productId } });
+                const inv = await tx.inventory.findUnique({
+                  where: { productId: alloc.productId },
+                  include: { product: true },
+                });
                 if (!inv || inv.quantityOnHand < diff) {
+                  const avail = inv ? inv.quantityOnHand : 0;
+                  const prodName = inv?.product?.name || alloc.productId;
                   throw new Error(
-                    `Insufficient available inventory to increase this event allocation. Only ${inv?.quantityOnHand || 0} unit(s) available in main inventory.`
+                    `Inventory changed while you were updating this event. Only ${avail} units are currently available in main inventory for ${prodName}. Please review the allocation.`
                   );
                 }
                 await tx.inventory.update({
@@ -435,10 +443,15 @@ router.put(
               });
             } else if (newQty > 0) {
               // Brand new allocation for this event
-              const inv = await tx.inventory.findUnique({ where: { productId: alloc.productId } });
+              const inv = await tx.inventory.findUnique({
+                where: { productId: alloc.productId },
+                include: { product: true },
+              });
               if (!inv || inv.quantityOnHand < newQty) {
+                const avail = inv ? inv.quantityOnHand : 0;
+                const prodName = inv?.product?.name || alloc.productId;
                 throw new Error(
-                  `Insufficient available inventory to increase this event allocation. Only ${inv?.quantityOnHand || 0} unit(s) available in main inventory.`
+                  `Inventory changed while you were updating this event. Only ${avail} units are currently available in main inventory for ${prodName}. Please review the allocation.`
                 );
               }
 
