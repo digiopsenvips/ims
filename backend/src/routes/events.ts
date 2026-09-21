@@ -344,11 +344,15 @@ router.put(
         return;
       }
 
-      const computedStatus = computeEventStatus(
-        parsedStart,
-        parsedEnd,
-        status ? (status.toUpperCase() as EventStatus) : existingEvent.status
-      );
+      // For ENDED/finalized events: do NOT automatically reopen or change status
+      const isAlreadyEnded = existingEvent.status === EventStatus.ENDED;
+      const computedStatus = isAlreadyEnded
+        ? EventStatus.ENDED
+        : computeEventStatus(
+            parsedStart,
+            parsedEnd,
+            status ? (status.toUpperCase() as EventStatus) : existingEvent.status
+          );
 
       // Group sales count by product for this event
       const salesByProduct: Record<string, number> = {};
@@ -383,7 +387,7 @@ router.put(
 
             if (newQty < soldSoFar) {
               throw new Error(
-                `Cannot reduce allocation for product ${alloc.productId} to ${newQty} because ${soldSoFar} units have already been sold at this event.`
+                `Allocation cannot be lower than the quantity already sold. Product has already sold ${soldSoFar} unit(s).`
               );
             }
 
@@ -398,38 +402,52 @@ router.put(
                 const inv = await tx.inventory.findUnique({ where: { productId: alloc.productId } });
                 if (!inv || inv.quantityOnHand < diff) {
                   throw new Error(
-                    `Insufficient stock in main inventory to increase allocation by ${diff} units.`
+                    `Insufficient available inventory to increase this event allocation. Only ${inv?.quantityOnHand || 0} unit(s) available in main inventory.`
                   );
                 }
                 await tx.inventory.update({
                   where: { productId: alloc.productId },
-                  data: { quantityOnHand: { decrement: diff } },
+                  data: {
+                    quantityOnHand: { decrement: diff },
+                    lastUpdated: new Date(),
+                  },
                 });
               } else if (diff < 0) {
-                // Return stock to main inventory
-                await tx.inventory.update({
-                  where: { productId: alloc.productId },
-                  data: { quantityOnHand: { increment: Math.abs(diff) } },
-                });
+                // Return stock to main inventory for active/upcoming events
+                // (for ended events, unsold stock was already returned to main inventory upon ending)
+                if (!isAlreadyEnded) {
+                  await tx.inventory.update({
+                    where: { productId: alloc.productId },
+                    data: {
+                      quantityOnHand: { increment: Math.abs(diff) },
+                      lastUpdated: new Date(),
+                    },
+                  });
+                }
               }
 
               await tx.eventAllocation.update({
                 where: { id: existingAlloc.id },
                 data: {
                   allocatedQty: newQty,
-                  priceAtEvent: !isNaN(newPrice) ? newPrice : existingAlloc.priceAtEvent,
+                  priceAtEvent: !isNaN(newPrice) && newPrice >= 0 ? newPrice : existingAlloc.priceAtEvent,
                 },
               });
             } else if (newQty > 0) {
               // Brand new allocation for this event
               const inv = await tx.inventory.findUnique({ where: { productId: alloc.productId } });
               if (!inv || inv.quantityOnHand < newQty) {
-                throw new Error(`Insufficient main stock for product ${alloc.productId}.`);
+                throw new Error(
+                  `Insufficient available inventory to increase this event allocation. Only ${inv?.quantityOnHand || 0} unit(s) available in main inventory.`
+                );
               }
 
               await tx.inventory.update({
                 where: { productId: alloc.productId },
-                data: { quantityOnHand: { decrement: newQty } },
+                data: {
+                  quantityOnHand: { decrement: newQty },
+                  lastUpdated: new Date(),
+                },
               });
 
               await tx.eventAllocation.create({
@@ -437,7 +455,7 @@ router.put(
                   eventId: id,
                   productId: alloc.productId,
                   allocatedQty: newQty,
-                  priceAtEvent: !isNaN(newPrice) ? newPrice : 0,
+                  priceAtEvent: !isNaN(newPrice) && newPrice >= 0 ? newPrice : 0,
                 },
               });
             }

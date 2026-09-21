@@ -23,7 +23,11 @@ interface AllocationInput {
   productName: string;
   projectName: string;
   availableStock: number;
+  initialAllocatedQty: number;
   allocatedQty: number;
+  soldQty: number;
+  remainingQty: number;
+  initialPriceAtEvent: number;
   priceAtEvent: number;
 }
 
@@ -83,6 +87,15 @@ export const EventsPage: React.FC = () => {
   const [eventStatusInput, setEventStatusInput] = useState<EventStatus>('ACTIVE');
   const [allocationsGrid, setAllocationsGrid] = useState<AllocationInput[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Edit Confirmation Modal State
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [pendingSavePayload, setPendingSavePayload] = useState<any>(null);
+  const [changesSummary, setChangesSummary] = useState<{
+    metadataChanges: string[];
+    allocationChanges: string[];
+    priceChanges: string[];
+  }>({ metadataChanges: [], allocationChanges: [], priceChanges: [] });
 
   // End Event Modal State
   const [endEventTarget, setEndEventTarget] = useState<AppEvent | null>(null);
@@ -200,14 +213,22 @@ export const EventsPage: React.FC = () => {
     setEventStatusInput('UPCOMING');
 
     // Build allocations grid with all products
-    const initialGrid: AllocationInput[] = products.map(p => ({
-      productId: p.id,
-      productName: p.name,
-      projectName: p.project?.name || '—',
-      availableStock: p.inventory ? p.inventory.quantityOnHand : 0,
-      allocatedQty: 0,
-      priceAtEvent: p.basePrice ? Number(p.basePrice) : 0,
-    }));
+    const initialGrid: AllocationInput[] = products.map(p => {
+      const basePrice = p.basePrice ? Number(p.basePrice) : 0;
+      const stock = p.inventory ? p.inventory.quantityOnHand : 0;
+      return {
+        productId: p.id,
+        productName: p.name,
+        projectName: p.project?.name || '—',
+        availableStock: stock,
+        initialAllocatedQty: 0,
+        allocatedQty: 0,
+        soldQty: 0,
+        remainingQty: 0,
+        initialPriceAtEvent: basePrice,
+        priceAtEvent: basePrice,
+      };
+    });
 
     setAllocationsGrid(initialGrid);
     setShowEventModal(true);
@@ -228,13 +249,27 @@ export const EventsPage: React.FC = () => {
     // Map existing allocations
     const grid: AllocationInput[] = products.map(p => {
       const existingAlloc = event.allocations.find(a => a.productId === p.id);
+      const allocatedQty = existingAlloc ? existingAlloc.allocatedQty : 0;
+      const soldQty = existingAlloc ? existingAlloc.soldQty : 0;
+      const priceAtEvent = existingAlloc
+        ? Number(existingAlloc.priceAtEvent)
+        : p.basePrice
+        ? Number(p.basePrice)
+        : 0;
+      const mainInventoryStock = p.inventory ? p.inventory.quantityOnHand : 0;
+      const availableStock = mainInventoryStock + allocatedQty;
+
       return {
         productId: p.id,
         productName: p.name,
         projectName: p.project?.name || '—',
-        availableStock: (p.inventory ? p.inventory.quantityOnHand : 0) + (existingAlloc ? existingAlloc.allocatedQty : 0),
-        allocatedQty: existingAlloc ? existingAlloc.allocatedQty : 0,
-        priceAtEvent: existingAlloc ? Number(existingAlloc.priceAtEvent) : p.basePrice ? Number(p.basePrice) : 0,
+        availableStock,
+        initialAllocatedQty: allocatedQty,
+        allocatedQty,
+        soldQty,
+        remainingQty: Math.max(0, allocatedQty - soldQty),
+        initialPriceAtEvent: priceAtEvent,
+        priceAtEvent,
       };
     });
 
@@ -250,6 +285,13 @@ export const EventsPage: React.FC = () => {
     setAllocationsGrid(prev =>
       prev.map(row => {
         if (row.productId !== productId) return row;
+        if (field === 'allocatedQty') {
+          return {
+            ...row,
+            allocatedQty: val,
+            remainingQty: Math.max(0, val - row.soldQty),
+          };
+        }
         return {
           ...row,
           [field]: val,
@@ -277,34 +319,92 @@ export const EventsPage: React.FC = () => {
       return;
     }
 
-    // Check allocations against available stock
+    // Check allocations against sold count and available stock
     for (const row of allocationsGrid) {
+      if (editingEventId && row.allocatedQty < row.soldQty) {
+        setStatusMessage({
+          type: 'error',
+          text: `Allocation cannot be lower than the quantity already sold. ${row.productName} has already sold ${row.soldQty} unit(s).`,
+        });
+        return;
+      }
       if (row.allocatedQty > row.availableStock) {
         setStatusMessage({
           type: 'error',
-          text: `Allocation for ${row.productName} (${row.allocatedQty}) exceeds available main stock (${row.availableStock}).`,
+          text: `Allocation for ${row.productName} (${row.allocatedQty}) exceeds available stock (${row.availableStock}).`,
         });
         return;
       }
     }
 
+    const payload = {
+      name: nameInput.trim(),
+      location: locationInput.trim(),
+      startDatetime,
+      endDatetime,
+      status: eventStatusInput,
+      allocations: allocationsGrid.map(a => ({
+        productId: a.productId,
+        allocatedQty: a.allocatedQty,
+        priceAtEvent: a.priceAtEvent,
+      })),
+    };
+
+    // If editing existing event, summarize changes and open confirmation modal
+    if (editingEventId) {
+      const targetEv = events.find(ev => ev.id === editingEventId);
+      const metaChanges: string[] = [];
+      const allocChanges: string[] = [];
+      const prcChanges: string[] = [];
+
+      if (targetEv) {
+        if (targetEv.name !== nameInput.trim()) {
+          metaChanges.push(`Name: "${targetEv.name}" → "${nameInput.trim()}"`);
+        }
+        if (targetEv.location !== locationInput.trim()) {
+          metaChanges.push(`Location: "${targetEv.location}" → "${locationInput.trim()}"`);
+        }
+        if (new Date(targetEv.startDatetime).getTime() !== new Date(startDatetime).getTime()) {
+          metaChanges.push(`Start Date/Time: ${formatISTDateTime(targetEv.startDatetime)} → ${formatISTDateTime(startDatetime)}`);
+        }
+        if (new Date(targetEv.endDatetime).getTime() !== new Date(endDatetime).getTime()) {
+          metaChanges.push(`End Date/Time: ${formatISTDateTime(targetEv.endDatetime)} → ${formatISTDateTime(endDatetime)}`);
+        }
+      }
+
+      for (const row of allocationsGrid) {
+        if (row.allocatedQty !== row.initialAllocatedQty) {
+          const diff = row.allocatedQty - row.initialAllocatedQty;
+          allocChanges.push(
+            `${row.productName}: Allocation changed from ${row.initialAllocatedQty} to ${row.allocatedQty} (${diff > 0 ? `+${diff} deducted from main inventory` : `${Math.abs(diff)} returned to main inventory`})`
+          );
+        }
+        if (Number(row.priceAtEvent) !== Number(row.initialPriceAtEvent)) {
+          prcChanges.push(
+            `${row.productName}: Price changed from ₹${Number(row.initialPriceAtEvent).toFixed(2)} to ₹${Number(row.priceAtEvent).toFixed(2)} (applies to future sales only; historical sales are preserved)`
+          );
+        }
+      }
+
+      setChangesSummary({
+        metadataChanges: metaChanges,
+        allocationChanges: allocChanges,
+        priceChanges: prcChanges,
+      });
+      setPendingSavePayload(payload);
+      setShowConfirmModal(true);
+      return;
+    }
+
+    // Creating new event
+    await executeSaveEvent(payload);
+  };
+
+  const executeSaveEvent = async (payload: any) => {
     setIsSubmitting(true);
     setStatusMessage(null);
 
     try {
-      const payload = {
-        name: nameInput,
-        location: locationInput,
-        startDatetime,
-        endDatetime,
-        status: eventStatusInput,
-        allocations: allocationsGrid.map(a => ({
-          productId: a.productId,
-          allocatedQty: a.allocatedQty,
-          priceAtEvent: a.priceAtEvent,
-        })),
-      };
-
       if (editingEventId) {
         await api.put(`/events/${editingEventId}`, payload);
         setStatusMessage({ type: 'success', text: `Event '${nameInput}' updated successfully.` });
@@ -313,8 +413,10 @@ export const EventsPage: React.FC = () => {
         setStatusMessage({ type: 'success', text: `Event '${nameInput}' created with stock allocations!` });
       }
 
+      setShowConfirmModal(false);
       setShowEventModal(false);
-      fetchEventsAndProducts();
+      setPendingSavePayload(null);
+      await fetchEventsAndProducts();
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message || 'Failed to save event' });
     } finally {
@@ -461,31 +563,32 @@ export const EventsPage: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {canEditEvents && !isEnded && (
-                        <>
-                          <button
-                            onClick={() => handleOpenEditModal(event)}
-                            className="px-3 py-1.5 text-xs font-semibold rounded border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-1 cursor-pointer"
-                          >
-                            <Edit className="w-3.5 h-3.5" />
-                            <span>Edit / Price</span>
-                          </button>
-
-                          <button
-                            onClick={() => setEndEventTarget(event)}
-                            className="px-3 py-1.5 text-xs font-semibold rounded bg-amber-50 border border-amber-200 text-amber-800 hover:bg-amber-100 transition-colors flex items-center gap-1 cursor-pointer"
-                            title="Close event and return unsold stock"
-                          >
-                            <PowerOff className="w-3.5 h-3.5" />
-                            <span>End Event</span>
-                          </button>
-                        </>
-                      )}
-
                       {isEnded && (
-                        <span className="text-xs font-semibold text-slate-400 px-3 py-1 bg-slate-50 border border-slate-200 rounded">
+                        <span className="text-xs font-semibold text-slate-500 px-3 py-1.5 bg-slate-100 border border-slate-200 rounded">
                           Finalized
                         </span>
+                      )}
+
+                      {canEditEvents && (
+                        <button
+                          onClick={() => handleOpenEditModal(event)}
+                          className="px-3 py-1.5 text-xs font-semibold rounded border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-1 cursor-pointer"
+                          title="Edit event details, allocations, and pricing"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                          <span>Edit</span>
+                        </button>
+                      )}
+
+                      {canEditEvents && !isEnded && isActive && (
+                        <button
+                          onClick={() => setEndEventTarget(event)}
+                          className="px-3 py-1.5 text-xs font-semibold rounded bg-amber-50 border border-amber-200 text-amber-800 hover:bg-amber-100 transition-colors flex items-center gap-1 cursor-pointer"
+                          title="Close event and return unsold stock"
+                        >
+                          <PowerOff className="w-3.5 h-3.5" />
+                          <span>End Event</span>
+                        </button>
                       )}
 
                       {canEditEvents && (
@@ -573,6 +676,16 @@ export const EventsPage: React.FC = () => {
             </div>
 
             <form onSubmit={handleSaveEvent} className="flex-1 overflow-y-auto py-4 space-y-4">
+              {/* Notice for Finalized Event */}
+              {editingEventId && events.find(e => e.id === editingEventId)?.status === 'ENDED' && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-800 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold">Finalized Event Notice:</span> This event has concluded and is marked as <strong>ENDED</strong>. Modifying details or allocations will not reopen the event. All historical sales and customer records remain strictly intact.
+                  </div>
+                </div>
+              )}
+
               {/* Event Metadata Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -663,7 +776,7 @@ export const EventsPage: React.FC = () => {
                     Product Allocations & Event-Specific Pricing
                   </h4>
                   <span className="text-[11px] text-slate-500">
-                    Allocations deduct from main inventory; returned when ended.
+                    Allocations deduct from main inventory; unsold units return when ended.
                   </span>
                 </div>
 
@@ -671,31 +784,26 @@ export const EventsPage: React.FC = () => {
                   <table className="w-full text-left text-xs">
                     <thead className="bg-slate-50 text-slate-600 font-semibold uppercase text-[10px]">
                       <tr>
-                        <th className="px-3 py-2.5">Auto ID</th>
-                        <th className="px-3 py-2.5">Product Name</th>
+                        <th className="px-3 py-2.5">Product</th>
                         <th className="px-3 py-2.5">Project</th>
-                        <th className="px-3 py-2.5 text-right">Available Stock</th>
-                        <th className="px-3 py-2.5 w-36 text-right">Quantity Allocated</th>
-                        <th className="px-3 py-2.5 w-36 text-right">Price at Event (₹)</th>
+                        <th className="px-3 py-2.5 w-36 text-right">Current Allocation</th>
+                        <th className="px-3 py-2.5 text-right">Sold</th>
+                        <th className="px-3 py-2.5 text-right">Remaining</th>
+                        <th className="px-3 py-2.5 w-36 text-right">Event Price (₹)</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {allocationsGrid.map(row => (
                         <tr key={row.productId} className="hover:bg-slate-50/70">
-                          <td className="px-3 py-2 font-mono font-semibold text-slate-800">
-                            {row.productId}
-                          </td>
                           <td className="px-3 py-2 font-medium text-slate-900">
-                            {row.productName}
+                            <div>{row.productName}</div>
+                            <span className="font-mono text-[10px] text-slate-400">{row.productId}</span>
                           </td>
                           <td className="px-3 py-2 text-slate-600">{row.projectName}</td>
-                          <td className="px-3 py-2 text-right font-medium text-slate-700">
-                            {row.availableStock}
-                          </td>
                           <td className="px-3 py-1.5 text-right">
                             <input
                               type="number"
-                              min={0}
+                              min={row.soldQty}
                               max={row.availableStock}
                               value={row.allocatedQty}
                               onChange={e =>
@@ -707,22 +815,36 @@ export const EventsPage: React.FC = () => {
                               }
                               className="w-24 text-right p-1.5 border border-slate-300 rounded font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
                             />
+                            {editingEventId && row.soldQty > 0 && (
+                              <div className="text-[10px] text-slate-400 mt-0.5">
+                                Min: {row.soldQty} (sold)
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-right font-semibold text-emerald-700">
+                            {row.soldQty}
+                          </td>
+                          <td className="px-3 py-2 text-right font-black text-slate-900">
+                            {row.remainingQty}
                           </td>
                           <td className="px-3 py-1.5 text-right">
-                            <input
-                              type="number"
-                              step="0.01"
-                              min={0}
-                              value={row.priceAtEvent}
-                              onChange={e =>
-                                handleAllocationChange(
-                                  row.productId,
-                                  'priceAtEvent',
-                                  parseFloat(e.target.value) || 0
-                                )
-                              }
-                              className="w-24 text-right p-1.5 border border-slate-300 rounded font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-                            />
+                            <div className="flex items-center justify-end gap-1">
+                              <span className="text-slate-400 text-xs">₹</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min={0}
+                                value={row.priceAtEvent}
+                                onChange={e =>
+                                  handleAllocationChange(
+                                    row.productId,
+                                    'priceAtEvent',
+                                    parseFloat(e.target.value) || 0
+                                  )
+                                }
+                                className="w-24 text-right p-1.5 border border-slate-300 rounded font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                              />
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -744,10 +866,119 @@ export const EventsPage: React.FC = () => {
                   disabled={isSubmitting}
                   className="px-5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md cursor-pointer shadow-sm"
                 >
-                  {isSubmitting ? 'Saving Event...' : 'Save & Allocate'}
+                  {isSubmitting ? 'Saving Event...' : editingEventId ? 'Save Changes' : 'Save & Allocate'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal for Edit Event */}
+      {showConfirmModal && pendingSavePayload && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-lg p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
+              <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                <Edit className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Confirm Event Changes
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Please review the modifications for '{nameInput}'
+                </p>
+              </div>
+            </div>
+
+            {/* Finalized Event Notice */}
+            {events.find(e => e.id === editingEventId)?.status === 'ENDED' && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-800 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong>Finalized Event Notice:</strong> This event is concluded. Updating it will <strong>NOT</strong> reactivate or reopen the event; its status will strictly remain <strong>ENDED</strong>.
+                </div>
+              </div>
+            )}
+
+            {/* Changes Breakdown */}
+            <div className="max-h-60 overflow-y-auto space-y-3 text-xs bg-slate-50 p-3 rounded-lg border border-slate-200">
+              {changesSummary.metadataChanges.length === 0 &&
+              changesSummary.allocationChanges.length === 0 &&
+              changesSummary.priceChanges.length === 0 ? (
+                <p className="text-slate-500 italic">No field modifications detected.</p>
+              ) : (
+                <>
+                  {changesSummary.metadataChanges.length > 0 && (
+                    <div>
+                      <div className="font-semibold text-slate-700 uppercase text-[10px] tracking-wider mb-1">
+                        Event Details Changes:
+                      </div>
+                      <ul className="list-disc pl-4 space-y-0.5 text-slate-800">
+                        {changesSummary.metadataChanges.map((c, i) => (
+                          <li key={i}>{c}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {changesSummary.allocationChanges.length > 0 && (
+                    <div>
+                      <div className="font-semibold text-slate-700 uppercase text-[10px] tracking-wider mb-1">
+                        Inventory & Allocation Adjustments:
+                      </div>
+                      <ul className="list-disc pl-4 space-y-0.5 text-slate-800">
+                        {changesSummary.allocationChanges.map((c, i) => (
+                          <li key={i}>{c}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {changesSummary.priceChanges.length > 0 && (
+                    <div>
+                      <div className="font-semibold text-slate-700 uppercase text-[10px] tracking-wider mb-1">
+                        Event Pricing Adjustments:
+                      </div>
+                      <ul className="list-disc pl-4 space-y-0.5 text-slate-800">
+                        {changesSummary.priceChanges.map((c, i) => (
+                          <li key={i}>{c}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Historical Data Protection Guarantee */}
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-md text-xs text-emerald-800 flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div>
+                <strong>Historical Data Protected:</strong> All previous sales, customer records, payment details, and past transaction unit prices will remain completely untouched.
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                disabled={isSubmitting}
+                className="px-4 py-2 border border-slate-300 text-slate-700 font-semibold text-xs rounded-md hover:bg-slate-50 transition-colors cursor-pointer"
+              >
+                Back to Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => executeSaveEvent(pendingSavePayload)}
+                disabled={isSubmitting}
+                className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-md shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isSubmitting ? 'Saving Changes...' : 'Confirm & Save Changes'}
+              </button>
+            </div>
           </div>
         </div>
       )}
