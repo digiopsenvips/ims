@@ -96,21 +96,8 @@ router.get(
         ];
         const num = parseInt(term.replace(/^#/, ''), 10);
         if (!isNaN(num)) {
+          searchConditions.push({ receiptNumber: num });
           searchConditions.push({ id: num });
-          try {
-            const rankedMatch: Array<{ id: number }> = await prisma.$queryRaw`
-              WITH ranked_sales AS (
-                SELECT id, ROW_NUMBER() OVER (ORDER BY sale_time ASC, created_at ASC, id ASC)::int as serial_number
-                FROM sales
-              )
-              SELECT id FROM ranked_sales WHERE serial_number = ${num}
-            `;
-            if (rankedMatch && rankedMatch.length > 0) {
-              searchConditions.push({ id: rankedMatch[0].id });
-            }
-          } catch (e) {
-            // Ignore search ranking error if raw query fails
-          }
         }
         whereClause.AND = whereClause.AND ? [...whereClause.AND, { OR: searchConditions }] : [{ OR: searchConditions }];
       }
@@ -121,10 +108,10 @@ router.get(
       const skip = isAll ? undefined : (page - 1) * pageSize;
       const take = isAll ? undefined : pageSize;
 
-      // Deterministic reverse chronological ordering: NEWEST first (highest S.No. is newest sale)
+      // Deterministic reverse chronological ordering: NEWEST first (highest canonical receiptNumber is newest sale)
       const orderBy = [
+        { receiptNumber: 'desc' as const },
         { saleTime: 'desc' as const },
-        { createdAt: 'desc' as const },
         { id: 'desc' as const },
       ];
 
@@ -197,29 +184,9 @@ router.get(
         }),
       ]);
 
-      // Calculate each returned sale's global chronological serial number
-      const rankMap = new Map<number, number>();
-      if (sales.length > 0) {
-        try {
-          const saleIds = sales.map(s => s.id);
-          const rankedRows: Array<{ id: number; serial_number: number }> = await prisma.$queryRaw`
-            WITH ranked_sales AS (
-              SELECT id, ROW_NUMBER() OVER (ORDER BY sale_time ASC, created_at ASC, id ASC)::int as serial_number
-              FROM sales
-            )
-            SELECT id, serial_number FROM ranked_sales WHERE id IN (${Prisma.join(saleIds)})
-          `;
-          for (const row of rankedRows) {
-            rankMap.set(row.id, Number(row.serial_number));
-          }
-        } catch (rankErr) {
-          console.error('Failed to query sales rank CTE:', rankErr);
-        }
-      }
-
-      // Format and sanitize for permissions
-      const formatted = sales.map((s, index) => {
-        const serialNumber = rankMap.get(s.id) ?? Math.max(1, totalRecords - ((page - 1) * pageSize) - index);
+      // Format and sanitize for permissions using canonical stored receiptNumber
+      const formatted = sales.map((s) => {
+        const canonicalReceiptNumber = s.receiptNumber ?? s.id;
 
         // Normalize items array
         const rawItems = (s.items && s.items.length > 0)
@@ -255,7 +222,8 @@ router.get(
 
         return {
           id: s.id, // Internal database ID
-          serialNumber, // Global chronological S.No. (1 = oldest sale, highest = newest)
+          receiptNumber: canonicalReceiptNumber, // Canonical sequential receipt number (#1, #2, #3...)
+          serialNumber: canonicalReceiptNumber, // Backward compatibility alias
           clientTxId: s.clientTxId,
           eventId: s.eventId,
           eventName: s.event.name,
@@ -532,8 +500,15 @@ router.post(
           }
         }
 
+        // Atomically allocate next canonical sequential receipt number from Postgres sequence
+        const [{ nextVal }] = await tx.$queryRaw<[{ nextVal: bigint | number }]>`
+          SELECT nextval('receipt_number_seq')::bigint as "nextVal"
+        `;
+        const receiptNumber = Number(nextVal);
+
         return await tx.sale.create({
           data: {
+            receiptNumber,
             clientTxId: clientTxId ? String(clientTxId) : null,
             eventId,
             memberId: req.user!.id,
@@ -573,6 +548,8 @@ router.post(
       // WebSocket broadcasts
       broadcast('sale:created', {
         id: newSale.id,
+        receiptNumber: newSale.receiptNumber,
+        serialNumber: newSale.receiptNumber,
         eventId: newSale.eventId,
         eventName: newSale.event.name,
         totalAmount: Number(newSale.totalAmount),
@@ -594,6 +571,8 @@ router.post(
 
       const formatted = {
         id: newSale.id,
+        receiptNumber: newSale.receiptNumber,
+        serialNumber: newSale.receiptNumber,
         clientTxId: newSale.clientTxId,
         eventId: newSale.eventId,
         eventName: newSale.event.name,
@@ -795,9 +774,16 @@ router.post(
           resolvedUpiAmount = grandTotal;
         }
 
-        // 4. Create single transaction record with items
+        // 4. Atomically allocate next canonical sequential receipt number from Postgres sequence
+        const [{ nextVal }] = await prisma.$queryRaw<[{ nextVal: bigint | number }]>`
+          SELECT nextval('receipt_number_seq')::bigint as "nextVal"
+        `;
+        const receiptNumber = Number(nextVal);
+
+        // Create single transaction record with items
         const created = await prisma.sale.create({
           data: {
+            receiptNumber,
             clientTxId: clientTxId ? String(clientTxId) : null,
             eventId,
             memberId: req.user!.id,
@@ -823,16 +809,23 @@ router.post(
         });
 
         syncedCount++;
-        results.push({ clientTxId, status: 'success', saleId: created.id });
+        results.push({ clientTxId, status: 'success', saleId: created.id, receiptNumber: created.receiptNumber });
 
         broadcast('sale:created', {
           id: created.id,
+          receiptNumber: created.receiptNumber,
+          serialNumber: created.receiptNumber,
           eventId: created.eventId,
+          eventName: event.name,
           totalAmount: Number(created.totalAmount),
           paymentMethod: created.paymentMethod,
           cashAmount: Number(created.cashAmount ?? resolvedCashAmount),
           upiAmount: Number(created.upiAmount ?? resolvedUpiAmount),
+          memberName: req.user!.name,
+          memberUsername: req.user!.username,
           saleTime: created.saleTime,
+          itemsCount: validatedItems.length,
+          totalUnits: validatedItems.reduce((sum, i) => sum + i.quantity, 0),
         });
       }
 
@@ -852,14 +845,22 @@ router.post(
   }
 );
 
-// DELETE /api/sales/purge-all: Purge all sales records (DEVELOPER ONLY)
+// DELETE /api/sales/purge-all: Purge all sales records and reset canonical receipt sequence (DEVELOPER ONLY)
 router.delete(
   '/purge-all',
   authenticateToken,
   requireRoles(Role.DEVELOPER),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
-      const { count } = await prisma.sale.deleteMany({});
+      const { count } = await prisma.$transaction(async tx => {
+        await tx.saleItem.deleteMany({});
+        const deleted = await tx.sale.deleteMany({});
+        // Reset canonical receipt sequence and sales ID sequence to 1
+        await tx.$executeRawUnsafe(`ALTER SEQUENCE receipt_number_seq RESTART WITH 1;`);
+        await tx.$executeRawUnsafe(`ALTER SEQUENCE sales_id_seq RESTART WITH 1;`);
+        return deleted;
+      });
+
       broadcast('inventory:updated', { action: 'sales_purged', count });
       res.json({ message: `Successfully deleted all ${count} sales records. Database is ready for actual project data.`, count });
     } catch (error) {
@@ -1022,6 +1023,8 @@ router.put(
 
       const formatted = {
         id: updated.id,
+        receiptNumber: updated.receiptNumber,
+        serialNumber: updated.receiptNumber,
         clientTxId: updated.clientTxId,
         eventId: updated.eventId,
         eventName: updated.event.name,

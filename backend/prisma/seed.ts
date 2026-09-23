@@ -18,7 +18,15 @@ async function main() {
   console.log('🌱 Starting database seed...');
 
   // 1. Clean existing records in reverse dependency order
+  await prisma.saleItem.deleteMany();
   await prisma.sale.deleteMany();
+  try {
+    await prisma.$executeRawUnsafe(`CREATE SEQUENCE IF NOT EXISTS receipt_number_seq START WITH 1;`);
+    await prisma.$executeRawUnsafe(`ALTER SEQUENCE receipt_number_seq RESTART WITH 1;`);
+    await prisma.$executeRawUnsafe(`ALTER SEQUENCE sales_id_seq RESTART WITH 1;`);
+  } catch (seqErr) {
+    // Ignore sequence error if DB doesn't support
+  }
   await prisma.eventAllocation.deleteMany();
   await prisma.event.deleteMany();
   await prisma.inventory.deleteMany();
@@ -312,6 +320,7 @@ async function main() {
   // 9. Sample Sales
   await prisma.sale.create({
     data: {
+      receiptNumber: 1,
       eventId: sampleEvent.id,
       productId: tah1.id,
       memberId: memberAarav.id,
@@ -327,6 +336,7 @@ async function main() {
 
   await prisma.sale.create({
     data: {
+      receiptNumber: 2,
       eventId: sampleEvent.id,
       productId: upc1.id,
       memberId: memberDiya.id,
@@ -339,6 +349,12 @@ async function main() {
       saleTime: new Date(Date.now() - 3600 * 1000)
     }
   });
+
+  try {
+    await prisma.$executeRawUnsafe(`SELECT setval('receipt_number_seq', 3, false);`);
+  } catch (seqErr) {
+    // Ignore sequence error if DB doesn't support
+  }
 
   console.log('💰 Seeded sample completed sales');
   console.log('✅ Seed completed successfully!');

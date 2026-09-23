@@ -544,7 +544,7 @@ export const DashboardPage: React.FC = () => {
                 {sales.slice(0, 8).map(sale => (
                   <tr key={sale.id} className="hover:bg-slate-50/70 transition-colors">
                     <td className="px-5 py-3.5 font-mono font-bold text-slate-900">
-                      #{sale.id}
+                      #{sale.receiptNumber ?? sale.id}
                     </td>
                     <td className="px-5 py-3.5 font-semibold text-slate-900">
                       {sale.productName}

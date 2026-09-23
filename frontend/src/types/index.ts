@@ -97,6 +97,7 @@ export interface SaleItem {
 
 export interface Sale {
   id: number; // Internal database ID
+  receiptNumber?: number; // Canonical sequential receipt number (#1, #2, #3...)
   serialNumber?: number; // Global chronological S.No. (1 = oldest transaction)
   clientTxId?: string | null;
   eventId: string;
@@ -156,6 +157,7 @@ export interface QueuedSaleItem {
 
 export interface QueuedTransaction {
   clientTxId: string;
+  receiptNumber?: number;
   eventId: string;
   eventName?: string;
   productId?: string;

@@ -324,8 +324,9 @@ export const SalesManagementPage: React.FC = () => {
         setSales(prev => prev.map(s => (s.id === editingSale.id ? { ...s, ...res.sale } : s)));
       }
       await fetchSalesData();
+      const receiptLabel = editingSale.receiptNumber ? `#${editingSale.receiptNumber}` : `#${editingSale.id}`;
       setEditingSale(null);
-      setActionMessage(`Sale (DB ID: #${editingSale.id}) updated successfully!`);
+      setActionMessage(`Sale (${receiptLabel}) updated successfully!`);
       setTimeout(() => setActionMessage(null), 3500);
     } catch (err: any) {
       alert(err.message || 'Failed to update sale record');
@@ -334,13 +335,14 @@ export const SalesManagementPage: React.FC = () => {
     }
   };
 
-  const handleDeleteSale = async (id: number) => {
-    if (!window.confirm(`Are you sure you want to delete Sale (DB ID: #${id})? This will permanently remove this transaction.`)) {
+  const handleDeleteSale = async (sale: Sale) => {
+    const receiptLabel = sale.receiptNumber ? `#${sale.receiptNumber}` : `#${sale.id}`;
+    if (!window.confirm(`Are you sure you want to delete Sale (${receiptLabel})? This will permanently remove this transaction.`)) {
       return;
     }
     try {
-      await api.delete(`/sales/${id}`);
-      setActionMessage(`Sale (DB ID: #${id}) deleted successfully!`);
+      await api.delete(`/sales/${sale.id}`);
+      setActionMessage(`Sale (${receiptLabel}) deleted successfully!`);
       await fetchSalesData();
       setTimeout(() => setActionMessage(null), 3500);
     } catch (err: any) {
@@ -354,7 +356,7 @@ export const SalesManagementPage: React.FC = () => {
       const res = await api.delete('/sales/purge-all');
       setSales([]);
       setShowClearModal(false);
-      setActionMessage(res?.message || 'All sales records cleared successfully!');
+      setActionMessage(res?.message || 'All sales records cleared successfully! Receipt counter reset to #1.');
       updateUrlState({ page: 1 });
       setTimeout(() => setActionMessage(null), 4000);
     } catch (err: any) {
@@ -364,7 +366,7 @@ export const SalesManagementPage: React.FC = () => {
     }
   };
 
-  // Export CSV Handler (fetches ALL matching records with chronological S.No.)
+  // Export CSV Handler (fetches ALL matching records with canonical Receipt No.)
   const handleExportCSV = async () => {
     if (!canExport || totalRecords === 0) return;
 
@@ -385,15 +387,16 @@ export const SalesManagementPage: React.FC = () => {
       const exportList: Sale[] = Array.isArray(res?.sales) ? res.sales : Array.isArray(res?.data) ? res.data : sales;
 
       const headers = [
+        'Receipt ID',
         'S.No.',
         'Sale ID (DB)',
         'Event ID',
         'Event Name',
-        'Project',
+        'Project Name',
         'Product ID',
         'Product Name',
-        'Member Name',
-        'Quantity',
+        'Sales Member Name',
+        'Items Purchased',
         ...(canViewRevenue ? ['Unit Price (INR)', 'Total Amount (INR)'] : []),
         'Payment Method',
         ...(canViewPII ? ['Customer Name', 'Customer Phone'] : []),
@@ -401,6 +404,7 @@ export const SalesManagementPage: React.FC = () => {
       ];
 
       const rows = exportList.map((s, idx) => [
+        s.receiptNumber ? `#${s.receiptNumber}` : `#${s.id}`,
         s.serialNumber ?? (exportList.length - idx),
         s.id,
         s.eventId,
@@ -610,6 +614,7 @@ export const SalesManagementPage: React.FC = () => {
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold uppercase tracking-wider text-[10px]">
               <tr>
+                <th className="px-4 py-3">Receipt ID</th>
                 <th className="px-4 py-3">S.No.</th>
                 <th className="px-4 py-3">Project Name</th>
                 <th className="px-4 py-3">Product Name</th>
@@ -627,7 +632,7 @@ export const SalesManagementPage: React.FC = () => {
               {isLoading ? (
                 <tr>
                   <td
-                    colSpan={canViewRevenue ? (isDeveloper ? 11 : 10) : (isDeveloper ? 10 : 9)}
+                    colSpan={canViewRevenue ? (isDeveloper ? 12 : 11) : (isDeveloper ? 11 : 10)}
                     className="px-4 py-12 text-center text-slate-400 text-xs"
                   >
                     <Loader2 className="w-5 h-5 mx-auto mb-2 animate-spin text-slate-400" />
@@ -637,7 +642,7 @@ export const SalesManagementPage: React.FC = () => {
               ) : sales.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={canViewRevenue ? (isDeveloper ? 11 : 10) : (isDeveloper ? 10 : 9)}
+                    colSpan={canViewRevenue ? (isDeveloper ? 12 : 11) : (isDeveloper ? 11 : 10)}
                     className="px-4 py-8 text-center text-slate-400 text-xs"
                   >
                     No matching sales records found.
@@ -645,13 +650,17 @@ export const SalesManagementPage: React.FC = () => {
                 </tr>
               ) : (
                 sales.map((sale, index) => {
-                  // Chronological S.No.: 1 = oldest sale in ledger, highest = newest sale
-                  const displaySerial = sale.serialNumber ?? Math.max(1, totalRecords - ((currentPage - 1) * pageSize) - index);
+                  // Canonical Receipt Number: #1, #2, #3...
+                  const displayReceipt = sale.receiptNumber ?? sale.id;
+                  const displaySNo = sale.serialNumber ?? Math.max(1, totalRecords - ((currentPage - 1) * pageSize) - index);
 
                   return (
                     <tr key={sale.id} className="hover:bg-slate-50/50">
                       <td className="px-4 py-3 font-mono font-bold text-slate-900">
-                        {displaySerial}
+                        #{displayReceipt}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-slate-500 font-medium">
+                        {displaySNo}
                       </td>
                       <td className="px-4 py-3 text-slate-700">
                         <div className="flex flex-wrap gap-1">
@@ -759,7 +768,7 @@ export const SalesManagementPage: React.FC = () => {
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleDeleteSale(sale.id)}
+                              onClick={() => handleDeleteSale(sale)}
                               title="Delete Sale Record"
                               className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
                             >

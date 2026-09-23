@@ -133,7 +133,8 @@ model EventAllocation {
 }
 
 model Sale {
-  id                   Int           @id @default(autoincrement()) // Serial No.
+  id                   Int           @id @default(autoincrement()) // Internal DB ID
+  receiptNumber        Int           @unique @map("receipt_number") // Canonical Sequential Receipt No. (#1, #2, #3...)
   clientTxId           String?       @unique @map("client_tx_id") // For offline sync idempotency
   eventId              String        @map("event_id")
   memberId             String?       @map("member_id")
@@ -162,6 +163,7 @@ model Sale {
   @@index([eventId])
   @@index([saleTime])
   @@index([memberId])
+  @@index([receiptNumber])
   @@map("sales")
 }
 

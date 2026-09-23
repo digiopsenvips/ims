@@ -27,16 +27,12 @@ import {
   Zap,
 } from 'lucide-react';
 
-const generateBillNumber = () =>
-  `BILL-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
-
 export const MemberSalePortalPage: React.FC = () => {
   const { user } = useAuth();
   const { socket } = useSocket();
 
   const [events, setEvents] = useState<AppEvent[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string>('');
-  const [billNumber, setBillNumber] = useState<string>(generateBillNumber());
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('UPI');
   const [splitCash, setSplitCash] = useState<string>('');
@@ -57,6 +53,7 @@ export const MemberSalePortalPage: React.FC = () => {
   // Completed bill receipt notification & modal state
   const [lastCompletedBill, setLastCompletedBill] = useState<{
     billNo: string;
+    receiptNumber?: number;
     customerName: string;
     customerPhone: string;
     items: CartItem[];
@@ -400,7 +397,6 @@ export const MemberSalePortalPage: React.FC = () => {
     setSplitUpi('');
     setCustomerName('');
     setCustomerPhone('');
-    setBillNumber(generateBillNumber());
     setErrorMessage(null);
   };
 
@@ -508,7 +504,7 @@ export const MemberSalePortalPage: React.FC = () => {
       };
 
       // Record through SyncManager (writes all items to IndexedDB and triggers batch sync)
-      const { syncedImmediately } = await syncManager.recordOrder(orderPayload);
+      const { syncedImmediately, receiptNumber, saleId } = await syncManager.recordOrder(orderPayload);
 
       // Optimistically decrement local remaining count in events
       if (currentEvent) {
@@ -531,9 +527,16 @@ export const MemberSalePortalPage: React.FC = () => {
         );
       }
 
-      // Fast success state: record completed bill for receipt/confirmation
+      const canonicalReceiptLabel = receiptNumber
+        ? `#${receiptNumber}`
+        : saleId
+        ? `#${saleId}`
+        : 'Confirmed';
+
+      // Fast success state: record completed bill with canonical receipt number
       setLastCompletedBill({
-        billNo: billNumber,
+        billNo: canonicalReceiptLabel,
+        receiptNumber,
         customerName: customerName.trim() || 'Walk-in Customer',
         customerPhone: customerPhone.trim() || '',
         items: [...cart],
@@ -553,7 +556,6 @@ export const MemberSalePortalPage: React.FC = () => {
       setCustomerName('');
       setCustomerPhone('');
       setShowCustomerDetails(false);
-      setBillNumber(generateBillNumber());
     } catch (err: any) {
       setErrorMessage(err.message || 'Failed to record bill');
     } finally {
@@ -1009,8 +1011,8 @@ export const MemberSalePortalPage: React.FC = () => {
                     <h2 className="text-sm font-black tracking-tight text-slate-900 uppercase">
                       Current Bill
                     </h2>
-                    <span className="font-mono text-[10px] text-slate-400">
-                      #{billNumber.slice(-4)}
+                    <span className="font-mono text-[10px] text-slate-400 font-semibold uppercase">
+                      POS Terminal
                     </span>
                   </div>
 

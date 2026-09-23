@@ -114,7 +114,7 @@ class SyncManager {
       unitPrice: number;
       totalAmount: number;
     }>;
-  }): Promise<{ orderId: string; syncedImmediately: boolean; count: number }> {
+  }): Promise<{ orderId: string; syncedImmediately: boolean; count: number; saleId?: number; receiptNumber?: number }> {
     const orderId = crypto.randomUUID();
     const totalUnits = orderData.items.reduce((sum, i) => sum + i.quantity, 0);
     const totalAmount = orderData.items.reduce((sum, i) => sum + i.totalAmount, 0);
@@ -148,16 +148,19 @@ class SyncManager {
 
     // 2. If online, attempt instant sync for the entire transaction
     let syncedImmediately = false;
+    let syncedSaleId: number | undefined;
+    let syncedReceiptNumber: number | undefined;
+
     if (this.isOnline) {
       try {
         const res = await api.post('/sales/sync', { transactions: [queuedTransaction] });
         if (res && Array.isArray(res.results)) {
-          const successIds = res.results
-            .filter((r: any) => r.status === 'success' || r.status === 'already_synced')
-            .map((r: any) => r.clientTxId);
-          if (successIds.includes(orderId)) {
+          const match = res.results.find((r: any) => r.clientTxId === orderId);
+          if (match && (match.status === 'success' || match.status === 'already_synced')) {
             await removeSyncedSales([orderId]);
             syncedImmediately = true;
+            syncedSaleId = match.saleId;
+            syncedReceiptNumber = match.receiptNumber;
             await this.refreshCount();
           }
         }
@@ -166,7 +169,13 @@ class SyncManager {
       }
     }
 
-    return { orderId, syncedImmediately, count: 1 };
+    return {
+      orderId,
+      syncedImmediately,
+      count: 1,
+      saleId: syncedSaleId,
+      receiptNumber: syncedReceiptNumber,
+    };
   }
 
   public async triggerSync(): Promise<void> {
