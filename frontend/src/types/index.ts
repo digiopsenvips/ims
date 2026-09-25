@@ -90,6 +90,23 @@ export interface AppEvent {
   totalRevenue: number;
   allocations: EventAllocation[];
   createdAt: string;
+  gamesCount?: number;
+  gamesPlayed?: number;
+  gameRevenue?: number;
+  productsSoldCount?: number;
+  games?: any[];
+  sales?: any[];
+  summary?: {
+    totalRevenue: number;
+    productRevenue: number;
+    gameRevenue: number;
+    totalAllocatedUnits: number;
+    totalSoldUnits: number;
+    totalRemainingUnits: number;
+    totalTransactions: number;
+    totalSalesCount: number;
+    totalGamesPlayed: number;
+  };
 }
 
 export interface SaleItem {

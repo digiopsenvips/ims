@@ -59,20 +59,26 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
       ],
     },
     {
-      title: 'Stall Operations',
+      title: 'Stall',
       items: [
         {
-          label: 'Play Game',
-          to: '/games/play',
-          icon: Gamepad2,
-          badge: 'PLAY',
-          show: true,
+          label: 'Events',
+          to: '/events',
+          icon: Calendar,
+          show: isDeveloper || isAdmin || hasPermission('view_event_breakdown') || hasPermission('edit_events') || isHead || isMember,
         },
         {
           label: 'Games',
           to: '/games',
           icon: Dices,
           show: isDeveloper || isAdmin || isHead,
+        },
+        {
+          label: 'Play Game',
+          to: '/games/play',
+          icon: Gamepad2,
+          badge: 'PLAY',
+          show: true,
         },
         {
           label: 'Game Sessions',
@@ -83,25 +89,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
       ],
     },
     {
-      title: 'Operations',
+      title: 'Inventory',
       items: [
-        {
-          label: 'Inventory',
-          to: '/inventory',
-          icon: Boxes,
-          show: isDeveloper || isAdmin || hasPermission('view_inventory'),
-        },
-        {
-          label: 'Events',
-          to: '/events',
-          icon: Calendar,
-          show: isDeveloper || isAdmin || hasPermission('view_event_breakdown') || hasPermission('edit_events'),
-        },
         {
           label: 'Products',
           to: '/projects-products',
           icon: FolderTree,
           show: isDeveloper || isAdmin,
+        },
+        {
+          label: 'Inventory',
+          to: '/inventory',
+          icon: Boxes,
+          show: isDeveloper || isAdmin || hasPermission('view_inventory'),
         },
       ],
     },

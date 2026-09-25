@@ -22,6 +22,8 @@ router.get(
       // Reconcile any expired events first so status is 100% authoritative
       await reconcileAllExpiredEvents();
 
+      const activeGamesCount = await prisma.game.count({ where: { status: 'ACTIVE' } });
+
       const events = await prisma.event.findMany({
         where: { isDeleted: false },
         include: {
@@ -32,12 +34,19 @@ router.get(
               },
             },
           },
+          games: {
+            select: { id: true, name: true, status: true, entryFee: true },
+          },
+          gameSessions: {
+            select: { id: true, entryFee: true, result: true, rewardQuantity: true },
+          },
           sales: {
             select: {
               id: true,
               productId: true,
               quantity: true,
               totalAmount: true,
+              transactionType: true,
               items: {
                 select: {
                   productId: true,
@@ -94,8 +103,12 @@ router.get(
         });
 
         const totalAllocated = enrichedAllocations.reduce((sum, a) => sum + a.allocatedQty, 0);
-
         const computedStatus = computeEventStatus(event.startDatetime, event.endDatetime, event.status);
+
+        const gamesCount = event.games.length > 0 ? event.games.length : activeGamesCount;
+        const gamesPlayed = event.gameSessions.length;
+        const gameRevenue = event.gameSessions.reduce((sum, gs) => sum + Number(gs.entryFee), 0);
+        const productsSoldCount = Object.keys(salesByProduct).length;
 
         return {
           id: event.id,
@@ -109,6 +122,10 @@ router.get(
           totalSold,
           totalRemaining: Math.max(0, totalAllocated - totalSold),
           totalRevenue,
+          gamesCount,
+          gamesPlayed,
+          gameRevenue,
+          productsSoldCount,
           allocations: enrichedAllocations,
           createdAt: event.createdAt,
         };
@@ -122,7 +139,7 @@ router.get(
   }
 );
 
-// GET /api/events/:id: Single event details
+// GET /api/events/:id: Single event details with games, allocations, and sales
 router.get(
   '/:id',
   authenticateToken,
@@ -133,26 +150,59 @@ router.get(
       // Reconcile status/inventory if expired
       await reconcileSingleEvent(id);
 
-      const event = await prisma.event.findUnique({
-        where: { id },
-        include: {
-          allocations: {
-            include: {
-              product: {
-                include: { project: true },
+      const [event, games] = await Promise.all([
+        prisma.event.findUnique({
+          where: { id },
+          include: {
+            allocations: {
+              include: {
+                product: {
+                  include: { project: true, inventory: true },
+                },
               },
             },
-          },
-          sales: {
-            include: {
-              items: true,
-              product: true,
-              member: { select: { id: true, name: true } },
+            sales: {
+              include: {
+                items: { include: { product: true } },
+                product: true,
+                game: true,
+                gameSession: {
+                  include: {
+                    rewardProduct: true,
+                  },
+                },
+                member: { select: { id: true, name: true, username: true } },
+              },
+              orderBy: { saleTime: 'desc' },
             },
-            orderBy: { saleTime: 'desc' },
+            gameSessions: {
+              include: {
+                game: true,
+                rewardProduct: true,
+              },
+              orderBy: { createdAt: 'desc' },
+            },
           },
-        },
-      });
+        }),
+        prisma.game.findMany({
+          where: {
+            OR: [
+              { eventId: id },
+              { eventId: null, status: 'ACTIVE' },
+            ],
+          },
+          include: {
+            project: true,
+            winRewardProduct: { include: { inventory: true } },
+            loseRewardProduct: { include: { inventory: true } },
+            sessions: {
+              where: { eventId: id },
+              select: { id: true, entryFee: true, result: true, rewardQuantity: true },
+            },
+          },
+          orderBy: { name: 'asc' },
+        }),
+      ]);
 
       if (!event || event.isDeleted) {
         res.status(404).json({ error: 'Event not found' });
@@ -160,19 +210,33 @@ router.get(
       }
 
       // Group sales by product
-      const salesByProduct: Record<string, number> = {};
+      const salesByProduct: Record<string, { count: number; revenue: number }> = {};
+      let totalSalesRevenue = 0;
+      let totalSold = 0;
+
       for (const s of event.sales) {
+        totalSalesRevenue += Number(s.totalAmount);
         if (s.items && s.items.length > 0) {
           for (const item of s.items) {
-            salesByProduct[item.productId] = (salesByProduct[item.productId] || 0) + item.quantity;
+            if (!salesByProduct[item.productId]) {
+              salesByProduct[item.productId] = { count: 0, revenue: 0 };
+            }
+            salesByProduct[item.productId].count += item.quantity;
+            salesByProduct[item.productId].revenue += Number(item.lineTotal);
+            totalSold += item.quantity;
           }
-        } else if (s.productId) {
-          salesByProduct[s.productId] = (salesByProduct[s.productId] || 0) + (s.quantity || 1);
+        } else if (s.productId && s.quantity) {
+          if (!salesByProduct[s.productId]) {
+            salesByProduct[s.productId] = { count: 0, revenue: 0 };
+          }
+          salesByProduct[s.productId].count += s.quantity;
+          salesByProduct[s.productId].revenue += Number(s.totalAmount);
+          totalSold += s.quantity;
         }
       }
 
       const enrichedAllocations = event.allocations.map(alloc => {
-        const sold = salesByProduct[alloc.productId] || 0;
+        const sold = salesByProduct[alloc.productId]?.count || 0;
         return {
           id: alloc.id,
           productId: alloc.productId,
@@ -182,16 +246,127 @@ router.get(
           soldQty: sold,
           remainingQty: Math.max(0, alloc.allocatedQty - sold),
           priceAtEvent: alloc.priceAtEvent,
+          availableStock: alloc.product.inventory?.quantityOnHand ?? 0,
         };
       });
 
+      const enrichedGames = games.map(g => {
+        const plays = g.sessions.length;
+        const rev = g.sessions.reduce((sum, s) => sum + Number(s.entryFee), 0);
+        const wins = g.sessions.filter(s => s.result === 'WIN').length;
+        const losses = g.sessions.filter(s => s.result === 'LOSE').length;
+        const winStock = g.winRewardProduct.inventory?.quantityOnHand ?? 0;
+        const loseStock = g.loseRewardProduct?.inventory?.quantityOnHand ?? 0;
+
+        return {
+          id: g.id,
+          name: g.name,
+          description: g.description,
+          entryFee: Number(g.entryFee),
+          status: g.status,
+          projectId: g.projectId,
+          projectName: g.project?.name,
+          winReward: {
+            productId: g.winRewardProductId,
+            productName: g.winRewardProduct.name,
+            quantity: g.winRewardQuantity,
+            availableStock: winStock,
+            isOutOfStock: winStock <= 0,
+          },
+          loseReward: g.loseRewardProduct
+            ? {
+                productId: g.loseRewardProductId,
+                productName: g.loseRewardProduct.name,
+                quantity: g.loseRewardQuantity,
+                availableStock: loseStock,
+                isOutOfStock: loseStock <= 0,
+              }
+            : null,
+          stats: {
+            plays,
+            revenue: rev,
+            wins,
+            losses,
+            winRate: plays > 0 ? Math.round((wins / plays) * 100) : 0,
+          },
+        };
+      });
+
+      const totalAllocated = enrichedAllocations.reduce((sum, a) => sum + a.allocatedQty, 0);
+      const totalRemaining = Math.max(0, totalAllocated - totalSold);
       const computedStatus = computeEventStatus(event.startDatetime, event.endDatetime, event.status);
+
+      const gamesPlayed = event.gameSessions.length;
+      const gameRevenue = event.gameSessions.reduce((sum, gs) => sum + Number(gs.entryFee), 0);
+      const productsSoldCount = Object.keys(salesByProduct).length;
+
+      // Format recent sales
+      const formattedSales = event.sales.map(s => {
+        const rawItems = (s.items && s.items.length > 0)
+          ? s.items.map(item => ({
+              id: item.id,
+              productId: item.productId,
+              productName: item.product?.name || item.productId,
+              quantity: item.quantity,
+              unitPrice: Number(item.unitPrice),
+              lineTotal: Number(item.lineTotal),
+            }))
+          : [];
+
+        const totalUnits = rawItems.reduce((sum, i) => sum + i.quantity, 0) || s.quantity || 1;
+        const isGame = s.transactionType === 'GAME';
+
+        return {
+          id: s.id,
+          receiptNumber: s.receiptNumber,
+          serialNumber: s.receiptNumber,
+          transactionType: s.transactionType,
+          totalAmount: Number(s.totalAmount),
+          paymentMethod: s.paymentMethod,
+          cashAmount: s.cashAmount !== null ? Number(s.cashAmount) : null,
+          upiAmount: s.upiAmount !== null ? Number(s.upiAmount) : null,
+          customerName: s.customerName,
+          customerPhone: s.customerPhone,
+          saleTime: s.saleTime,
+          sellerName: s.sellerNameAtSale || s.member?.name || 'Member',
+          sellerUsername: s.sellerUsernameAtSale || s.member?.username || '',
+          productName: isGame ? (s.game?.name || 'Stall Game') : rawItems.map(i => `${i.productName} × ${i.quantity}`).join(', ') || s.product?.name || 'Merchandise',
+          items: rawItems,
+          totalUnits,
+          game: s.game ? { id: s.game.id, name: s.game.name, entryFee: Number(s.game.entryFee) } : null,
+          gameSession: s.gameSession ? {
+            sessionCode: s.gameSession.sessionCode,
+            result: s.gameSession.result,
+            rewardProductName: s.gameSession.rewardProduct?.name || 'Reward',
+            rewardQuantity: s.gameSession.rewardQuantity,
+          } : null,
+        };
+      });
 
       res.json({
         event: {
-          ...event,
+          id: event.id,
+          name: event.name,
+          location: event.location,
+          startDatetime: event.startDatetime,
+          endDatetime: event.endDatetime,
           status: computedStatus,
+          reconciledAt: event.reconciledAt,
           allocations: enrichedAllocations,
+          games: enrichedGames,
+          sales: formattedSales,
+          summary: {
+            totalAllocated,
+            totalSold,
+            totalRemaining,
+            totalRevenue: totalSalesRevenue,
+            totalSalesRevenue,
+            gamesCount: enrichedGames.length,
+            gamesPlayed,
+            gameRevenue,
+            productsSoldCount,
+          },
+          createdAt: event.createdAt,
         },
       });
     } catch (error) {

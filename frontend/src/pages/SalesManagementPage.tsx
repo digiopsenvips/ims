@@ -335,7 +335,7 @@ export const SalesManagementPage: React.FC = () => {
         setSales(prev => prev.map(s => (s.id === editingSale.id ? { ...s, ...res.sale } : s)));
       }
       await fetchSalesData();
-      const receiptLabel = editingSale.receiptNumber ? `#${editingSale.receiptNumber}` : `#${editingSale.id}`;
+      const receiptLabel = editingSale.receiptNumber ? `#${editingSale.receiptNumber}` : 'record';
       setEditingSale(null);
       setActionMessage(`Sale (${receiptLabel}) updated successfully!`);
       setTimeout(() => setActionMessage(null), 3500);
@@ -347,7 +347,7 @@ export const SalesManagementPage: React.FC = () => {
   };
 
   const handleDeleteSale = async (sale: Sale) => {
-    const receiptLabel = sale.receiptNumber ? `#${sale.receiptNumber}` : `#${sale.id}`;
+    const receiptLabel = sale.receiptNumber ? `#${sale.receiptNumber}` : 'record';
     if (!window.confirm(`Are you sure you want to delete Sale (${receiptLabel})? This will permanently remove this transaction.`)) {
       return;
     }
@@ -422,7 +422,7 @@ export const SalesManagementPage: React.FC = () => {
       ];
 
       const rows = exportList.map((s, idx) => [
-        s.receiptNumber ? `#${s.receiptNumber}` : `#${s.id}`,
+        s.receiptNumber ? `#${s.receiptNumber}` : '—',
         s.serialNumber ?? (exportList.length - idx),
         s.transactionType || 'SALE',
         s.id,
@@ -690,13 +690,13 @@ export const SalesManagementPage: React.FC = () => {
               ) : (
                 sales.map((sale, index) => {
                   // Canonical Receipt Number: #1, #2, #3...
-                  const displayReceipt = sale.receiptNumber ?? sale.id;
+                  const displayReceipt = sale.receiptNumber ?? '—';
                   const displaySNo = sale.serialNumber ?? Math.max(1, totalRecords - ((currentPage - 1) * pageSize) - index);
 
                   return (
                     <tr key={sale.id} className="hover:bg-slate-50/50">
                       <td className="px-4 py-3 font-mono font-bold text-slate-900">
-                        #{displayReceipt}
+                        {displayReceipt !== '—' ? `#${displayReceipt}` : '—'}
                       </td>
                       <td className="px-4 py-3 font-mono text-slate-500 font-medium">
                         {displaySNo}

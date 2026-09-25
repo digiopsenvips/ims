@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { api } from '../lib/api';
@@ -16,6 +17,11 @@ import {
   X,
   ArrowDownLeft,
   Trash2,
+  Store,
+  Eye,
+  Gamepad2,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 interface AllocationInput {
@@ -75,6 +81,11 @@ export const EventsPage: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [expandedPreviews, setExpandedPreviews] = useState<Record<string, boolean>>({});
+
+  const togglePreview = (id: string) => {
+    setExpandedPreviews(prev => ({ ...prev, [id]: !prev[id] }));
+  };
 
   // Create / Edit Modal State
   const [showEventModal, setShowEventModal] = useState(false);
@@ -527,18 +538,23 @@ export const EventsPage: React.FC = () => {
           events.map(event => {
             const isEnded = event.status === 'ENDED';
             const isActive = event.status === 'ACTIVE';
+            const isPreviewOpen = !!expandedPreviews[event.id];
+            const combinedRevenue = (event.totalRevenue || 0) + (event.gameRevenue || 0);
+            const soldPct = event.totalAllocated > 0
+              ? Math.min(100, Math.round((event.totalSold / event.totalAllocated) * 100))
+              : 0;
 
             return (
               <div
                 key={event.id}
-                className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden"
+                className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden hover:border-slate-300 transition-all"
               >
-                {/* Event Summary Bar */}
-                <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
+                {/* 1. Header Bar: Title, Status, Dates, Location */}
+                <div className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100">
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span
-                        className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
                           isActive
                             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                             : isEnded
@@ -546,131 +562,237 @@ export const EventsPage: React.FC = () => {
                             : 'bg-blue-50 text-blue-700 border border-blue-200'
                         }`}
                       >
+                        {isActive && (
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                          </span>
+                        )}
                         {event.status}
                       </span>
-                      <h2 className="text-base font-bold text-slate-900">{event.name}</h2>
+                      <h2 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
+                        {event.name}
+                      </h2>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500 pt-0.5">
-                      <span className="flex items-center gap-1">
+                    <div className="flex flex-wrap items-center gap-4 text-xs text-slate-500">
+                      <span className="flex items-center gap-1 font-medium">
                         <MapPin className="w-3.5 h-3.5 text-slate-400" />
                         <span>{event.location}</span>
                       </span>
-                      <span className="flex items-center gap-1.5">
+                      <span className="flex items-center gap-1.5 font-medium">
                         <Clock className="w-3.5 h-3.5 text-slate-400" />
-                        <span className="text-slate-700 font-medium">
+                        <span className="text-slate-700">
                           {formatISTDateTime(event.startDatetime)}
                         </span>
                         <span className="text-slate-400 font-normal">to</span>
-                        <span className="text-slate-700 font-medium">
+                        <span className="text-slate-700">
                           {formatISTDateTime(event.endDatetime)}
                         </span>
                       </span>
                     </div>
                   </div>
 
-                  {/* Actions & Metrics */}
-                  <div className="flex items-center gap-4">
-                    <div className="text-right hidden sm:block">
-                      <div className="text-[10px] uppercase font-semibold text-slate-400">
-                        Units (Sold / Alloc)
+                  {/* Top Right Quick Badges */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {isEnded && (
+                      <span className="text-[11px] font-bold text-slate-500 px-2.5 py-1 bg-slate-100 border border-slate-200 rounded-lg">
+                        Finalized
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. Compact 4 KPI Tiles Grid */}
+                <div className="p-4 sm:p-5 bg-slate-50/40">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    {/* KPI 1: Total Revenue */}
+                    <div className="p-3 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Total Revenue
                       </div>
-                      <div className="text-sm font-bold text-slate-800">
-                        {event.totalSold} / {event.totalAllocated}
+                      <div className="text-lg font-black text-emerald-700 mt-0.5">
+                        ₹{combinedRevenue.toLocaleString('en-IN')}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-medium truncate mt-0.5">
+                        Products: ₹{(event.totalRevenue || 0).toLocaleString('en-IN')} &bull; Games: ₹{(event.gameRevenue || 0).toLocaleString('en-IN')}
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      {isEnded && (
-                        <span className="text-xs font-semibold text-slate-500 px-3 py-1.5 bg-slate-100 border border-slate-200 rounded">
-                          Finalized
-                        </span>
-                      )}
+                    {/* KPI 2: Units Sold */}
+                    <div className="p-3 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Units Sold
+                      </div>
+                      <div className="text-lg font-black text-slate-900 mt-0.5">
+                        {event.totalSold} <span className="text-xs font-normal text-slate-400">/ {event.totalAllocated}</span>
+                      </div>
+                      <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-1.5">
+                        <div
+                          className="bg-emerald-500 h-full rounded-full transition-all"
+                          style={{ width: `${soldPct}%` }}
+                        />
+                      </div>
+                    </div>
 
-                      {canEditEvents && (
-                        <button
-                          onClick={() => handleOpenEditModal(event)}
-                          className="px-3 py-1.5 text-xs font-semibold rounded border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-1 cursor-pointer"
-                          title="Edit event details, allocations, and pricing"
-                        >
-                          <Edit className="w-3.5 h-3.5" />
-                          <span>Edit</span>
-                        </button>
-                      )}
+                    {/* KPI 3: Stock Remaining */}
+                    <div className="p-3 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Stock Remaining
+                      </div>
+                      <div className="text-lg font-black text-slate-900 mt-0.5">
+                        {event.totalRemaining}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-medium truncate mt-0.5">
+                        {event.allocations?.length || 0} product lines active
+                      </div>
+                    </div>
 
-                      {canEditEvents && !isEnded && isActive && (
-                        <button
-                          onClick={() => setEndEventTarget(event)}
-                          className="px-3 py-1.5 text-xs font-semibold rounded bg-amber-50 border border-amber-200 text-amber-800 hover:bg-amber-100 transition-colors flex items-center gap-1 cursor-pointer"
-                          title="Close event and return unsold stock"
-                        >
-                          <PowerOff className="w-3.5 h-3.5" />
-                          <span>End Event</span>
-                        </button>
-                      )}
-
-                      {canEditEvents && (
-                        <button
-                          onClick={() => setDeleteEventTarget(event)}
-                          className="px-3 py-1.5 text-xs font-semibold rounded bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 transition-colors flex items-center gap-1 cursor-pointer"
-                          title="Delete Event"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span>Delete</span>
-                        </button>
-                      )}
+                    {/* KPI 4: Games Stall Activity */}
+                    <div className="p-3 bg-white rounded-xl border border-slate-200/80 shadow-2xs">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Games & Plays
+                      </div>
+                      <div className="text-lg font-black text-purple-900 mt-0.5">
+                        {event.gamesPlayed || 0} <span className="text-xs font-normal text-slate-400">plays</span>
+                      </div>
+                      <div className="text-[10px] text-purple-700 font-medium truncate mt-0.5">
+                        {event.gamesCount || 0} games assigned
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Inline Product Allocations Sub-table */}
-                <div className="bg-slate-50/50 p-4">
-                  <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                    Event Inventory Breakdown & Pricing
+                {/* 3. Action Buttons Row */}
+                <div className="px-4 py-3 sm:px-5 bg-white border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link
+                      to={`/events/${event.id}`}
+                      className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg shadow-xs transition-colors cursor-pointer ${
+                        isActive
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          : 'bg-slate-900 hover:bg-slate-800 text-white'
+                      }`}
+                    >
+                      <Store className="w-3.5 h-3.5" />
+                      <span>Open Stall</span>
+                    </Link>
+
+                    <Link
+                      to={`/events/${event.id}`}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors"
+                    >
+                      <Eye className="w-3.5 h-3.5 text-slate-500" />
+                      <span>View Details</span>
+                    </Link>
+
+                    {canEditEvents && (
+                      <button
+                        onClick={() => handleOpenEditModal(event)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
+                        title="Edit event details, allocations, and pricing"
+                      >
+                        <Edit className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Manage</span>
+                      </button>
+                    )}
+
+                    {canEditEvents && !isEnded && isActive && (
+                      <button
+                        onClick={() => setEndEventTarget(event)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-amber-50 border border-amber-200 text-amber-800 hover:bg-amber-100 transition-colors cursor-pointer"
+                        title="Close event and return unsold stock"
+                      >
+                        <PowerOff className="w-3.5 h-3.5" />
+                        <span>End Event</span>
+                      </button>
+                    )}
+
+                    {canEditEvents && (
+                      <button
+                        onClick={() => setDeleteEventTarget(event)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer ml-auto sm:ml-0"
+                        title="Delete Event"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Delete</span>
+                      </button>
+                    )}
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs bg-white border border-slate-200 rounded">
-                      <thead className="bg-slate-100 text-slate-500 font-semibold uppercase text-[10px]">
-                        <tr>
-                          <th className="px-3 py-2">ID</th>
-                          <th className="px-3 py-2">Product</th>
-                          <th className="px-3 py-2">Project</th>
-                          <th className="px-3 py-2 text-right">Event Price (₹)</th>
-                          <th className="px-3 py-2 text-right">Allocated</th>
-                          <th className="px-3 py-2 text-right">Sold</th>
-                          <th className="px-3 py-2 text-right">Remaining</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {event.allocations.map(alloc => (
-                          <tr key={alloc.id} className="hover:bg-slate-50">
-                            <td className="px-3 py-2 font-mono font-medium text-slate-700">
-                              {alloc.productId}
-                            </td>
-                            <td className="px-3 py-2 font-semibold text-slate-900">
-                              {alloc.productName}
-                            </td>
-                            <td className="px-3 py-2 text-slate-600">
-                              {alloc.projectName}
-                            </td>
-                            <td className="px-3 py-2 text-right font-bold text-slate-900">
-                              ₹{Number(alloc.priceAtEvent).toFixed(2)}
-                            </td>
-                            <td className="px-3 py-2 text-right text-slate-700 font-medium">
-                              {alloc.allocatedQty}
-                            </td>
-                            <td className="px-3 py-2 text-right text-emerald-700 font-bold">
-                              {alloc.soldQty}
-                            </td>
-                            <td className="px-3 py-2 text-right font-black text-slate-900">
-                              {alloc.remainingQty}
-                            </td>
+
+                  {/* Toggle Preview Button */}
+                  <button
+                    onClick={() => togglePreview(event.id)}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-slate-800 transition-colors cursor-pointer ml-auto"
+                  >
+                    <span>{isPreviewOpen ? 'Hide' : 'Quick Preview'} Stock ({event.allocations?.length || 0})</span>
+                    {isPreviewOpen ? (
+                      <ChevronUp className="w-3.5 h-3.5" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
+
+                {/* 4. Collapsible Product Allocations Preview (Only when requested) */}
+                {isPreviewOpen && (
+                  <div className="bg-slate-50 border-t border-slate-200/80 p-4 animate-fadeIn">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                        Inventory Snapshot & Event Pricing
+                      </div>
+                      <Link
+                        to={`/events/${event.id}`}
+                        className="text-xs font-semibold text-emerald-700 hover:underline"
+                      >
+                        Open Full Stall Manager →
+                      </Link>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs bg-white border border-slate-200 rounded-lg">
+                        <thead className="bg-slate-100 text-slate-500 font-bold uppercase text-[10px]">
+                          <tr>
+                            <th className="px-3 py-2">ID</th>
+                            <th className="px-3 py-2">Product</th>
+                            <th className="px-3 py-2">Project</th>
+                            <th className="px-3 py-2 text-right">Event Price (₹)</th>
+                            <th className="px-3 py-2 text-right">Allocated</th>
+                            <th className="px-3 py-2 text-right">Sold</th>
+                            <th className="px-3 py-2 text-right">Remaining</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {event.allocations.map(alloc => (
+                            <tr key={alloc.id} className="hover:bg-slate-50">
+                              <td className="px-3 py-2 font-mono font-medium text-slate-700">
+                                {alloc.productId}
+                              </td>
+                              <td className="px-3 py-2 font-semibold text-slate-900">
+                                {alloc.productName}
+                              </td>
+                              <td className="px-3 py-2 text-slate-600">
+                                {alloc.projectName}
+                              </td>
+                              <td className="px-3 py-2 text-right font-bold text-slate-900">
+                                ₹{Number(alloc.priceAtEvent).toFixed(2)}
+                              </td>
+                              <td className="px-3 py-2 text-right text-slate-700 font-medium">
+                                {alloc.allocatedQty}
+                              </td>
+                              <td className="px-3 py-2 text-right text-emerald-700 font-bold">
+                                {alloc.soldQty}
+                              </td>
+                              <td className="px-3 py-2 text-right font-black text-slate-900">
+                                {alloc.remainingQty}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             );
           })

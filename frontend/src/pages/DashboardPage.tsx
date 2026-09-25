@@ -669,7 +669,7 @@ export const DashboardPage: React.FC = () => {
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50/60 text-slate-500 border-b border-slate-100 font-bold uppercase tracking-wider text-[10px]">
                 <tr>
-                  <th className="px-5 py-3">Receipt / ID</th>
+                  <th className="px-5 py-3">Receipt #</th>
                   <th className="px-5 py-3">Product / Game</th>
                   <th className="px-5 py-3">Stall / Event</th>
                   <th className="px-5 py-3">Seller</th>
@@ -683,7 +683,7 @@ export const DashboardPage: React.FC = () => {
                 {sales.slice(0, 8).map(sale => (
                   <tr key={sale.id} className="hover:bg-slate-50/70 transition-colors">
                     <td className="px-5 py-3.5 font-mono font-bold text-slate-900">
-                      #{sale.receiptNumber ?? sale.id}
+                      #{sale.receiptNumber ?? '—'}
                     </td>
                     <td className="px-5 py-3.5 font-semibold text-slate-900">
                       {sale.transactionType === 'GAME' ? (

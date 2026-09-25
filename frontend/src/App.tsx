@@ -12,6 +12,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { ProjectsProductsPage } from './pages/ProjectsProductsPage';
 import { InventoryPage } from './pages/InventoryPage';
 import { EventsPage } from './pages/EventsPage';
+import { EventDetailsPage } from './pages/EventDetailsPage';
 import { SalesManagementPage } from './pages/SalesManagementPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { UserManagementPage } from './pages/UserManagementPage';
@@ -87,6 +88,15 @@ export const App: React.FC = () => {
         />
 
         <Route
+          path="products"
+          element={
+            <ProtectedRoute allowedRoles={['DEVELOPER', 'ADMIN']}>
+              <ProjectsProductsPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
           path="inventory"
           element={
             <ProtectedRoute requiredPermission="view_inventory">
@@ -100,6 +110,15 @@ export const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <EventsPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="events/:eventId"
+          element={
+            <ProtectedRoute>
+              <EventDetailsPage />
             </ProtectedRoute>
           }
         />
@@ -124,6 +143,15 @@ export const App: React.FC = () => {
 
         <Route
           path="games/play"
+          element={
+            <ProtectedRoute>
+              <GamePlayPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="play-game"
           element={
             <ProtectedRoute>
               <GamePlayPage />
