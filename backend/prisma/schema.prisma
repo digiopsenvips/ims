@@ -211,10 +211,10 @@ model GameSession {
   updatedAt       DateTime          @updatedAt @map("updated_at")
 
   game            Game              @relation(fields: [gameId], references: [id], onDelete: Restrict)
-  event           Event             @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  event           Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
   seller          User?             @relation(fields: [sellerId], references: [id], onDelete: SetNull)
   rewardProduct   Product           @relation(fields: [rewardProductId], references: [id], onDelete: Restrict)
-  sale            Sale?             @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  sale            Sale?             @relation(fields: [saleId], references: [id], onDelete: Cascade)
 
   @@index([gameId])
   @@index([eventId])

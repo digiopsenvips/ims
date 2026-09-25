@@ -627,20 +627,45 @@ router.delete(
         }
       }
 
-      // In a transaction, delete related sales, allocations, and the event
-      await prisma.$transaction([
-        prisma.sale.deleteMany({ where: { eventId: id } }),
-        prisma.eventAllocation.deleteMany({ where: { eventId: id } }),
-        prisma.event.delete({ where: { id } }),
-      ]);
+      // In a transaction, cleanly delete all event dependencies and the event
+      await prisma.$transaction(async tx => {
+        // 1. Unbind any game associated with this event
+        await tx.game.updateMany({
+          where: { eventId: id },
+          data: { eventId: null },
+        });
+
+        // 2. Delete game sessions associated with this event
+        await tx.gameSession.deleteMany({
+          where: { eventId: id },
+        });
+
+        // 3. Delete sales items and sales associated with this event
+        await tx.saleItem.deleteMany({
+          where: { sale: { eventId: id } },
+        });
+        await tx.sale.deleteMany({
+          where: { eventId: id },
+        });
+
+        // 4. Delete event allocations
+        await tx.eventAllocation.deleteMany({
+          where: { eventId: id },
+        });
+
+        // 5. Delete the event record
+        await tx.event.delete({
+          where: { id },
+        });
+      });
 
       broadcast('event:updated', { eventId: id, action: 'deleted' });
       broadcast('inventory:updated', { action: 'event_deleted', eventId: id });
 
       res.json({ message: `Event '${event.name}' deleted successfully` });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Delete event error:', error);
-      res.status(500).json({ error: 'Failed to delete event' });
+      res.status(500).json({ error: error?.message || 'Failed to delete event' });
     }
   }
 );

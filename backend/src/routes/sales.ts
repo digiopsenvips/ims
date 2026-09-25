@@ -897,6 +897,7 @@ router.delete(
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { count } = await prisma.$transaction(async tx => {
+        await tx.gameSession.deleteMany({});
         await tx.saleItem.deleteMany({});
         const deleted = await tx.sale.deleteMany({});
         // Reset canonical receipt sequence and sales ID sequence to 1
@@ -1139,7 +1140,10 @@ router.delete(
         return;
       }
 
-      await prisma.sale.delete({ where: { id } });
+      await prisma.$transaction([
+        prisma.gameSession.deleteMany({ where: { saleId: id } }),
+        prisma.sale.delete({ where: { id } }),
+      ]);
       broadcast('inventory:updated', { action: 'sale_deleted', id });
 
       res.json({ message: `Sale #${id} deleted successfully`, id });
