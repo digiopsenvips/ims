@@ -109,14 +109,20 @@ export const EventDetailsPage: React.FC = () => {
     if (!eventId) return;
     try {
       const [evData, prodRes, projRes] = await Promise.all([
-        api.get<AppEvent>(`/events/${eventId}`),
+        api.get<any>(`/events/${eventId}`),
         api.get('/products'),
         api.get('/projects'),
       ]);
 
-      if (evData) setEvent(evData);
+      const loadedEvent = evData?.event || evData;
+      if (loadedEvent && loadedEvent.id) {
+        setEvent(loadedEvent);
+      }
       if (prodRes?.products) setProducts(prodRes.products);
+      else if (Array.isArray(prodRes)) setProducts(prodRes);
+
       if (projRes?.projects) setProjects(projRes.projects);
+      else if (Array.isArray(projRes)) setProjects(projRes);
     } catch (err: any) {
       console.error('Failed to load event details:', err);
       setStatusMessage({ type: 'error', text: err.message || 'Failed to load event data' });

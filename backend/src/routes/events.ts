@@ -328,8 +328,13 @@ router.get(
           customerName: s.customerName,
           customerPhone: s.customerPhone,
           saleTime: s.saleTime,
+          createdAt: s.saleTime,
           sellerName: s.sellerNameAtSale || s.member?.name || 'Member',
+          memberName: s.sellerNameAtSale || s.member?.name || 'Member',
           sellerUsername: s.sellerUsernameAtSale || s.member?.username || '',
+          memberUsername: s.sellerUsernameAtSale || s.member?.username || '',
+          description: isGame ? (s.game?.name || 'Stall Game') : (rawItems.length > 0 ? rawItems.map(i => `${i.productName} × ${i.quantity}`).join(', ') : s.product?.name || 'Merchandise'),
+          rewardDescription: s.gameSession ? `${s.gameSession.rewardProduct?.name || 'Reward'} × ${s.gameSession.rewardQuantity}` : undefined,
           productName: isGame ? (s.game?.name || 'Stall Game') : rawItems.map(i => `${i.productName} × ${i.quantity}`).join(', ') || s.product?.name || 'Merchandise',
           items: rawItems,
           totalUnits,
@@ -343,31 +348,40 @@ router.get(
         };
       });
 
-      res.json({
-        event: {
-          id: event.id,
-          name: event.name,
-          location: event.location,
-          startDatetime: event.startDatetime,
-          endDatetime: event.endDatetime,
-          status: computedStatus,
-          reconciledAt: event.reconciledAt,
-          allocations: enrichedAllocations,
-          games: enrichedGames,
-          sales: formattedSales,
-          summary: {
-            totalAllocated,
-            totalSold,
-            totalRemaining,
-            totalRevenue: totalSalesRevenue,
-            totalSalesRevenue,
-            gamesCount: enrichedGames.length,
-            gamesPlayed,
-            gameRevenue,
-            productsSoldCount,
-          },
-          createdAt: event.createdAt,
+      const eventPayload = {
+        id: event.id,
+        name: event.name,
+        location: event.location,
+        startDatetime: event.startDatetime,
+        endDatetime: event.endDatetime,
+        status: computedStatus,
+        reconciledAt: event.reconciledAt,
+        totalAllocated,
+        totalSold,
+        totalRemaining,
+        totalRevenue: totalSalesRevenue,
+        allocations: enrichedAllocations,
+        games: enrichedGames,
+        sales: formattedSales,
+        summary: {
+          totalAllocated,
+          totalSold,
+          totalRemaining,
+          totalRevenue: totalSalesRevenue,
+          totalSalesRevenue,
+          gamesCount: enrichedGames.length,
+          gamesPlayed,
+          gameRevenue,
+          productsSoldCount,
+          totalTransactions: formattedSales.length,
+          totalSalesCount: formattedSales.filter(s => s.transactionType !== 'GAME').length,
         },
+        createdAt: event.createdAt,
+      };
+
+      res.json({
+        ...eventPayload,
+        event: eventPayload,
       });
     } catch (error) {
       console.error('Fetch event details error:', error);
