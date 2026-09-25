@@ -15,14 +15,20 @@ import { EventsPage } from './pages/EventsPage';
 import { SalesManagementPage } from './pages/SalesManagementPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { UserManagementPage } from './pages/UserManagementPage';
+import { GamesPage } from './pages/GamesPage';
+import { GamePlayPage } from './pages/GamePlayPage';
+import { GameSessionsPage } from './pages/GameSessionsPage';
+import { CustomerGameQrPage } from './pages/CustomerGameQrPage';
 
 export const App: React.FC = () => {
   const { user, isMember } = useAuth();
 
   return (
     <Routes>
-      {/* Public Login */}
+      {/* Public Login & Customer Game View */}
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/play" element={<CustomerGameQrPage />} />
+      <Route path="/play/:gameId" element={<CustomerGameQrPage />} />
 
       {/* Member Volunteer Check-In — Name + Department */}
       <Route
@@ -103,6 +109,33 @@ export const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <SalesManagementPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="games"
+          element={
+            <ProtectedRoute>
+              <GamesPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="games/play"
+          element={
+            <ProtectedRoute>
+              <GamePlayPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="game-sessions"
+          element={
+            <ProtectedRoute>
+              <GameSessionsPage />
             </ProtectedRoute>
           }
         />

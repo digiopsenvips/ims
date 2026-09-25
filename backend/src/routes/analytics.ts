@@ -210,6 +210,94 @@ router.get(
       // Convert time trend to sorted array
       const timeTrend = Object.values(dateMap).sort((a, b) => a.date.localeCompare(b.date));
 
+      // Fetch Game Sessions for game analytics
+      const gameSessionWhere: any = { status: 'COMPLETED' };
+      if (eventId) gameSessionWhere.eventId = String(eventId);
+      if (startDate || endDate) {
+        gameSessionWhere.createdAt = {};
+        if (startDate) gameSessionWhere.createdAt.gte = new Date(String(startDate));
+        if (endDate) gameSessionWhere.createdAt.lte = new Date(String(endDate));
+      }
+
+      const gameSessions = await prisma.gameSession.findMany({
+        where: gameSessionWhere,
+        include: {
+          game: { include: { project: true } },
+          event: true,
+          rewardProduct: true,
+        },
+      });
+
+      let totalGamesPlayed = gameSessions.length;
+      let totalGameRevenue = 0;
+      let totalWins = 0;
+      let totalLosses = 0;
+      let totalRewardsIssued = 0;
+      let estimatedRewardValue = 0;
+
+      const gMap: Record<string, any> = {};
+      const evGameMap: Record<string, any> = {};
+
+      for (const gs of gameSessions) {
+        const fee = Number(gs.entryFee);
+        totalGameRevenue += fee;
+        totalRewardsIssued += gs.rewardQuantity;
+        const rewardBase = gs.rewardProduct?.basePrice ? Number(gs.rewardProduct.basePrice) : 0;
+        estimatedRewardValue += rewardBase * gs.rewardQuantity;
+
+        if (gs.result === 'WIN') totalWins++;
+        else totalLosses++;
+
+        if (!gMap[gs.gameId]) {
+          gMap[gs.gameId] = {
+            gameId: gs.gameId,
+            gameName: gs.game.name,
+            projectName: gs.game.project?.name || 'Upcycle',
+            plays: 0,
+            revenue: 0,
+            wins: 0,
+            losses: 0,
+            rewardsIssued: 0,
+          };
+        }
+        gMap[gs.gameId].plays++;
+        gMap[gs.gameId].revenue += fee;
+        gMap[gs.gameId].rewardsIssued += gs.rewardQuantity;
+        if (gs.result === 'WIN') gMap[gs.gameId].wins++;
+        else gMap[gs.gameId].losses++;
+
+        if (!evGameMap[gs.eventId]) {
+          evGameMap[gs.eventId] = {
+            eventId: gs.eventId,
+            eventName: gs.event.name,
+            plays: 0,
+            revenue: 0,
+            wins: 0,
+            losses: 0,
+            rewardsIssued: 0,
+          };
+        }
+        evGameMap[gs.eventId].plays++;
+        evGameMap[gs.eventId].revenue += fee;
+        evGameMap[gs.eventId].rewardsIssued += gs.rewardQuantity;
+        if (gs.result === 'WIN') evGameMap[gs.eventId].wins++;
+        else evGameMap[gs.eventId].losses++;
+      }
+
+      const gameWinRate = totalGamesPlayed > 0 ? Math.round((totalWins / totalGamesPlayed) * 1000) / 10 : 0;
+
+      const gameBreakdown = Object.values(gMap).map((g: any) => ({
+        ...g,
+        revenue: canViewRevenue ? g.revenue : undefined,
+        winRate: g.plays > 0 ? Math.round((g.wins / g.plays) * 1000) / 10 : 0,
+      }));
+
+      const eventGameBreakdown = Object.values(evGameMap).map((e: any) => ({
+        ...e,
+        revenue: canViewRevenue ? e.revenue : undefined,
+        winRate: e.plays > 0 ? Math.round((e.wins / e.plays) * 1000) / 10 : 0,
+      }));
+
       res.json({
         canViewRevenue,
         canViewEventBreakdown,
@@ -222,6 +310,17 @@ router.get(
         projectShare,
         stallPerformance,
         timeTrend,
+        gameAnalytics: {
+          totalGamesPlayed,
+          totalGameRevenue: canViewRevenue ? totalGameRevenue : null,
+          totalWins,
+          totalLosses,
+          winRate: gameWinRate,
+          totalRewardsIssued,
+          estimatedRewardValue: canViewRevenue ? estimatedRewardValue : null,
+          gameBreakdown,
+          eventBreakdown: eventGameBreakdown,
+        },
       });
     } catch (error) {
       console.error('Fetch analytics error:', error);

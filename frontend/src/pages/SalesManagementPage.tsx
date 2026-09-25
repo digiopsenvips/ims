@@ -49,6 +49,7 @@ export const SalesManagementPage: React.FC = () => {
   const activeTab = (searchParams.get('tab') === 'per-event' ? 'per-event' : 'all-time') as 'all-time' | 'per-event';
   const selectedEventId = searchParams.get('eventId') || '';
   const paymentFilter = ((searchParams.get('payment') as 'ALL' | 'UPI' | 'CASH' | 'CASH_UPI') || 'ALL');
+  const transactionFilter = ((searchParams.get('txType') as 'ALL' | 'SALES' | 'GAMES') || 'ALL');
   const searchFromUrl = searchParams.get('search') || '';
 
   // Local state
@@ -92,6 +93,7 @@ export const SalesManagementPage: React.FC = () => {
       tab?: 'all-time' | 'per-event';
       eventId?: string;
       payment?: 'ALL' | 'UPI' | 'CASH' | 'CASH_UPI';
+      txType?: 'ALL' | 'SALES' | 'GAMES';
       search?: string;
     }) => {
       const newParams = new URLSearchParams(searchParams);
@@ -101,6 +103,7 @@ export const SalesManagementPage: React.FC = () => {
       const targetTab = updates.tab !== undefined ? updates.tab : activeTab;
       const targetEventId = updates.eventId !== undefined ? updates.eventId : selectedEventId;
       const targetPayment = updates.payment !== undefined ? updates.payment : paymentFilter;
+      const targetTxType = updates.txType !== undefined ? updates.txType : transactionFilter;
       const targetSearch = updates.search !== undefined ? updates.search : searchFromUrl;
 
       if (targetPage > 1) newParams.set('page', String(targetPage));
@@ -118,12 +121,15 @@ export const SalesManagementPage: React.FC = () => {
       if (targetPayment !== 'ALL') newParams.set('payment', targetPayment);
       else newParams.delete('payment');
 
+      if (targetTxType !== 'ALL') newParams.set('txType', targetTxType);
+      else newParams.delete('txType');
+
       if (targetSearch.trim()) newParams.set('search', targetSearch.trim());
       else newParams.delete('search');
 
       setSearchParams(newParams, { replace: true });
     },
-    [searchParams, currentPage, pageSize, activeTab, selectedEventId, paymentFilter, searchFromUrl, setSearchParams]
+    [searchParams, currentPage, pageSize, activeTab, selectedEventId, paymentFilter, transactionFilter, searchFromUrl, setSearchParams]
   );
 
   // Debounced search input handler
@@ -157,6 +163,11 @@ export const SalesManagementPage: React.FC = () => {
       }
       if (paymentFilter !== 'ALL') {
         query.set('paymentMethod', paymentFilter);
+      }
+      if (transactionFilter === 'SALES') {
+        query.set('transactionType', 'SALE');
+      } else if (transactionFilter === 'GAMES') {
+        query.set('transactionType', 'GAME');
       }
       if (searchFromUrl.trim()) {
         query.set('search', searchFromUrl.trim());
@@ -379,6 +390,11 @@ export const SalesManagementPage: React.FC = () => {
       if (paymentFilter !== 'ALL') {
         query.set('paymentMethod', paymentFilter);
       }
+      if (transactionFilter === 'SALES') {
+        query.set('transactionType', 'SALE');
+      } else if (transactionFilter === 'GAMES') {
+        query.set('transactionType', 'GAME');
+      }
       if (searchFromUrl.trim()) {
         query.set('search', searchFromUrl.trim());
       }
@@ -389,12 +405,14 @@ export const SalesManagementPage: React.FC = () => {
       const headers = [
         'Receipt ID',
         'S.No.',
+        'Transaction Type',
         'Sale ID (DB)',
         'Event ID',
         'Event Name',
         'Project Name',
-        'Product ID',
-        'Product Name',
+        'Product / Game Name',
+        'Game Result',
+        'Reward Issued',
         'Sales Member Name',
         'Items Purchased',
         ...(canViewRevenue ? ['Unit Price (INR)', 'Total Amount (INR)'] : []),
@@ -406,12 +424,14 @@ export const SalesManagementPage: React.FC = () => {
       const rows = exportList.map((s, idx) => [
         s.receiptNumber ? `#${s.receiptNumber}` : `#${s.id}`,
         s.serialNumber ?? (exportList.length - idx),
+        s.transactionType || 'SALE',
         s.id,
         s.eventId,
         `"${(s.eventName || '').replace(/"/g, '""')}"`,
         `"${s.projectName || ''}"`,
-        s.productId,
-        `"${(s.productName || '').replace(/"/g, '""')}"`,
+        `"${(s.description || s.productName || '').replace(/"/g, '""')}"`,
+        s.gameSession?.result || '',
+        s.gameSession?.rewardDescription ? `"${s.gameSession.rewardDescription.replace(/"/g, '""')}"` : '',
         `"${s.memberName || ''}"`,
         s.quantity,
         ...(canViewRevenue ? [s.unitPrice || 0, s.totalAmount || 0] : []),
@@ -578,6 +598,24 @@ export const SalesManagementPage: React.FC = () => {
           </div>
         </div>
 
+        {/* Transaction Type Filter */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-slate-500">Transaction:</span>
+          <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5 text-xs">
+            {(['ALL', 'SALES', 'GAMES'] as const).map(t => (
+              <button
+                key={t}
+                onClick={() => updateUrlState({ page: 1, txType: t })}
+                className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all cursor-pointer ${
+                  transactionFilter === t ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Mini stats summary */}
         <div className="flex items-center gap-4 text-xs">
           <div>
@@ -616,10 +654,11 @@ export const SalesManagementPage: React.FC = () => {
               <tr>
                 <th className="px-4 py-3">Receipt ID</th>
                 <th className="px-4 py-3">S.No.</th>
+                <th className="px-4 py-3">Type</th>
                 <th className="px-4 py-3">Project Name</th>
-                <th className="px-4 py-3">Product Name</th>
+                <th className="px-4 py-3">Product / Game</th>
                 <th className="px-4 py-3">Sales Member Name</th>
-                <th className="px-4 py-3 text-right">Items Purchased</th>
+                <th className="px-4 py-3 text-right">Items / Plays</th>
                 {canViewRevenue && <th className="px-4 py-3 text-right">Total Amount (₹)</th>}
                 <th className="px-4 py-3">Payment</th>
                 <th className="px-4 py-3">Time (Auto)</th>
@@ -632,7 +671,7 @@ export const SalesManagementPage: React.FC = () => {
               {isLoading ? (
                 <tr>
                   <td
-                    colSpan={canViewRevenue ? (isDeveloper ? 12 : 11) : (isDeveloper ? 11 : 10)}
+                    colSpan={canViewRevenue ? (isDeveloper ? 13 : 12) : (isDeveloper ? 12 : 11)}
                     className="px-4 py-12 text-center text-slate-400 text-xs"
                   >
                     <Loader2 className="w-5 h-5 mx-auto mb-2 animate-spin text-slate-400" />
@@ -642,7 +681,7 @@ export const SalesManagementPage: React.FC = () => {
               ) : sales.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={canViewRevenue ? (isDeveloper ? 12 : 11) : (isDeveloper ? 11 : 10)}
+                    colSpan={canViewRevenue ? (isDeveloper ? 13 : 12) : (isDeveloper ? 12 : 11)}
                     className="px-4 py-8 text-center text-slate-400 text-xs"
                   >
                     No matching sales records found.
@@ -662,6 +701,17 @@ export const SalesManagementPage: React.FC = () => {
                       <td className="px-4 py-3 font-mono text-slate-500 font-medium">
                         {displaySNo}
                       </td>
+                      <td className="px-4 py-3">
+                        {sale.transactionType === 'GAME' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            🎮 GAME
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                            SALE
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-slate-700">
                         <div className="flex flex-wrap gap-1">
                           {(sale.projectNames && sale.projectNames.length > 0
@@ -675,7 +725,35 @@ export const SalesManagementPage: React.FC = () => {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-slate-900">
-                        {sale.items && sale.items.length > 0 ? (
+                        {sale.transactionType === 'GAME' ? (
+                          <div>
+                            <div className="font-bold text-indigo-950 flex items-center gap-1.5 flex-wrap">
+                              <span>🎮 {sale.game?.name || sale.productName || 'Stall Game'}</span>
+                              {sale.gameSession && (
+                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
+                                  sale.gameSession.result === 'WIN'
+                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                    : 'bg-amber-100 text-amber-800 border border-amber-200'
+                                }`}>
+                                  {sale.gameSession.result === 'WIN' ? '🏆 WIN' : 'LOSE'}
+                                </span>
+                              )}
+                            </div>
+                            {sale.gameSession?.rewardProduct ? (
+                              <div className="text-[11px] text-slate-600 mt-0.5">
+                                Reward:{' '}
+                                <span className="font-semibold text-slate-800">
+                                  {sale.gameSession.rewardProduct.name}
+                                </span>{' '}
+                                × {sale.gameSession.rewardQuantity}
+                              </div>
+                            ) : sale.rewardDescription ? (
+                              <div className="text-[11px] text-slate-600 mt-0.5">
+                                Reward: <span className="font-semibold">{sale.rewardDescription}</span>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : sale.items && sale.items.length > 0 ? (
                           <div className="space-y-1">
                             {sale.items.map((item, itIdx) => (
                               <div key={itIdx} className="text-xs flex items-center gap-1.5">

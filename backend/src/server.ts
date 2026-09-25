@@ -11,6 +11,7 @@ import inventoryRoutes from './routes/inventory';
 import eventRoutes from './routes/events';
 import salesRoutes from './routes/sales';
 import analyticsRoutes from './routes/analytics';
+import gameRoutes from './routes/games';
 
 const app = express();
 const server = http.createServer(app);
@@ -46,6 +47,7 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/sales', salesRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/games', gameRoutes);
 
 // Global Error Handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

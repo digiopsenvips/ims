@@ -12,6 +12,9 @@ import {
   Calendar,
   Layers,
   Award,
+  Gamepad2,
+  Trophy,
+  Gift,
 } from 'lucide-react';
 import {
   PieChart,
@@ -386,6 +389,151 @@ export const AnalyticsPage: React.FC = () => {
                   </table>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Stall Games & Rewards Analytics Section */}
+          {analytics.gameAnalytics && (
+            <div className="space-y-4">
+              <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
+                      <Gamepad2 className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">
+                        Stall Games & Rewards Performance
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Attraction game sessions, conversion win rates, entry fees, and inventory reward distribution
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 4 Game KPIs */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
+                  <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl">
+                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                      Total Plays
+                    </div>
+                    <div className="text-2xl font-black text-slate-900 mt-1">
+                      {analytics.gameAnalytics.totalGamesPlayed}
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">Across all events</div>
+                  </div>
+
+                  {canViewRevenue && analytics.gameAnalytics.totalGameRevenue !== null && (
+                    <div className="p-3.5 bg-emerald-50/50 border border-emerald-200/80 rounded-xl">
+                      <div className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">
+                        Game Revenue
+                      </div>
+                      <div className="text-2xl font-black text-emerald-800 mt-1">
+                        ₹{analytics.gameAnalytics.totalGameRevenue.toLocaleString('en-IN', {
+                          minimumFractionDigits: 0,
+                          maximumFractionDigits: 0,
+                        })}
+                      </div>
+                      <div className="text-[11px] text-emerald-600 mt-0.5">Collected entry fees</div>
+                    </div>
+                  )}
+
+                  <div className="p-3.5 bg-indigo-50/50 border border-indigo-200/80 rounded-xl">
+                    <div className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider">
+                      Win Rate
+                    </div>
+                    <div className="text-2xl font-black text-indigo-900 mt-1">
+                      {analytics.gameAnalytics.winRate}%
+                    </div>
+                    <div className="text-[11px] text-indigo-600 mt-0.5">
+                      {analytics.gameAnalytics.totalWins} Wins / {analytics.gameAnalytics.totalLosses} Losses
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 bg-amber-50/50 border border-amber-200/80 rounded-xl">
+                    <div className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">
+                      Rewards Issued
+                    </div>
+                    <div className="text-2xl font-black text-amber-900 mt-1">
+                      {analytics.gameAnalytics.totalRewardsIssued} units
+                    </div>
+                    <div className="text-[11px] text-amber-600 mt-0.5">
+                      {canViewRevenue && analytics.gameAnalytics.estimatedRewardValue !== null && analytics.gameAnalytics.estimatedRewardValue > 0
+                        ? `₹${analytics.gameAnalytics.estimatedRewardValue.toFixed(0)} retail value`
+                        : 'Physical items awarded'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Per-Game Breakdown Table */}
+                <div className="mt-5">
+                  <h4 className="text-xs font-bold text-slate-900 mb-2 uppercase tracking-wider">
+                    Breakdown By Game
+                  </h4>
+                  {analytics.gameAnalytics.gameBreakdown.length === 0 ? (
+                    <div className="py-6 text-center text-xs text-slate-400">
+                      No game sessions recorded in this timeframe.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold uppercase tracking-wider text-[10px]">
+                          <tr>
+                            <th className="px-4 py-2.5">Game Name</th>
+                            <th className="px-4 py-2.5">Project</th>
+                            <th className="px-4 py-2.5 text-right">Plays</th>
+                            <th className="px-4 py-2.5 text-right">Wins</th>
+                            <th className="px-4 py-2.5 text-right">Losses</th>
+                            <th className="px-4 py-2.5 text-right">Win Rate</th>
+                            <th className="px-4 py-2.5 text-right">Rewards Distributed</th>
+                            {canViewRevenue && (
+                              <th className="px-4 py-2.5 text-right">Total Revenue (₹)</th>
+                            )}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {analytics.gameAnalytics.gameBreakdown.map(g => (
+                            <tr key={g.gameId} className="hover:bg-slate-50/50">
+                              <td className="px-4 py-2.5 font-bold text-slate-900 flex items-center gap-1.5">
+                                <Gamepad2 className="w-3.5 h-3.5 text-indigo-500" />
+                                <span>{g.gameName}</span>
+                              </td>
+                              <td className="px-4 py-2.5 text-slate-600 font-medium">
+                                <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 border border-slate-200">
+                                  {g.projectName}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-black text-slate-900">
+                                {g.plays}
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-bold text-emerald-700">
+                                {g.wins}
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-bold text-amber-700">
+                                {g.losses}
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-semibold text-slate-800">
+                                {g.winRate}%
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-bold text-slate-900">
+                                {g.rewardsIssued}
+                              </td>
+                              {canViewRevenue && (
+                                <td className="px-4 py-2.5 text-right font-black text-emerald-700">
+                                  {g.revenue !== undefined
+                                    ? `₹${g.revenue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                                    : '—'}
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </>

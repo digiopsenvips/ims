@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { api } from '../lib/api';
@@ -25,6 +26,7 @@ import {
   Search,
   ChevronDown,
   Zap,
+  Gamepad2,
 } from 'lucide-react';
 
 export const MemberSalePortalPage: React.FC = () => {
@@ -587,8 +589,17 @@ export const MemberSalePortalPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Active Event Selector */}
+        {/* Play Game Quick Action & Active Event Selector */}
         <div className="flex items-center gap-2 w-full sm:w-auto">
+          <Link
+            to={`/games/play${selectedEventId ? `?eventId=${selectedEventId}` : ''}`}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-2xs transition-all shrink-0 cursor-pointer"
+            title="Switch to Game Reward terminal"
+          >
+            <Gamepad2 className="w-3.5 h-3.5" />
+            <span>🎮 Play Game</span>
+          </Link>
+
           <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0 hidden sm:inline">
             Stall:
           </span>

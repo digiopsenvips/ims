@@ -19,6 +19,8 @@ import {
   Sparkles,
   Zap,
   Activity,
+  Gamepad2,
+  Trophy,
 } from 'lucide-react';
 
 export const DashboardPage: React.FC = () => {
@@ -65,11 +67,13 @@ export const DashboardPage: React.FC = () => {
     socket.on('sale:created', loadDashboardData);
     socket.on('inventory:updated', loadDashboardData);
     socket.on('event:updated', loadDashboardData);
+    socket.on('game:played', loadDashboardData);
 
     return () => {
       socket.off('sale:created', loadDashboardData);
       socket.off('inventory:updated', loadDashboardData);
       socket.off('event:updated', loadDashboardData);
+      socket.off('game:played', loadDashboardData);
     };
   }, [socket]);
 
@@ -88,6 +92,23 @@ export const DashboardPage: React.FC = () => {
   const totalRevenue = sales.reduce((acc, s) => acc + (s.totalAmount || 0), 0);
   const totalStockOnHand = inventory.reduce((acc, i) => acc + i.quantityOnHand, 0);
   const averageTransactionValue = sales.length > 0 ? totalRevenue / sales.length : 0;
+
+  // Games stats breakdown
+  const gameSales = useMemo(() => {
+    return sales.filter(s => s.transactionType === 'GAME' || !!s.gameId);
+  }, [sales]);
+
+  const gameRevenue = useMemo(() => {
+    return gameSales.reduce((acc, s) => acc + (s.totalAmount || 0), 0);
+  }, [gameSales]);
+
+  const gameWins = useMemo(() => {
+    return gameSales.filter(s => s.gameSession?.result === 'WIN').length;
+  }, [gameSales]);
+
+  const gameLosses = useMemo(() => {
+    return gameSales.filter(s => s.gameSession?.result === 'LOSE').length;
+  }, [gameSales]);
 
   // Active event specific metrics
   const activeEventSales = useMemo(() => {
@@ -187,6 +208,14 @@ export const DashboardPage: React.FC = () => {
               </div>
 
               <Link
+                to="/games/play"
+                className="inline-flex items-center justify-center gap-2 px-4 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-md transition-all active:scale-95"
+              >
+                <Gamepad2 className="w-4 h-4" />
+                <span>Play Game</span>
+              </Link>
+
+              <Link
                 to="/sales-entry"
                 className="inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-md transition-all active:scale-95"
               >
@@ -211,6 +240,13 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2">
+            <Link
+              to="/games/play"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg shadow-xs transition-colors"
+            >
+              <Gamepad2 className="w-4 h-4" />
+              <span>Play Game</span>
+            </Link>
             <Link
               to="/sales-entry"
               className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg shadow-xs transition-colors"
@@ -458,6 +494,20 @@ export const DashboardPage: React.FC = () => {
             )}
 
             <Link
+              to="/games/play"
+              className="p-3.5 bg-indigo-50/70 hover:bg-indigo-100/70 border border-indigo-200/80 rounded-xl transition-all group flex items-start justify-between"
+            >
+              <div>
+                <div className="text-xs font-bold text-indigo-950 group-hover:text-indigo-900 transition-colors flex items-center gap-1.5">
+                  <Gamepad2 className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Stall Games (Play)</span>
+                </div>
+                <div className="text-[11px] text-indigo-700/70 mt-0.5">Quick play & reward payout</div>
+              </div>
+              <ArrowUpRight className="w-4 h-4 text-indigo-400 group-hover:text-indigo-700 transition-colors shrink-0 mt-0.5" />
+            </Link>
+
+            <Link
               to="/events"
               className="p-3.5 bg-slate-50 hover:bg-slate-100/80 border border-slate-200/70 hover:border-slate-300 rounded-xl transition-all group flex items-start justify-between"
             >
@@ -472,6 +522,19 @@ export const DashboardPage: React.FC = () => {
 
             {(isDeveloper || isAdmin) && (
               <>
+                <Link
+                  to="/games"
+                  className="p-3.5 bg-slate-50 hover:bg-slate-100/80 border border-slate-200/70 hover:border-slate-300 rounded-xl transition-all group flex items-start justify-between"
+                >
+                  <div>
+                    <div className="text-xs font-bold text-slate-900 group-hover:text-slate-950 transition-colors">
+                      Manage Games
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">Prizes, fees & rules setup</div>
+                  </div>
+                  <Gamepad2 className="w-4 h-4 text-slate-400 group-hover:text-slate-700 transition-colors shrink-0 mt-0.5" />
+                </Link>
+
                 <Link
                   to="/projects-products"
                   className="p-3.5 bg-slate-50 hover:bg-slate-100/80 border border-slate-200/70 hover:border-slate-300 rounded-xl transition-all group flex items-start justify-between"
@@ -499,6 +562,82 @@ export const DashboardPage: React.FC = () => {
                 </Link>
               </>
             )}
+          </div>
+        </div>
+      </div>
+
+      {/* 3.5. Dedicated Stall Games Section */}
+      <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-900 text-white rounded-2xl p-5 shadow-xs border border-indigo-800/40">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-300">
+              <Gamepad2 className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-black text-white tracking-wide uppercase">Stall Games & Rewards</h2>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/30 text-indigo-200 border border-indigo-400/30">
+                  Live Operations
+                </span>
+              </div>
+              <p className="text-xs text-indigo-200/80 mt-0.5">
+                Stall attraction games, entry fees, and reward product distributions
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link
+              to="/games/play"
+              className="px-3.5 py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+            >
+              <Gamepad2 className="w-3.5 h-3.5" />
+              <span>Launch Game</span>
+            </Link>
+            <Link
+              to="/games"
+              className="px-3.5 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-lg border border-white/15 transition-colors"
+            >
+              Manage Catalog
+            </Link>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-white/10 text-xs">
+          <div className="bg-white/5 rounded-xl p-3 border border-white/5">
+            <span className="text-[10px] uppercase font-bold text-indigo-200/70 block">Total Plays</span>
+            <span className="text-xl font-black text-white mt-1 block">{gameSales.length}</span>
+            <span className="text-[10px] text-indigo-200/60 mt-0.5 block">Played by visitors</span>
+          </div>
+          {canViewRevenue && (
+            <div className="bg-white/5 rounded-xl p-3 border border-white/5">
+              <span className="text-[10px] uppercase font-bold text-indigo-200/70 block">Game Revenue</span>
+              <span className="text-xl font-black text-emerald-400 mt-1 block">
+                ₹{gameRevenue.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+              </span>
+              <span className="text-[10px] text-indigo-200/60 mt-0.5 block">Collected entry fees</span>
+            </div>
+          )}
+          <div className="bg-white/5 rounded-xl p-3 border border-white/5">
+            <span className="text-[10px] uppercase font-bold text-indigo-200/70 block">Wins vs Losses</span>
+            <div className="text-base font-black text-white mt-1 flex items-center gap-1.5">
+              <span className="text-emerald-400 font-bold">{gameWins}W</span>
+              <span className="text-white/40">/</span>
+              <span className="text-amber-400 font-bold">{gameLosses}L</span>
+            </div>
+            <span className="text-[10px] text-indigo-200/60 mt-0.5 block">
+              {gameSales.length > 0 ? `${Math.round((gameWins / gameSales.length) * 100)}% Win Rate` : 'No plays yet'}
+            </span>
+          </div>
+          <div className="bg-white/5 rounded-xl p-3 border border-white/5">
+            <span className="text-[10px] uppercase font-bold text-indigo-200/70 block">Sessions Ledger</span>
+            <Link
+              to="/game-sessions"
+              className="text-xs font-bold text-indigo-300 hover:text-white mt-2 inline-flex items-center gap-1 transition-colors"
+            >
+              <span>View Sessions</span>
+              <ArrowUpRight className="w-3.5 h-3.5" />
+            </Link>
+            <span className="text-[10px] text-indigo-200/60 mt-0.5 block">Complete audit trail</span>
           </div>
         </div>
       </div>
@@ -531,10 +670,10 @@ export const DashboardPage: React.FC = () => {
               <thead className="bg-slate-50/60 text-slate-500 border-b border-slate-100 font-bold uppercase tracking-wider text-[10px]">
                 <tr>
                   <th className="px-5 py-3">Receipt / ID</th>
-                  <th className="px-5 py-3">Product</th>
+                  <th className="px-5 py-3">Product / Game</th>
                   <th className="px-5 py-3">Stall / Event</th>
                   <th className="px-5 py-3">Seller</th>
-                  <th className="px-5 py-3 text-right">Units</th>
+                  <th className="px-5 py-3 text-right">Units / Plays</th>
                   {canViewRevenue && <th className="px-5 py-3 text-right">Amount (₹)</th>}
                   <th className="px-5 py-3">Payment</th>
                   <th className="px-5 py-3">Time</th>
@@ -547,10 +686,30 @@ export const DashboardPage: React.FC = () => {
                       #{sale.receiptNumber ?? sale.id}
                     </td>
                     <td className="px-5 py-3.5 font-semibold text-slate-900">
-                      {sale.productName}
-                      <span className="block text-[10px] text-slate-400 font-normal mt-0.5">
-                        {sale.projectName} &bull; {sale.productId}
-                      </span>
+                      {sale.transactionType === 'GAME' ? (
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-indigo-950 font-bold">🎮 {sale.game?.name || sale.productName}</span>
+                            {sale.gameSession && (
+                              <span className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase ${
+                                sale.gameSession.result === 'WIN' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                              }`}>
+                                {sale.gameSession.result}
+                              </span>
+                            )}
+                          </div>
+                          <span className="block text-[10px] text-slate-400 font-normal mt-0.5">
+                            {sale.rewardDescription ? `Reward: ${sale.rewardDescription}` : 'Stall Game'}
+                          </span>
+                        </div>
+                      ) : (
+                        <div>
+                          {sale.productName}
+                          <span className="block text-[10px] text-slate-400 font-normal mt-0.5">
+                            {sale.projectName} &bull; {sale.productId}
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td className="px-5 py-3.5 text-slate-600 font-medium">
                       {sale.eventName}

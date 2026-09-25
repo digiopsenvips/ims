@@ -4,6 +4,14 @@ export type EventStatus = 'UPCOMING' | 'ACTIVE' | 'ENDED';
 
 export type PaymentMethod = 'CASH' | 'UPI' | 'CASH_UPI';
 
+export type TransactionType = 'SALE' | 'GAME';
+
+export type GameStatus = 'ACTIVE' | 'INACTIVE';
+
+export type GameResult = 'WIN' | 'LOSE';
+
+export type GameSessionStatus = 'COMPLETED' | 'CANCELLED';
+
 export interface User {
   id: string;
   name: string;
@@ -99,6 +107,27 @@ export interface Sale {
   id: number; // Internal database ID
   receiptNumber?: number; // Canonical sequential receipt number (#1, #2, #3...)
   serialNumber?: number; // Global chronological S.No. (1 = oldest transaction)
+  transactionType?: TransactionType; // 'SALE' | 'GAME'
+  gameId?: string | null;
+  gameName?: string | null;
+  game?: {
+    id: string;
+    name: string;
+    entryFee?: number;
+  } | null;
+  description?: string;
+  rewardDescription?: string;
+  gameSession?: {
+    sessionCode: string;
+    result: GameResult;
+    rewardProductName: string;
+    rewardQuantity: number;
+    rewardDescription?: string;
+    rewardProduct?: {
+      id: string;
+      name: string;
+    };
+  } | null;
   clientTxId?: string | null;
   eventId: string;
   eventName: string;
@@ -179,6 +208,69 @@ export interface QueuedTransaction {
 
 export type QueuedSale = QueuedTransaction;
 
+export interface GameRewardInfo {
+  productId: string;
+  productName: string;
+  quantity: number;
+  availableStock: number;
+  isLowStock: boolean;
+  isOutOfStock: boolean;
+}
+
+export interface Game {
+  id: string;
+  name: string;
+  description?: string | null;
+  projectId?: string | null;
+  projectName?: string | null;
+  projectCode?: string | null;
+  eventId?: string | null;
+  eventName?: string | null;
+  eventStatus?: EventStatus | null;
+  entryFee: number;
+  status: GameStatus;
+  winReward: GameRewardInfo;
+  loseReward?: GameRewardInfo | null;
+  stats?: {
+    totalPlays: number;
+    wins: number;
+    losses: number;
+    winRate: number;
+    totalRevenue: number;
+    totalRewardsIssued: number;
+  };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GameSession {
+  id: string;
+  sessionCode: string; // "GS-000001"
+  receiptNumber: number;
+  gameId: string;
+  gameName: string;
+  projectId?: string | null;
+  projectName?: string | null;
+  eventId: string;
+  eventName: string;
+  sellerId?: string | null;
+  sellerName: string;
+  sellerUsername?: string;
+  entryFee: number;
+  paymentMethod: PaymentMethod;
+  cashAmount?: number | null;
+  upiAmount?: number | null;
+  result: GameResult;
+  rewardProductId: string;
+  rewardProductName: string;
+  rewardQuantity: number;
+  rewardDescription: string;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  status: GameSessionStatus;
+  createdAt: string;
+}
+
 export interface AnalyticsData {
   canViewRevenue: boolean;
   canViewEventBreakdown: boolean;
@@ -211,6 +303,36 @@ export interface AnalyticsData {
     units: number;
     revenue?: number;
   }[];
+  gameAnalytics?: {
+    totalGamesPlayed: number;
+    totalGameRevenue: number | null;
+    totalWins: number;
+    totalLosses: number;
+    winRate: number;
+    totalRewardsIssued: number;
+    estimatedRewardValue: number | null;
+    gameBreakdown: {
+      gameId: string;
+      gameName: string;
+      projectName: string;
+      plays: number;
+      revenue?: number;
+      wins: number;
+      losses: number;
+      winRate: number;
+      rewardsIssued: number;
+    }[];
+    eventBreakdown: {
+      eventId: string;
+      eventName: string;
+      plays: number;
+      revenue?: number;
+      wins: number;
+      losses: number;
+      winRate: number;
+      rewardsIssued: number;
+    }[];
+  };
 }
 
 export interface CartItem {

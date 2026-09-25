@@ -13,6 +13,9 @@ import {
   LogOut,
   X,
   Sparkles,
+  Gamepad2,
+  Dices,
+  History,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -52,6 +55,30 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           to: '/sales',
           icon: ReceiptText,
           show: !isMember,
+        },
+      ],
+    },
+    {
+      title: 'Stall Operations',
+      items: [
+        {
+          label: 'Play Game',
+          to: '/games/play',
+          icon: Gamepad2,
+          badge: 'PLAY',
+          show: true,
+        },
+        {
+          label: 'Games',
+          to: '/games',
+          icon: Dices,
+          show: isDeveloper || isAdmin || isHead,
+        },
+        {
+          label: 'Game Sessions',
+          to: '/game-sessions',
+          icon: History,
+          show: isDeveloper || isAdmin || isHead,
         },
       ],
     },

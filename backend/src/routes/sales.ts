@@ -5,7 +5,7 @@ import { AuthenticatedRequest } from '../types';
 import { sanitizeSaleForUser, sanitizeSalesListForUser } from '../middleware/piiSanitizer';
 import { requireRoles } from '../middleware/rbac';
 import { broadcast } from '../sockets';
-import { PaymentMethod, Role, Prisma } from '@prisma/client';
+import { PaymentMethod, Role, Prisma, TransactionType } from '@prisma/client';
 import { computeEventStatus, reconcileSingleEvent } from '../services/eventLifecycle';
 
 const router = Router();
@@ -22,6 +22,7 @@ router.get(
       startDate,
       endDate,
       paymentMethod,
+      transactionType,
       search,
       page: rawPage,
       pageSize: rawPageSize,
@@ -61,6 +62,9 @@ router.get(
       if (paymentMethod && (paymentMethod === 'CASH' || paymentMethod === 'UPI' || paymentMethod === 'CASH_UPI')) {
         whereClause.paymentMethod = paymentMethod as PaymentMethod;
       }
+      if (transactionType && (transactionType === 'SALE' || transactionType === 'GAME')) {
+        whereClause.transactionType = transactionType as TransactionType;
+      }
       if (startDate || endDate) {
         whereClause.saleTime = {};
         if (startDate) whereClause.saleTime.gte = new Date(String(startDate));
@@ -93,6 +97,8 @@ router.get(
           { event: { name: { contains: term, mode: 'insensitive' } } },
           { customerName: { contains: term, mode: 'insensitive' } },
           { customerPhone: { contains: term, mode: 'insensitive' } },
+          { game: { name: { contains: term, mode: 'insensitive' } } },
+          { gameSession: { sessionCode: { contains: term, mode: 'insensitive' } } },
         ];
         const num = parseInt(term.replace(/^#/, ''), 10);
         if (!isNaN(num)) {
@@ -126,6 +132,27 @@ router.get(
                 name: true,
                 location: true,
                 status: true,
+              },
+            },
+            game: {
+              include: {
+                project: {
+                  select: {
+                    id: true,
+                    name: true,
+                    code: true,
+                  },
+                },
+              },
+            },
+            gameSession: {
+              include: {
+                rewardProduct: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
               },
             },
             product: {
@@ -218,20 +245,37 @@ router.get(
         const primaryProject = uniqueProjects.length > 0 ? uniqueProjects.join(' + ') : (s.product?.project?.name || 'Multiple');
         const productSummary = rawItems.map(item => `${item.productName} × ${item.quantity}`).join(', ') || s.product?.name || 'No Products';
 
+        const isGame = s.transactionType === 'GAME';
+        const displayProductName = isGame ? (s.game?.name || 'Stall Game') : productSummary;
+        const displayProjectName = isGame ? (s.game?.project?.name || 'Upcycle') : primaryProject;
+
         const firstItem = rawItems[0] || {};
 
         return {
           id: s.id, // Internal database ID
           receiptNumber: canonicalReceiptNumber, // Canonical sequential receipt number (#1, #2, #3...)
           serialNumber: canonicalReceiptNumber, // Backward compatibility alias
+          transactionType: s.transactionType || 'SALE',
+          gameId: s.gameId || null,
+          gameName: s.game?.name || null,
+          gameSession: s.gameSession
+            ? {
+                sessionCode: s.gameSession.sessionCode,
+                result: s.gameSession.result,
+                rewardProductName: s.gameSession.rewardProduct?.name || 'Reward',
+                rewardQuantity: s.gameSession.rewardQuantity,
+                rewardDescription: `${s.gameSession.rewardProduct?.name || 'Reward'} × ${s.gameSession.rewardQuantity}`,
+              }
+            : null,
           clientTxId: s.clientTxId,
           eventId: s.eventId,
           eventName: s.event.name,
-          productId: firstItem.productId || s.productId || '',
-          productName: productSummary,
-          projectId: firstItem.projectId || s.product?.project?.id || '',
-          projectName: primaryProject,
-          projectNames: uniqueProjects,
+          productId: isGame ? (s.gameId || '') : (firstItem.productId || s.productId || ''),
+          productName: displayProductName,
+          description: displayProductName,
+          projectId: isGame ? (s.game?.projectId || '') : (firstItem.projectId || s.product?.project?.id || ''),
+          projectName: displayProjectName,
+          projectNames: isGame ? [displayProjectName] : uniqueProjects,
           memberId: s.sellerUserIdAtSale || s.memberId || '',
           memberName: s.sellerNameAtSale || s.member?.name || 'Unknown Member',
           memberUsername: s.sellerUsernameAtSale || s.member?.username || '',
