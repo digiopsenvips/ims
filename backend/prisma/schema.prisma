@@ -29,6 +29,19 @@ enum PaymentMethod {
 enum TransactionType {
   SALE
   GAME
+  COMBO
+}
+
+enum ComboType {
+  FIXED_QUANTITY
+  MULTI_PRODUCT
+  PICK_ANY
+  BUY_X_GET_Y
+}
+
+enum ComboStatus {
+  ACTIVE
+  INACTIVE
 }
 
 enum GameStatus {
@@ -85,6 +98,7 @@ model Project {
   updatedAt DateTime  @updatedAt @map("updated_at")
   products  Product[]
   games     Game[]
+  combos    Combo[]
 
   @@map("projects")
 }
@@ -95,6 +109,7 @@ model Product {
   projectId       String            @map("project_id")
   basePrice       Decimal?          @map("base_price") @db.Decimal(10, 2)
   isDeleted       Boolean           @default(false) @map("is_deleted")
+  isArchived      Boolean           @default(false) @map("is_archived")
   createdAt       DateTime          @default(now()) @map("created_at")
   updatedAt       DateTime          @updatedAt @map("updated_at")
   project         Project           @relation(fields: [projectId], references: [id], onDelete: Restrict)
@@ -105,8 +120,10 @@ model Product {
   winRewardGames  Game[]            @relation("GameWinReward")
   loseRewardGames Game[]            @relation("GameLoseReward")
   rewardSessions  GameSession[]
+  comboItems      ComboItem[]
 
   @@index([projectId])
+  @@index([isArchived])
   @@map("products")
 }
 
@@ -137,6 +154,7 @@ model Event {
   sales         Sale[]
   games         Game[]
   gameSessions  GameSession[]
+  combos        Combo[]
 
   @@index([status])
   @@map("events")
@@ -245,6 +263,9 @@ model Sale {
   saleTime             DateTime        @default(now()) @map("sale_time")
   createdAt            DateTime        @default(now()) @map("created_at")
 
+  comboId              String?         @map("combo_id")
+  comboName            String?         @map("combo_name")
+
   // Legacy fields for backward compatibility
   productId            String?         @map("product_id")
   quantity             Int?
@@ -254,6 +275,7 @@ model Sale {
   member               User?           @relation(fields: [memberId], references: [id], onDelete: SetNull)
   product              Product?        @relation(fields: [productId], references: [id], onDelete: Restrict)
   game                 Game?           @relation(fields: [gameId], references: [id], onDelete: SetNull)
+  combo                Combo?          @relation(fields: [comboId], references: [id], onDelete: SetNull)
   gameSession          GameSession?
   items                SaleItem[]
 
@@ -264,6 +286,7 @@ model Sale {
   @@index([productId])
   @@index([transactionType])
   @@index([gameId])
+  @@index([comboId])
   @@map("sales")
 }
 
@@ -282,4 +305,48 @@ model SaleItem {
   @@index([saleId])
   @@index([productId])
   @@map("sale_items")
+}
+
+model Combo {
+  id             String      @id @default(uuid())
+  name           String
+  description    String?
+  comboType      ComboType   @default(FIXED_QUANTITY) @map("combo_type")
+  price          Decimal     @db.Decimal(10, 2)
+  status         ComboStatus @default(ACTIVE)
+  isArchived     Boolean     @default(false) @map("is_archived")
+  eventId        String?     @map("event_id")
+  projectId      String?     @map("project_id")
+  minItems       Int?        @default(1) @map("min_items")
+  freeItemsCount Int?        @default(0) @map("free_items_count")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  event          Event?      @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  project        Project?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  items          ComboItem[]
+  sales          Sale[]
+
+  @@index([status])
+  @@index([eventId])
+  @@index([projectId])
+  @@index([comboType])
+  @@map("combos")
+}
+
+model ComboItem {
+  id        String   @id @default(uuid())
+  comboId   String   @map("combo_id")
+  productId String   @map("product_id")
+  quantity  Int      @default(1)
+  isFree    Boolean  @default(false) @map("is_free")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  combo     Combo    @relation(fields: [comboId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([comboId])
+  @@index([productId])
+  @@map("combo_items")
 }

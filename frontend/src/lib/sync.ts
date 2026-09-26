@@ -107,6 +107,10 @@ class SyncManager {
     customerName?: string;
     customerPhone?: string;
     saleTime: string;
+    comboId?: string;
+    comboName?: string;
+    comboQuantity?: number;
+    transactionType?: any;
     items: Array<{
       productId: string;
       productName: string;
@@ -128,6 +132,10 @@ class SyncManager {
       upiAmount: orderData.upiAmount,
       customerName: orderData.customerName,
       customerPhone: orderData.customerPhone,
+      comboId: orderData.comboId,
+      comboName: orderData.comboName,
+      comboQuantity: orderData.comboQuantity,
+      transactionType: orderData.transactionType,
       saleTime: orderData.saleTime,
       totalUnits,
       totalAmount,

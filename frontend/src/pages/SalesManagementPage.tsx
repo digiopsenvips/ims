@@ -49,7 +49,7 @@ export const SalesManagementPage: React.FC = () => {
   const activeTab = (searchParams.get('tab') === 'per-event' ? 'per-event' : 'all-time') as 'all-time' | 'per-event';
   const selectedEventId = searchParams.get('eventId') || '';
   const paymentFilter = ((searchParams.get('payment') as 'ALL' | 'UPI' | 'CASH' | 'CASH_UPI') || 'ALL');
-  const transactionFilter = ((searchParams.get('txType') as 'ALL' | 'SALES' | 'GAMES') || 'ALL');
+  const transactionFilter = ((searchParams.get('txType') as 'ALL' | 'SALES' | 'COMBOS' | 'GAMES') || 'ALL');
   const searchFromUrl = searchParams.get('search') || '';
 
   // Local state
@@ -93,7 +93,7 @@ export const SalesManagementPage: React.FC = () => {
       tab?: 'all-time' | 'per-event';
       eventId?: string;
       payment?: 'ALL' | 'UPI' | 'CASH' | 'CASH_UPI';
-      txType?: 'ALL' | 'SALES' | 'GAMES';
+      txType?: 'ALL' | 'SALES' | 'COMBOS' | 'GAMES';
       search?: string;
     }) => {
       const newParams = new URLSearchParams(searchParams);
@@ -166,6 +166,8 @@ export const SalesManagementPage: React.FC = () => {
       }
       if (transactionFilter === 'SALES') {
         query.set('transactionType', 'SALE');
+      } else if (transactionFilter === 'COMBOS') {
+        query.set('transactionType', 'COMBO');
       } else if (transactionFilter === 'GAMES') {
         query.set('transactionType', 'GAME');
       }
@@ -602,7 +604,7 @@ export const SalesManagementPage: React.FC = () => {
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-slate-500">Transaction:</span>
           <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5 text-xs">
-            {(['ALL', 'SALES', 'GAMES'] as const).map(t => (
+            {(['ALL', 'SALES', 'COMBOS', 'GAMES'] as const).map(t => (
               <button
                 key={t}
                 onClick={() => updateUrlState({ page: 1, txType: t })}
@@ -706,6 +708,10 @@ export const SalesManagementPage: React.FC = () => {
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                             🎮 GAME
                           </span>
+                        ) : sale.transactionType === 'COMBO' || sale.comboId ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-pink-50 text-pink-700 border border-pink-200">
+                            🎁 COMBO
+                          </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
                             SALE
@@ -750,6 +756,22 @@ export const SalesManagementPage: React.FC = () => {
                             ) : sale.rewardDescription ? (
                               <div className="text-[11px] text-slate-600 mt-0.5">
                                 Reward: <span className="font-semibold">{sale.rewardDescription}</span>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : (sale.transactionType === 'COMBO' || sale.comboId) ? (
+                          <div>
+                            <div className="font-bold text-pink-900 flex items-center gap-1.5 flex-wrap">
+                              <span>🎁 {sale.comboName || sale.productName || 'Combo Offer'}</span>
+                            </div>
+                            {sale.items && sale.items.length > 0 ? (
+                              <div className="mt-1 space-y-0.5 border-l-2 border-pink-200 pl-2">
+                                {sale.items.map((item, itIdx) => (
+                                  <div key={itIdx} className="text-[11px] text-slate-600 flex items-center gap-1.5">
+                                    <span className="font-medium text-slate-800">{item.productName}</span>
+                                    <span className="font-bold text-slate-600">× {item.quantity}</span>
+                                  </div>
+                                ))}
                               </div>
                             ) : null}
                           </div>

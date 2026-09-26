@@ -20,6 +20,7 @@ import { GamesPage } from './pages/GamesPage';
 import { GamePlayPage } from './pages/GamePlayPage';
 import { GameSessionsPage } from './pages/GameSessionsPage';
 import { CustomerGameQrPage } from './pages/CustomerGameQrPage';
+import { CombosPage } from './pages/CombosPage';
 
 export const App: React.FC = () => {
   const { user, isMember } = useAuth();
@@ -119,6 +120,15 @@ export const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <EventDetailsPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="combos"
+          element={
+            <ProtectedRoute allowedRoles={['DEVELOPER', 'ADMIN', 'HEAD']}>
+              <CombosPage />
             </ProtectedRoute>
           }
         />

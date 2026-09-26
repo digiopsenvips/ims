@@ -4,7 +4,11 @@ export type EventStatus = 'UPCOMING' | 'ACTIVE' | 'ENDED';
 
 export type PaymentMethod = 'CASH' | 'UPI' | 'CASH_UPI';
 
-export type TransactionType = 'SALE' | 'GAME';
+export type TransactionType = 'SALE' | 'GAME' | 'COMBO';
+
+export type ComboType = 'FIXED_QUANTITY' | 'MULTI_PRODUCT' | 'PICK_ANY' | 'BUY_X_GET_Y';
+
+export type ComboStatus = 'ACTIVE' | 'INACTIVE';
 
 export type GameStatus = 'ACTIVE' | 'INACTIVE';
 
@@ -38,6 +42,7 @@ export interface Product {
   projectId: string;
   basePrice?: number | null;
   isDeleted?: boolean;
+  isArchived?: boolean;
   project?: Project;
   inventory?: Inventory | null;
   createdAt: string;
@@ -124,7 +129,15 @@ export interface Sale {
   id: number; // Internal database ID
   receiptNumber?: number; // Canonical sequential receipt number (#1, #2, #3...)
   serialNumber?: number; // Global chronological S.No. (1 = oldest transaction)
-  transactionType?: TransactionType; // 'SALE' | 'GAME'
+  transactionType?: TransactionType; // 'SALE' | 'GAME' | 'COMBO'
+  comboId?: string | null;
+  comboName?: string | null;
+  combo?: {
+    id: string;
+    name: string;
+    type: ComboType;
+    price: number;
+  } | null;
   gameId?: string | null;
   gameName?: string | null;
   game?: {
@@ -218,6 +231,10 @@ export interface QueuedTransaction {
   upiAmount?: number;
   customerName?: string;
   customerPhone?: string;
+  comboId?: string;
+  comboName?: string;
+  comboQuantity?: number;
+  transactionType?: TransactionType;
   saleTime: string;
   queuedAt: number;
   syncStatus: 'pending' | 'syncing' | 'failed';
@@ -350,6 +367,18 @@ export interface AnalyticsData {
       rewardsIssued: number;
     }[];
   };
+  comboAnalytics?: {
+    totalCombosSold: number;
+    totalComboRevenue: number | null;
+    totalComboUnits: number;
+    comboBreakdown: {
+      comboId: string;
+      comboName: string;
+      salesCount: number;
+      revenue?: number;
+      unitsSold: number;
+    }[];
+  };
 }
 
 export interface CartItem {
@@ -359,4 +388,64 @@ export interface CartItem {
   priceAtEvent: number;
   quantity: number;
   remainingStock: number;
+  isCombo?: boolean;
+  comboId?: string;
+  comboName?: string;
+  comboType?: ComboType;
+  normalValue?: number;
+  savings?: number;
+  components?: Array<{
+    productId: string;
+    productName: string;
+    quantity: number;
+  }>;
+}
+
+export interface ComboItem {
+  id: string;
+  comboId: string;
+  productId: string;
+  quantity: number;
+  isFree?: boolean;
+  product?: Product;
+}
+
+export interface Combo {
+  id: string;
+  name: string;
+  description?: string | null;
+  comboType: ComboType;
+  price: number;
+  status: ComboStatus;
+  isArchived: boolean;
+  eventId?: string | null;
+  eventName?: string | null;
+  projectId?: string | null;
+  projectName?: string | null;
+  projectCode?: string | null;
+  minItems?: number | null;
+  freeItemsCount?: number | null;
+  items: Array<{
+    id: string;
+    comboId: string;
+    productId: string;
+    productName: string;
+    projectName: string;
+    quantity: number;
+    isFree?: boolean;
+    basePrice?: number | null;
+    availableStock?: number;
+    isLowStock?: boolean;
+    isOutOfStock?: boolean;
+  }>;
+  normalValue?: number;
+  savings?: number;
+  savingsPercent?: number;
+  availableStock?: number;
+  isLowStock?: boolean;
+  isOutOfStock?: boolean;
+  salesCount?: number;
+  revenue?: number;
+  createdAt: string;
+  updatedAt: string;
 }

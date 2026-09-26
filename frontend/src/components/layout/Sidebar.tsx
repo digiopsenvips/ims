@@ -16,6 +16,7 @@ import {
   Gamepad2,
   Dices,
   History,
+  Gift,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -66,6 +67,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           to: '/events',
           icon: Calendar,
           show: isDeveloper || isAdmin || hasPermission('view_event_breakdown') || hasPermission('edit_events') || isHead || isMember,
+        },
+        {
+          label: 'Combos & Offers',
+          to: '/combos',
+          icon: Gift,
+          badge: 'DEALS',
+          show: isDeveloper || isAdmin || isHead,
         },
         {
           label: 'Games',

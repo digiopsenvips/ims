@@ -298,6 +298,41 @@ router.get(
         winRate: e.plays > 0 ? Math.round((e.wins / e.plays) * 1000) / 10 : 0,
       }));
 
+      // Combos analytics
+      const comboSales = sales.filter(s => s.transactionType === 'COMBO' || Boolean(s.comboId));
+      let totalCombosSold = comboSales.length;
+      let totalComboRevenue = 0;
+      let totalComboUnits = 0;
+      const comboBreakdownMap: Record<string, any> = {};
+
+      for (const cs of comboSales) {
+        const cRev = Number(cs.totalAmount);
+        totalComboRevenue += cRev;
+        const cUnits = (cs.items || []).reduce((sum, item) => sum + item.quantity, 0) || cs.quantity || 1;
+        totalComboUnits += cUnits;
+
+        const cId = cs.comboId || cs.comboName || 'unknown';
+        const cName = cs.comboName || (cs.comboId ? `Combo ${cs.comboId}` : 'Special Combo');
+
+        if (!comboBreakdownMap[cId]) {
+          comboBreakdownMap[cId] = {
+            comboId: cs.comboId || cId,
+            comboName: cName,
+            salesCount: 0,
+            revenue: 0,
+            unitsSold: 0,
+          };
+        }
+        comboBreakdownMap[cId].salesCount++;
+        comboBreakdownMap[cId].revenue += cRev;
+        comboBreakdownMap[cId].unitsSold += cUnits;
+      }
+
+      const comboBreakdown = Object.values(comboBreakdownMap).map((c: any) => ({
+        ...c,
+        revenue: canViewRevenue ? c.revenue : undefined,
+      }));
+
       res.json({
         canViewRevenue,
         canViewEventBreakdown,
@@ -320,6 +355,12 @@ router.get(
           estimatedRewardValue: canViewRevenue ? estimatedRewardValue : null,
           gameBreakdown,
           eventBreakdown: eventGameBreakdown,
+        },
+        comboAnalytics: {
+          totalCombosSold,
+          totalComboRevenue: canViewRevenue ? totalComboRevenue : null,
+          totalComboUnits,
+          comboBreakdown,
         },
       });
     } catch (error) {

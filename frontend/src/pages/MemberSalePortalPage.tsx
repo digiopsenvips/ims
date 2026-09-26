@@ -5,7 +5,7 @@ import { useSocket } from '../context/SocketContext';
 import { api } from '../lib/api';
 import { syncManager } from '../lib/sync';
 import { cacheEvents, getCachedEvents } from '../lib/db';
-import { AppEvent, EventAllocation, PaymentMethod, CartItem } from '../types';
+import { AppEvent, EventAllocation, PaymentMethod, CartItem, Combo, ComboType } from '../types';
 import {
   Receipt,
   CheckCircle2,
@@ -27,6 +27,9 @@ import {
   ChevronDown,
   Zap,
   Gamepad2,
+  Gift,
+  Tag,
+  Percent,
 } from 'lucide-react';
 
 export const MemberSalePortalPage: React.FC = () => {
@@ -35,6 +38,10 @@ export const MemberSalePortalPage: React.FC = () => {
 
   const [events, setEvents] = useState<AppEvent[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string>('');
+  const [combos, setCombos] = useState<Combo[]>([]);
+  const [portalTab, setPortalTab] = useState<'PRODUCTS' | 'COMBOS'>('PRODUCTS');
+  const [pickingCombo, setPickingCombo] = useState<Combo | null>(null);
+  const [pickSelectedMap, setPickSelectedMap] = useState<Record<string, number>>({});
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('UPI');
   const [splitCash, setSplitCash] = useState<string>('');
@@ -149,9 +156,27 @@ export const MemberSalePortalPage: React.FC = () => {
     }
   };
 
+  const fetchCombos = async () => {
+    try {
+      const url = selectedEventId
+        ? `/combos?eventId=${selectedEventId}&status=ACTIVE`
+        : '/combos?status=ACTIVE';
+      const data = await api.get(url);
+      if (data && Array.isArray(data.combos)) {
+        setCombos(data.combos);
+      }
+    } catch (err) {
+      console.warn('Failed to load combos:', err);
+    }
+  };
+
   useEffect(() => {
     fetchEvents();
   }, []);
+
+  useEffect(() => {
+    fetchCombos();
+  }, [selectedEventId]);
 
   // Listen for real-time inventory and event updates
   useEffect(() => {
@@ -159,18 +184,31 @@ export const MemberSalePortalPage: React.FC = () => {
 
     const handleInventoryUpdate = () => {
       fetchEvents();
+      fetchCombos();
     };
 
     const handleEventUpdate = () => {
+      fetchEvents();
+      fetchCombos();
+    };
+
+    const handleComboUpdate = () => {
+      fetchCombos();
       fetchEvents();
     };
 
     socket.on('inventory:updated', handleInventoryUpdate);
     socket.on('event:updated', handleEventUpdate);
+    socket.on('combo:created', handleComboUpdate);
+    socket.on('combo:updated', handleComboUpdate);
+    socket.on('combo:sold', handleComboUpdate);
 
     return () => {
       socket.off('inventory:updated', handleInventoryUpdate);
       socket.off('event:updated', handleEventUpdate);
+      socket.off('combo:created', handleComboUpdate);
+      socket.off('combo:updated', handleComboUpdate);
+      socket.off('combo:sold', handleComboUpdate);
     };
   }, [socket]);
 
@@ -220,20 +258,25 @@ export const MemberSalePortalPage: React.FC = () => {
     return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
   };
 
-  // Quick Sell: top 4-6 most frequently allocated or sold products in this event
+  // Quick Sell: top 4-6 most frequently allocated or sold products in this event (excluding legacy combo items)
   const quickSellProducts = useMemo(() => {
     if (!allocations || allocations.length === 0) return [];
     return [...allocations]
-      .filter(a => a.remainingQty > 0)
+      .filter(a => a.remainingQty > 0 && !['TAH-010', 'TAH-011', 'TAH-012'].includes(a.productId))
       .sort((a, b) => (b.soldQty || 0) - (a.soldQty || 0) || (b.remainingQty || 0) - (a.remainingQty || 0))
       .slice(0, 6);
   }, [allocations]);
 
-  // Filter allocations combining project selector and search query
+  // Filter allocations combining project selector and search query (excluding legacy combo items)
   const filteredAllocations = useMemo(() => {
     const term = searchQuery.trim().toLowerCase();
 
     return allocations.filter(item => {
+      // Exclude legacy combo products from normal products view
+      if (['TAH-010', 'TAH-011', 'TAH-012'].includes(item.productId)) {
+        return false;
+      }
+
       // 1. Project filter
       if (selectedProject !== 'ALL') {
         if ((item.projectName || '').toUpperCase() !== selectedProject.toUpperCase()) {
@@ -254,6 +297,67 @@ export const MemberSalePortalPage: React.FC = () => {
       return true;
     });
   }, [allocations, selectedProject, searchQuery]);
+
+  // Live calculation of stall stock for combos based on event stall allocations
+  const combosWithStallStock = useMemo(() => {
+    return combos
+      .map(combo => {
+        if (combo.isArchived || combo.status !== 'ACTIVE') return null;
+        if (combo.eventId && combo.eventId !== selectedEventId) return null;
+
+        let normalValue = 0;
+        let maxBundles = 999999;
+        let hasMissingComponent = false;
+
+        if (combo.comboType === 'PICK_ANY') {
+          const allowed = combo.items && combo.items.length > 0
+            ? combo.items.map(i => i.productId)
+            : allocations.map(a => a.productId);
+
+          let totalEligibleUnits = 0;
+          allowed.forEach(pId => {
+            const alloc = allocations.find(a => a.productId === pId);
+            if (alloc) {
+              totalEligibleUnits += alloc.remainingQty;
+              normalValue = Math.max(normalValue, Number(alloc.priceAtEvent) * (combo.minItems || 3));
+            }
+          });
+          const minItems = combo.minItems || 3;
+          maxBundles = Math.floor(totalEligibleUnits / minItems);
+        } else {
+          for (const item of combo.items) {
+            const alloc = allocations.find(a => a.productId === item.productId);
+            if (!alloc) {
+              hasMissingComponent = true;
+              maxBundles = 0;
+            } else {
+              normalValue += Number(alloc.priceAtEvent) * item.quantity;
+              const bundlesForComp = Math.floor(alloc.remainingQty / item.quantity);
+              if (bundlesForComp < maxBundles) {
+                maxBundles = bundlesForComp;
+              }
+            }
+          }
+        }
+
+        if (maxBundles === 999999) maxBundles = 0;
+
+        const dealPrice = Number(combo.price);
+        const savings = Math.max(0, normalValue - dealPrice);
+        const savingsPercent = normalValue > 0 ? Math.round((savings / normalValue) * 100) : 0;
+
+        return {
+          ...combo,
+          normalValue: normalValue > 0 ? normalValue : combo.normalValue,
+          savings,
+          savingsPercent,
+          availableStock: maxBundles,
+          isOutOfStock: maxBundles <= 0 || hasMissingComponent,
+          isLowStock: maxBundles > 0 && maxBundles < 4,
+        };
+      })
+      .filter((c): c is NonNullable<typeof c> => c !== null);
+  }, [combos, allocations, selectedEventId]);
 
   // Predictable sorting: Project ascending -> Product ID ascending (numeric-aware: TAH-001, TAH-002, UPC-001)
   const sortedAllocations = useMemo(() => {
@@ -358,6 +462,84 @@ export const MemberSalePortalPage: React.FC = () => {
     });
   };
 
+  // Add combo offer to customer bill
+  const handleAddComboToCart = (
+    combo: Combo,
+    customComponents?: Array<{ productId: string; productName: string; quantity: number }>
+  ) => {
+    setErrorMessage(null);
+
+    if (isEventEnded) {
+      setErrorMessage('This event has ended and is no longer accepting sales.');
+      return;
+    }
+    if (isEventUpcoming) {
+      setErrorMessage('This event has not started yet.');
+      return;
+    }
+
+    const components =
+      customComponents ||
+      combo.items.map(i => ({
+        productId: i.productId,
+        productName: i.productName,
+        quantity: i.quantity,
+      }));
+
+    // Stock check against current event allocations
+    for (const comp of components) {
+      const alloc = allocations.find(a => a.productId === comp.productId);
+      const remaining = alloc ? alloc.remainingQty : 0;
+      let alreadyInCart = 0;
+      cart.forEach(c => {
+        if (c.isCombo && c.components) {
+          const match = c.components.find(ci => ci.productId === comp.productId);
+          if (match) alreadyInCart += match.quantity * c.quantity;
+        } else if (c.productId === comp.productId) {
+          alreadyInCart += c.quantity;
+        }
+      });
+
+      if (comp.quantity + alreadyInCart > remaining) {
+        setErrorMessage(
+          `Cannot add combo. Insufficient stall stock for ${comp.productName} (${remaining} remaining in stall).`
+        );
+        return;
+      }
+    }
+
+    const cartKey = `combo-${combo.id}${
+      customComponents ? '-' + customComponents.map(c => `${c.productId}x${c.quantity}`).join('_') : ''
+    }`;
+
+    setCart(prevCart => {
+      const existing = prevCart.find(item => item.productId === cartKey);
+      if (existing) {
+        return prevCart.map(item =>
+          item.productId === cartKey ? { ...item, quantity: item.quantity + 1 } : item
+        );
+      }
+      return [
+        ...prevCart,
+        {
+          productId: cartKey,
+          productName: combo.name,
+          projectName: combo.projectName || 'Special Combo',
+          priceAtEvent: Number(combo.price),
+          quantity: 1,
+          remainingStock: combo.availableStock || 999,
+          isCombo: true,
+          comboId: combo.id,
+          comboName: combo.name,
+          comboType: combo.comboType,
+          normalValue: combo.normalValue,
+          savings: combo.savings,
+          components,
+        },
+      ];
+    });
+  };
+
   // Adjust quantity (+1 or -1) in bill. If reduced to 0, item is cleanly removed from bill.
   const handleUpdateQuantity = (productId: string, delta: number) => {
     setErrorMessage(null);
@@ -367,7 +549,28 @@ export const MemberSalePortalPage: React.FC = () => {
           if (item.productId !== productId) return item;
           const nextQty = item.quantity + delta;
           if (nextQty < 1) return null;
-          if (nextQty > item.remainingStock) {
+
+          if (item.isCombo && item.components && delta > 0) {
+            for (const comp of item.components) {
+              const alloc = allocations.find(a => a.productId === comp.productId);
+              const remaining = alloc ? alloc.remainingQty : 0;
+              let otherInCart = 0;
+              prevCart.forEach(c => {
+                if (c.productId === productId) return;
+                if (c.isCombo && c.components) {
+                  const m = c.components.find(ci => ci.productId === comp.productId);
+                  if (m) otherInCart += m.quantity * c.quantity;
+                } else if (c.productId === comp.productId) {
+                  otherInCart += c.quantity;
+                }
+              });
+
+              if (comp.quantity * nextQty + otherInCart > remaining) {
+                setErrorMessage(`Stall stock limit reached for component ${comp.productName} (${remaining} in stall).`);
+                return item;
+              }
+            }
+          } else if (!item.isCombo && nextQty > item.remainingStock) {
             setErrorMessage(`Stock limit reached for ${item.productName} (${item.remainingStock} available).`);
             return item;
           }
@@ -419,7 +622,7 @@ export const MemberSalePortalPage: React.FC = () => {
       `*Date/Time:* ${lastCompletedBill.time}`,
       `---------------------------------`,
       ...lastCompletedBill.items.map(
-        i => `• ${i.quantity}x ${i.productName} @ ₹${i.priceAtEvent} = ₹${(i.priceAtEvent * i.quantity).toFixed(2)}`
+        i => `• ${i.quantity}x ${i.isCombo ? '[Combo] ' : ''}${i.productName} @ ₹${i.priceAtEvent} = ₹${(i.priceAtEvent * i.quantity).toFixed(2)}`
       ),
       `---------------------------------`,
       `*Grand Total: ₹${lastCompletedBill.totalAmount.toFixed(2)}*`,
@@ -450,7 +653,7 @@ export const MemberSalePortalPage: React.FC = () => {
     }
 
     if (cart.length === 0) {
-      setErrorMessage('This customer bill is empty. Please add at least one product.');
+      setErrorMessage('This customer bill is empty. Please add at least one product or combo.');
       return;
     }
 
@@ -474,7 +677,16 @@ export const MemberSalePortalPage: React.FC = () => {
         setErrorMessage(`Invalid quantity for ${item.productName}`);
         return;
       }
-      if (item.quantity > item.remainingStock) {
+      if (item.isCombo && item.components) {
+        for (const comp of item.components) {
+          const alloc = allocations.find(a => a.productId === comp.productId);
+          const req = comp.quantity * item.quantity;
+          if (!alloc || req > alloc.remainingQty) {
+            setErrorMessage(`Insufficient stock for component ${comp.productName} in combo ${item.productName}`);
+            return;
+          }
+        }
+      } else if (!item.isCombo && item.quantity > item.remainingStock) {
         setErrorMessage(
           `Insufficient stock for ${item.productName}. Only ${item.remainingStock} unit(s) remaining.`
         );
@@ -487,6 +699,59 @@ export const MemberSalePortalPage: React.FC = () => {
 
     try {
       const saleTime = new Date().toISOString();
+
+      // Explode items for individual component stock deduction while preserving combo metadata
+      const orderItems: Array<{
+        productId: string;
+        productName: string;
+        quantity: number;
+        unitPrice: number;
+        totalAmount: number;
+      }> = [];
+
+      const isSingleComboOrder = cart.length === 1 && Boolean(cart[0].isCombo);
+      const targetComboId = isSingleComboOrder ? cart[0].comboId : undefined;
+      const targetComboName = isSingleComboOrder ? cart[0].comboName : undefined;
+      const targetComboQuantity = isSingleComboOrder ? cart[0].quantity : undefined;
+
+      for (const item of cart) {
+        if (item.isCombo && item.components && item.components.length > 0) {
+          const totalUnitsInCombo = item.components.reduce((sum, c) => sum + c.quantity, 0) || 1;
+          const comboTotal = item.priceAtEvent * item.quantity;
+          let allocatedCents = 0;
+          const totalCents = Math.round(comboTotal * 100);
+
+          item.components.forEach((comp, idx) => {
+            const totalQty = comp.quantity * item.quantity;
+            let compCents: number;
+            if (idx === item.components!.length - 1) {
+              compCents = totalCents - allocatedCents;
+            } else {
+              compCents = Math.round(totalCents * (comp.quantity / totalUnitsInCombo));
+              allocatedCents += compCents;
+            }
+            const compLineTotal = compCents / 100;
+            const compUnitPrice = Math.round((compLineTotal / totalQty) * 100) / 100;
+
+            orderItems.push({
+              productId: comp.productId,
+              productName: comp.productName,
+              quantity: totalQty,
+              unitPrice: compUnitPrice,
+              totalAmount: compLineTotal,
+            });
+          });
+        } else {
+          orderItems.push({
+            productId: item.productId,
+            productName: item.productName,
+            quantity: item.quantity,
+            unitPrice: item.priceAtEvent,
+            totalAmount: item.priceAtEvent * item.quantity,
+          });
+        }
+      }
+
       const orderPayload = {
         eventId: selectedEventId,
         eventName: currentEvent?.name,
@@ -495,20 +760,18 @@ export const MemberSalePortalPage: React.FC = () => {
         upiAmount: paymentMethod === 'CASH_UPI' ? upiNum : paymentMethod === 'UPI' ? totalAmount : 0,
         customerName: customerName.trim() || undefined,
         customerPhone: customerPhone.trim() || undefined,
+        comboId: targetComboId,
+        comboName: targetComboName,
+        comboQuantity: targetComboQuantity,
+        transactionType: isSingleComboOrder ? 'COMBO' : undefined,
         saleTime,
-        items: cart.map(item => ({
-          productId: item.productId,
-          productName: item.productName,
-          quantity: item.quantity,
-          unitPrice: item.priceAtEvent,
-          totalAmount: item.priceAtEvent * item.quantity,
-        })),
+        items: orderItems,
       };
 
       // Record through SyncManager (writes all items to IndexedDB and triggers batch sync)
       const { syncedImmediately, receiptNumber, saleId } = await syncManager.recordOrder(orderPayload);
 
-      // Optimistically decrement local remaining count in events
+      // Optimistically decrement local remaining count in events for every physical component deducted
       if (currentEvent) {
         setEvents(prevEvents =>
           prevEvents.map(evt => {
@@ -516,12 +779,14 @@ export const MemberSalePortalPage: React.FC = () => {
             return {
               ...evt,
               allocations: evt.allocations.map(alloc => {
-                const cartItem = cart.find(c => c.productId === alloc.productId);
-                if (!cartItem) return alloc;
+                const totalDeducted = orderItems
+                  .filter(oi => oi.productId === alloc.productId)
+                  .reduce((sum, oi) => sum + oi.quantity, 0);
+                if (totalDeducted === 0) return alloc;
                 return {
                   ...alloc,
-                  remainingQty: Math.max(0, alloc.remainingQty - cartItem.quantity),
-                  soldQty: alloc.soldQty + cartItem.quantity,
+                  remainingQty: Math.max(0, alloc.remainingQty - totalDeducted),
+                  soldQty: alloc.soldQty + totalDeducted,
                 };
               }),
             };
@@ -559,7 +824,8 @@ export const MemberSalePortalPage: React.FC = () => {
       setCustomerPhone('');
       setShowCustomerDetails(false);
     } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to record bill');
+      console.error('Order recording error:', err);
+      setErrorMessage(err?.error || err?.message || 'Failed to record customer bill');
     } finally {
       setIsSubmitting(false);
     }
@@ -747,13 +1013,158 @@ export const MemberSalePortalPage: React.FC = () => {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-start">
             {/* LEFT / MAIN AREA (Product Selection) */}
             <div className="lg:col-span-7 xl:col-span-8 space-y-2.5">
-              {/* Product Controls: Project Filter Tabs + Search Input */}
-              <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-2xs space-y-2.5">
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                  {/* 2. Project Filter Tabs */}
-                  <div className="inline-flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0 overflow-x-auto">
-                    <button
-                      type="button"
+              {/* POS Mode Switcher: Products vs Combos */}
+              <div className="flex items-center gap-1.5 p-1 bg-slate-200/70 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setPortalTab('PRODUCTS')}
+                  className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    portalTab === 'PRODUCTS'
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <ShoppingBag className="w-4 h-4 text-indigo-600" />
+                  <span>Normal Products ({sortedAllocations.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPortalTab('COMBOS')}
+                  className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    portalTab === 'COMBOS'
+                      ? 'bg-white text-pink-700 shadow-xs ring-1 ring-pink-500/20'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Gift className="w-4 h-4 text-pink-600" />
+                  <span>Special Combos ({combosWithStallStock.length})</span>
+                  {combosWithStallStock.length > 0 && (
+                    <span className="px-1.5 py-0.2 bg-pink-100 text-pink-700 rounded-full text-[10px] font-black">
+                      HOT
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {portalTab === 'COMBOS' ? (
+                /* Combos Stall Grid */
+                combosWithStallStock.length === 0 ? (
+                  <div className="bg-white p-8 rounded-xl border border-slate-200 text-center space-y-2">
+                    <div className="w-10 h-10 rounded-full bg-pink-50 text-pink-600 flex items-center justify-center mx-auto">
+                      <Gift className="w-5 h-5" />
+                    </div>
+                    <h3 className="text-xs font-bold text-slate-800">No active combo offers for this stall</h3>
+                    <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
+                      There are currently no active combo deals mapped to this event. You can create combos in the Combos page or sell normal products.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                    {combosWithStallStock.map(combo => {
+                      const isOutOfStock = combo.isOutOfStock;
+                      const inCart = cart.find(c => c.comboId === combo.id);
+                      return (
+                        <div
+                          key={combo.id}
+                          className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all select-none relative ${
+                            isOutOfStock
+                              ? 'border-slate-200 bg-slate-100/70 opacity-60'
+                              : inCart
+                              ? 'border-pink-500 bg-pink-50/50 shadow-xs ring-1 ring-pink-500'
+                              : 'border-slate-200 hover:border-pink-300 bg-white hover:shadow-xs'
+                          }`}
+                        >
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-pink-100 text-pink-700 uppercase tracking-wider">
+                                {combo.comboType === 'PICK_ANY' ? `Pick Any ${combo.minItems || 3}` : combo.comboType.replace('_', ' ')}
+                              </span>
+                              {combo.savings > 0 && (
+                                <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800">
+                                  Save ₹{combo.savings}
+                                </span>
+                              )}
+                            </div>
+
+                            <div>
+                              <h4 className="text-xs font-bold text-slate-900 leading-snug">
+                                {combo.name}
+                              </h4>
+                              {combo.description && (
+                                <p className="text-[10px] text-slate-500 line-clamp-1 mt-0.5">
+                                  {combo.description}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="text-[10px] text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100 space-y-1">
+                              {combo.items.map((ci, idx) => (
+                                <div key={idx} className="flex items-center justify-between">
+                                  <span className="truncate">
+                                    {ci.quantity}× {ci.productName}
+                                  </span>
+                                  {ci.availableStock !== undefined && (
+                                    <span className="text-slate-400 font-mono text-[9px]">
+                                      {ci.availableStock} in stall
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="pt-2.5 mt-2 border-t border-slate-100 flex items-end justify-between gap-2">
+                            <div>
+                              <div className="flex items-baseline gap-1.5">
+                                <span className="text-sm font-black text-pink-700">
+                                  ₹{combo.price}
+                                </span>
+                                {combo.normalValue && combo.normalValue > combo.price && (
+                                  <span className="text-[10px] text-slate-400 line-through">
+                                    ₹{combo.normalValue}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[9px] font-medium text-slate-400">
+                                {isOutOfStock ? 'Sold out in stall' : `${combo.availableStock} bundle(s) left`}
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              disabled={isOutOfStock || isEventEnded || isEventUpcoming}
+                              onClick={() => {
+                                if (combo.comboType === 'PICK_ANY') {
+                                  setPickingCombo(combo);
+                                  setPickSelectedMap({});
+                                } else {
+                                  handleAddComboToCart(combo);
+                                }
+                              }}
+                              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1 active:scale-95 cursor-pointer ${
+                                isOutOfStock
+                                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                                  : 'bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white shadow-xs'
+                              }`}
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                              <span>{combo.comboType === 'PICK_ANY' ? 'Choose & Add' : '+ Add to Bill'}</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
+              ) : (
+                <>
+                  {/* Product Controls: Project Filter Tabs + Search Input */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-2xs space-y-2.5">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      {/* 2. Project Filter Tabs */}
+                      <div className="inline-flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0 overflow-x-auto">
+                        <button
+                          type="button"
                       onClick={() => setSelectedProject('ALL')}
                       className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all cursor-pointer shrink-0 ${
                         selectedProject === 'ALL'
@@ -1010,7 +1421,9 @@ export const MemberSalePortalPage: React.FC = () => {
                   })}
                 </div>
               )}
-            </div>
+            </>
+          )}
+        </div>
 
             {/* RIGHT AREA: Current Customer Bill / Cart Panel */}
             <div id="pos-bill-panel" className="lg:col-span-5 xl:col-span-4">
@@ -1054,11 +1467,21 @@ export const MemberSalePortalPage: React.FC = () => {
                     {cart.map(item => (
                       <div key={item.productId} className="py-2 flex items-center justify-between gap-2">
                         <div className="flex-1 min-w-0">
-                          <div className="text-xs font-bold text-slate-900 truncate">
-                            {item.productName}
+                          <div className="text-xs font-bold text-slate-900 truncate flex items-center gap-1.5">
+                            {item.isCombo && (
+                              <span className="px-1.5 py-0.2 bg-pink-100 text-pink-700 text-[10px] font-black rounded shrink-0">
+                                🎁 COMBO
+                              </span>
+                            )}
+                            <span className="truncate">{item.productName}</span>
                           </div>
+                          {item.isCombo && item.components && (
+                            <div className="text-[10px] text-pink-700 font-medium truncate mt-0.5">
+                              Includes: {item.components.map(c => `${c.quantity}× ${c.productName}`).join(', ')}
+                            </div>
+                          )}
                           <div className="text-[10px] text-slate-500">
-                            ₹{item.priceAtEvent.toFixed(0)} each &bull; Stock: {item.remainingStock}
+                            ₹{item.priceAtEvent.toFixed(0)} each {item.savings ? `(Save ₹${item.savings})` : ''} &bull; {item.isCombo ? 'Combo bundle' : `Stock: ${item.remainingStock}`}
                           </div>
                         </div>
 
@@ -1436,6 +1859,123 @@ export const MemberSalePortalPage: React.FC = () => {
           </div>
         </div>
       )}
+      {/* PICK ANY COMBO CUSTOMIZATION MODAL */}
+      {pickingCombo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl p-5 space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-pink-100 text-pink-600 rounded-xl">
+                  <Gift className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">{pickingCombo.name}</h3>
+                  <p className="text-xs text-slate-500">
+                    Pick exactly {pickingCombo.minItems || 3} items for ₹{pickingCombo.price}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPickingCombo(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Allowed Products Selection */}
+            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+              {(pickingCombo.items.length > 0
+                ? pickingCombo.items.map(ci => ({ productId: ci.productId, productName: ci.productName }))
+                : allocations.map(a => ({ productId: a.productId, productName: a.productName }))
+              ).map(item => {
+                const alloc = allocations.find(a => a.productId === item.productId);
+                const maxStock = alloc ? alloc.remainingQty : 0;
+                const selectedCount = pickSelectedMap[item.productId] || 0;
+
+                return (
+                  <div key={item.productId} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+                    <div>
+                      <div className="font-bold text-slate-900">{item.productName}</div>
+                      <div className="text-[10px] text-slate-400">Available in stall: {maxStock}</div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={selectedCount <= 0}
+                        onClick={() => setPickSelectedMap(prev => ({ ...prev, [item.productId]: Math.max(0, (prev[item.productId] || 0) - 1) }))}
+                        className="w-7 h-7 rounded-lg bg-white border border-slate-300 flex items-center justify-center font-bold disabled:opacity-40 hover:bg-slate-100 cursor-pointer"
+                      >
+                        -
+                      </button>
+                      <span className="w-6 text-center font-black text-slate-900 text-sm">{selectedCount}</span>
+                      <button
+                        type="button"
+                        disabled={selectedCount >= maxStock}
+                        onClick={() => setPickSelectedMap(prev => ({ ...prev, [item.productId]: (prev[item.productId] || 0) + 1 }))}
+                        className="w-7 h-7 rounded-lg bg-white border border-slate-300 flex items-center justify-center font-bold disabled:opacity-40 hover:bg-slate-100 cursor-pointer"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Total picked progress */}
+            {(() => {
+              const currentTotal = Object.values(pickSelectedMap).reduce((a, b) => a + b, 0);
+              const targetTotal = pickingCombo.minItems || 3;
+              const isMatch = currentTotal === targetTotal;
+              return (
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+                  <div className="text-xs">
+                    <span className="text-slate-500">Selected: </span>
+                    <strong className={isMatch ? 'text-emerald-700 font-extrabold' : 'text-amber-700 font-bold'}>
+                      {currentTotal} / {targetTotal} items
+                    </strong>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPickingCombo(null)}
+                      className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!isMatch}
+                      onClick={() => {
+                        const customComponents = Object.entries(pickSelectedMap)
+                          .filter(([_, q]) => q > 0)
+                          .map(([pId, q]) => {
+                            const alloc = allocations.find(a => a.productId === pId);
+                            return {
+                              productId: pId,
+                              productName: alloc?.productName || pId,
+                              quantity: q,
+                            };
+                          });
+                        handleAddComboToCart(pickingCombo, customComponents);
+                        setPickingCombo(null);
+                      }}
+                      className="px-4 py-1.5 text-xs font-bold bg-pink-600 hover:bg-pink-700 disabled:opacity-40 text-white rounded-lg transition-all shadow-xs cursor-pointer"
+                    >
+                      Add Bundle to Bill
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+export default MemberSalePortalPage;

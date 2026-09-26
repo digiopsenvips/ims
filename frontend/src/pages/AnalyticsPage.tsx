@@ -536,6 +536,117 @@ export const AnalyticsPage: React.FC = () => {
               </div>
             </div>
           )}
+
+          {/* Combos & Special Offers Performance Section */}
+          {analytics.comboAnalytics && (
+            <div className="space-y-4">
+              <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-pink-50 border border-pink-100 flex items-center justify-center text-pink-600">
+                      <Gift className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">
+                        Event Combos & Special Offers Performance
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Dynamic bundles, promotional pricing rules & multi-product transaction volume
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3 Combo KPIs */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+                  <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl">
+                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                      Combos Sold
+                    </div>
+                    <div className="text-2xl font-black text-slate-900 mt-1">
+                      {analytics.comboAnalytics.totalCombosSold} bundles
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">Across all events</div>
+                  </div>
+
+                  {canViewRevenue && analytics.comboAnalytics.totalComboRevenue !== null && (
+                    <div className="p-3.5 bg-pink-50/50 border border-pink-200/80 rounded-xl">
+                      <div className="text-[10px] font-bold text-pink-700 uppercase tracking-wider">
+                        Combo Revenue
+                      </div>
+                      <div className="text-2xl font-black text-pink-800 mt-1">
+                        ₹{analytics.comboAnalytics.totalComboRevenue.toLocaleString('en-IN', {
+                          minimumFractionDigits: 0,
+                          maximumFractionDigits: 0,
+                        })}
+                      </div>
+                      <div className="text-[11px] text-pink-600 mt-0.5">Total promotional gross sales</div>
+                    </div>
+                  )}
+
+                  <div className="p-3.5 bg-purple-50/50 border border-purple-200/80 rounded-xl">
+                    <div className="text-[10px] font-bold text-purple-700 uppercase tracking-wider">
+                      Components Deducted
+                    </div>
+                    <div className="text-2xl font-black text-purple-900 mt-1">
+                      {analytics.comboAnalytics.totalComboUnits} units
+                    </div>
+                    <div className="text-[11px] text-purple-600 mt-0.5">Physical items packaged</div>
+                  </div>
+                </div>
+
+                {/* Per-Combo Breakdown Table */}
+                <div className="mt-5">
+                  <h4 className="text-xs font-bold text-slate-900 mb-2 uppercase tracking-wider">
+                    Breakdown By Combo Offer
+                  </h4>
+                  {analytics.comboAnalytics.comboBreakdown.length === 0 ? (
+                    <div className="py-6 text-center text-xs text-slate-400">
+                      No combo sales recorded in this timeframe.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold uppercase tracking-wider text-[10px]">
+                          <tr>
+                            <th className="px-4 py-2.5">Combo Offer</th>
+                            <th className="px-4 py-2.5 text-right">Bundles Sold</th>
+                            <th className="px-4 py-2.5 text-right">Units Bundled</th>
+                            {canViewRevenue && (
+                              <th className="px-4 py-2.5 text-right">Total Revenue (₹)</th>
+                            )}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {analytics.comboAnalytics.comboBreakdown.map(c => (
+                            <tr key={c.comboId} className="hover:bg-slate-50/50">
+                              <td className="px-4 py-2.5 font-bold text-slate-900 flex items-center gap-1.5">
+                                <Gift className="w-3.5 h-3.5 text-pink-500" />
+                                <span>{c.comboName}</span>
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-black text-slate-900">
+                                {c.salesCount}
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-bold text-purple-700">
+                                {c.unitsSold}
+                              </td>
+                              {canViewRevenue && (
+                                <td className="px-4 py-2.5 text-right font-black text-emerald-700">
+                                  {c.revenue !== undefined
+                                    ? `₹${c.revenue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                                    : '—'}
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
