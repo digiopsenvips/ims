@@ -1032,14 +1032,14 @@ export const MemberSalePortalPage: React.FC = () => {
                   onClick={() => setPortalTab('COMBOS')}
                   className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
                     portalTab === 'COMBOS'
-                      ? 'bg-white text-pink-700 shadow-xs ring-1 ring-pink-500/20'
+                      ? 'bg-white text-emerald-700 shadow-xs ring-1 ring-emerald-500/20'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  <Gift className="w-4 h-4 text-pink-600" />
+                  <Gift className="w-4 h-4 text-emerald-600" />
                   <span>Special Combos ({combosWithStallStock.length})</span>
                   {combosWithStallStock.length > 0 && (
-                    <span className="px-1.5 py-0.2 bg-pink-100 text-pink-700 rounded-full text-[10px] font-black">
+                    <span className="px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded-full text-[10px] font-black">
                       HOT
                     </span>
                   )}
@@ -1050,7 +1050,7 @@ export const MemberSalePortalPage: React.FC = () => {
                 /* Combos Stall Grid */
                 combosWithStallStock.length === 0 ? (
                   <div className="bg-white p-8 rounded-xl border border-slate-200 text-center space-y-3">
-                    <div className="w-10 h-10 rounded-full bg-pink-50 text-pink-600 flex items-center justify-center mx-auto">
+                    <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border border-emerald-100">
                       <Gift className="w-5 h-5" />
                     </div>
                     <h3 className="text-xs font-bold text-slate-800">No active combo offers for this stall</h3>
@@ -1059,7 +1059,7 @@ export const MemberSalePortalPage: React.FC = () => {
                     </p>
                     <Link
                       to={`/combos?action=create&eventId=${selectedEventId}`}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>+ Create Combo Offer</span>
@@ -1071,7 +1071,7 @@ export const MemberSalePortalPage: React.FC = () => {
                       <span className="text-xs font-bold text-slate-700">Available Stall Bundles</span>
                       <Link
                         to={`/combos?action=create&eventId=${selectedEventId}`}
-                        className="text-xs font-bold text-pink-600 hover:text-pink-700 flex items-center gap-1 hover:underline"
+                        className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 hover:underline"
                       >
                         <Plus className="w-3.5 h-3.5" />
                         <span>Create Combo Offer</span>
@@ -1088,17 +1088,17 @@ export const MemberSalePortalPage: React.FC = () => {
                             isOutOfStock
                               ? 'border-slate-200 bg-slate-100/70 opacity-60'
                               : inCart
-                              ? 'border-pink-500 bg-pink-50/50 shadow-xs ring-1 ring-pink-500'
-                              : 'border-slate-200 hover:border-pink-300 bg-white hover:shadow-xs'
+                              ? 'border-emerald-500 bg-emerald-50/50 shadow-xs ring-1 ring-emerald-500'
+                              : 'border-slate-200 hover:border-slate-300 bg-white hover:shadow-xs'
                           }`}
                         >
                           <div className="space-y-2">
                             <div className="flex items-center justify-between gap-1">
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-pink-100 text-pink-700 uppercase tracking-wider">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200 uppercase tracking-wider">
                                 {combo.comboType === 'PICK_ANY' ? `Pick Any ${combo.minItems || 3}` : combo.comboType.replace('_', ' ')}
                               </span>
                               {combo.savings > 0 && (
-                                <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800">
+                                <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
                                   Save ₹{combo.savings}
                                 </span>
                               )}
@@ -1134,7 +1134,7 @@ export const MemberSalePortalPage: React.FC = () => {
                           <div className="pt-2.5 mt-2 border-t border-slate-100 flex items-end justify-between gap-2">
                             <div>
                               <div className="flex items-baseline gap-1.5">
-                                <span className="text-sm font-black text-pink-700">
+                                <span className="text-sm font-black text-slate-900">
                                   ₹{combo.price}
                                 </span>
                                 {combo.normalValue && combo.normalValue > combo.price && (
@@ -1162,7 +1162,7 @@ export const MemberSalePortalPage: React.FC = () => {
                               className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1 active:scale-95 cursor-pointer ${
                                 isOutOfStock
                                   ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                                  : 'bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white shadow-xs'
+                                  : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs'
                               }`}
                             >
                               <Plus className="w-3.5 h-3.5" />
@@ -1488,14 +1488,14 @@ export const MemberSalePortalPage: React.FC = () => {
                         <div className="flex-1 min-w-0">
                           <div className="text-xs font-bold text-slate-900 truncate flex items-center gap-1.5">
                             {item.isCombo && (
-                              <span className="px-1.5 py-0.2 bg-pink-100 text-pink-700 text-[10px] font-black rounded shrink-0">
+                              <span className="px-1.5 py-0.2 bg-emerald-50 text-emerald-800 text-[10px] font-bold rounded border border-emerald-200 shrink-0">
                                 🎁 COMBO
                               </span>
                             )}
                             <span className="truncate">{item.productName}</span>
                           </div>
                           {item.isCombo && item.components && (
-                            <div className="text-[10px] text-pink-700 font-medium truncate mt-0.5">
+                            <div className="text-[10px] text-slate-500 font-medium truncate mt-0.5">
                               Includes: {item.components.map(c => `${c.quantity}× ${c.productName}`).join(', ')}
                             </div>
                           )}
@@ -1884,7 +1884,7 @@ export const MemberSalePortalPage: React.FC = () => {
           <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl p-5 space-y-4 animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
-                <div className="p-2 bg-pink-100 text-pink-600 rounded-xl">
+                <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100">
                   <Gift className="w-5 h-5" />
                 </div>
                 <div>
@@ -1983,7 +1983,7 @@ export const MemberSalePortalPage: React.FC = () => {
                         handleAddComboToCart(pickingCombo, customComponents);
                         setPickingCombo(null);
                       }}
-                      className="px-4 py-1.5 text-xs font-bold bg-pink-600 hover:bg-pink-700 disabled:opacity-40 text-white rounded-lg transition-all shadow-xs cursor-pointer"
+                      className="px-4 py-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white rounded-lg transition-all shadow-xs cursor-pointer"
                     >
                       Add Bundle to Bill
                     </button>

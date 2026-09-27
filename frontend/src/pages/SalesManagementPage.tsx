@@ -709,7 +709,7 @@ export const SalesManagementPage: React.FC = () => {
                             🎮 GAME
                           </span>
                         ) : sale.transactionType === 'COMBO' || sale.comboId ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-pink-50 text-pink-700 border border-pink-200">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
                             🎁 COMBO
                           </span>
                         ) : (
@@ -761,11 +761,11 @@ export const SalesManagementPage: React.FC = () => {
                           </div>
                         ) : (sale.transactionType === 'COMBO' || sale.comboId) ? (
                           <div>
-                            <div className="font-bold text-pink-900 flex items-center gap-1.5 flex-wrap">
+                            <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
                               <span>🎁 {sale.comboName || sale.productName || 'Combo Offer'}</span>
                             </div>
                             {sale.items && sale.items.length > 0 ? (
-                              <div className="mt-1 space-y-0.5 border-l-2 border-pink-200 pl-2">
+                              <div className="mt-1 space-y-0.5 border-l-2 border-emerald-200 pl-2">
                                 {sale.items.map((item, itIdx) => (
                                   <div key={itIdx} className="text-[11px] text-slate-600 flex items-center gap-1.5">
                                     <span className="font-medium text-slate-800">{item.productName}</span>

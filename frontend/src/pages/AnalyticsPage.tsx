@@ -543,7 +543,7 @@ export const AnalyticsPage: React.FC = () => {
               <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
                   <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-pink-50 border border-pink-100 flex items-center justify-center text-pink-600">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
                       <Gift className="w-4 h-4" />
                     </div>
                     <div>
@@ -570,28 +570,28 @@ export const AnalyticsPage: React.FC = () => {
                   </div>
 
                   {canViewRevenue && analytics.comboAnalytics.totalComboRevenue !== null && (
-                    <div className="p-3.5 bg-pink-50/50 border border-pink-200/80 rounded-xl">
-                      <div className="text-[10px] font-bold text-pink-700 uppercase tracking-wider">
+                    <div className="p-3.5 bg-emerald-50/50 border border-emerald-200/80 rounded-xl">
+                      <div className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">
                         Combo Revenue
                       </div>
-                      <div className="text-2xl font-black text-pink-800 mt-1">
+                      <div className="text-2xl font-black text-emerald-900 mt-1">
                         ₹{analytics.comboAnalytics.totalComboRevenue.toLocaleString('en-IN', {
                           minimumFractionDigits: 0,
                           maximumFractionDigits: 0,
                         })}
                       </div>
-                      <div className="text-[11px] text-pink-600 mt-0.5">Total promotional gross sales</div>
+                      <div className="text-[11px] text-emerald-600 mt-0.5">Total promotional gross sales</div>
                     </div>
                   )}
 
-                  <div className="p-3.5 bg-purple-50/50 border border-purple-200/80 rounded-xl">
-                    <div className="text-[10px] font-bold text-purple-700 uppercase tracking-wider">
+                  <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl">
+                    <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">
                       Components Deducted
                     </div>
-                    <div className="text-2xl font-black text-purple-900 mt-1">
+                    <div className="text-2xl font-black text-slate-900 mt-1">
                       {analytics.comboAnalytics.totalComboUnits} units
                     </div>
-                    <div className="text-[11px] text-purple-600 mt-0.5">Physical items packaged</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">Physical items packaged</div>
                   </div>
                 </div>
 
@@ -621,7 +621,7 @@ export const AnalyticsPage: React.FC = () => {
                           {analytics.comboAnalytics.comboBreakdown.map(c => (
                             <tr key={c.comboId} className="hover:bg-slate-50/50">
                               <td className="px-4 py-2.5 font-bold text-slate-900 flex items-center gap-1.5">
-                                <Gift className="w-3.5 h-3.5 text-pink-500" />
+                                <Gift className="w-3.5 h-3.5 text-emerald-600" />
                                 <span>{c.comboName}</span>
                               </td>
                               <td className="px-4 py-2.5 text-right font-black text-slate-900">

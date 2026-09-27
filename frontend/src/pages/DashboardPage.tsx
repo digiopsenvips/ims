@@ -88,9 +88,17 @@ export const DashboardPage: React.FC = () => {
     );
   }, [events]);
 
-  const totalUnitsSold = sales.reduce((acc, s) => acc + s.quantity, 0);
-  const totalRevenue = sales.reduce((acc, s) => acc + (s.totalAmount || 0), 0);
-  const totalStockOnHand = inventory.reduce((acc, i) => acc + i.quantityOnHand, 0);
+  // Helper to extract true units count from a sale (handling multi-item sales and legacy single-product sales)
+  const getSaleUnits = (s: any): number => {
+    if (s.items && Array.isArray(s.items) && s.items.length > 0) {
+      return s.items.reduce((sum: number, it: any) => sum + (Number(it.quantity) || 0), 0);
+    }
+    return Number(s.quantity) || 0;
+  };
+
+  const totalUnitsSold = sales.reduce((acc, s) => acc + getSaleUnits(s), 0);
+  const totalRevenue = sales.reduce((acc, s) => acc + (Number(s.totalAmount) || 0), 0);
+  const totalStockOnHand = inventory.reduce((acc, i) => acc + (Number(i.quantityOnHand) || 0), 0);
   const averageTransactionValue = sales.length > 0 ? totalRevenue / sales.length : 0;
 
   // Games stats breakdown
@@ -99,7 +107,7 @@ export const DashboardPage: React.FC = () => {
   }, [sales]);
 
   const gameRevenue = useMemo(() => {
-    return gameSales.reduce((acc, s) => acc + (s.totalAmount || 0), 0);
+    return gameSales.reduce((acc, s) => acc + (Number(s.totalAmount) || 0), 0);
   }, [gameSales]);
 
   const gameWins = useMemo(() => {
@@ -116,11 +124,11 @@ export const DashboardPage: React.FC = () => {
     return sales.filter(s => s.eventId === activeEvent.id);
   }, [sales, activeEvent]);
 
-  const activeEventRevenue = activeEventSales.reduce((acc, s) => acc + (s.totalAmount || 0), 0);
-  const activeEventUnitsSold = activeEventSales.reduce((acc, s) => acc + s.quantity, 0);
+  const activeEventRevenue = activeEventSales.reduce((acc, s) => acc + (Number(s.totalAmount) || 0), 0);
+  const activeEventUnitsSold = activeEventSales.reduce((acc, s) => acc + getSaleUnits(s), 0);
   const activeEventAllocatedTotal = useMemo(() => {
     if (!activeEvent || !activeEvent.allocations) return 0;
-    return activeEvent.allocations.reduce((acc, a) => acc + a.allocatedQty, 0);
+    return activeEvent.allocations.reduce((acc, a) => acc + (Number(a.allocatedQty) || 0), 0);
   }, [activeEvent]);
 
   const activeEventProgressPct =
@@ -128,15 +136,33 @@ export const DashboardPage: React.FC = () => {
       ? Math.min(100, Math.round((activeEventUnitsSold / activeEventAllocatedTotal) * 100))
       : 0;
 
-  // Top Selling Products across all sales
+  // Top Selling Products across all sales (handling line items, combos, and single products)
   const topProducts = useMemo(() => {
     const map = new Map<string, { name: string; project: string; units: number; revenue: number }>();
     sales.forEach(s => {
-      const key = s.productId || s.productName;
-      const cur = map.get(key) || { name: s.productName, project: s.projectName || '', units: 0, revenue: 0 };
-      cur.units += s.quantity;
-      cur.revenue += s.totalAmount || 0;
-      map.set(key, cur);
+      if (s.items && Array.isArray(s.items) && s.items.length > 0) {
+        s.items.forEach(item => {
+          const key = item.productId || item.productName || 'Unknown';
+          const pName = item.productName || item.productId || 'Unknown Item';
+          const prjName = item.projectName || s.projectName || '';
+          const cur = map.get(key) || { name: pName, project: prjName, units: 0, revenue: 0 };
+          cur.units += Number(item.quantity) || 1;
+          cur.revenue += Number(item.lineTotal) || (Number(item.unitPrice) * (Number(item.quantity) || 1)) || 0;
+          map.set(key, cur);
+        });
+      } else if (s.comboName || s.transactionType === 'COMBO') {
+        const key = s.comboId || s.comboName || 'Combo';
+        const cur = map.get(key) || { name: s.comboName || 'Special Combo Offer', project: s.projectName || 'Bundles', units: 0, revenue: 0 };
+        cur.units += Number(s.quantity) || 1;
+        cur.revenue += Number(s.totalAmount) || 0;
+        map.set(key, cur);
+      } else if (s.productId || s.productName) {
+        const key = s.productId || s.productName || 'Unknown';
+        const cur = map.get(key) || { name: s.productName || 'Product', project: s.projectName || '', units: 0, revenue: 0 };
+        cur.units += Number(s.quantity) || 1;
+        cur.revenue += Number(s.totalAmount) || 0;
+        map.set(key, cur);
+      }
     });
     return Array.from(map.values())
       .sort((a, b) => b.units - a.units)

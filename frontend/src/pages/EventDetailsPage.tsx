@@ -122,8 +122,8 @@ export const EventDetailsPage: React.FC = () => {
       if (loadedEvent && loadedEvent.id) {
         setEvent(loadedEvent);
       }
-      if (prodRes?.products) setProducts(prodRes.products);
-      else if (Array.isArray(prodRes)) setProducts(prodRes);
+      if (prodRes?.products) setProducts(prodRes.products.filter((p: Product) => !p.isArchived));
+      else if (Array.isArray(prodRes)) setProducts(prodRes.filter((p: Product) => !p.isArchived));
 
       if (projRes?.projects) setProjects(projRes.projects);
       else if (Array.isArray(projRes)) setProjects(projRes);
@@ -381,9 +381,9 @@ export const EventDetailsPage: React.FC = () => {
           <div className="flex flex-wrap items-center gap-2 shrink-0">
             <Link
               to={`/combos?action=create&eventId=${event.id}`}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-semibold shadow-2xs transition-colors"
             >
-              <Gift className="w-4 h-4" />
+              <Gift className="w-4 h-4 text-emerald-600" />
               <span>+ Create Combo</span>
             </Link>
 
@@ -694,7 +694,7 @@ export const EventDetailsPage: React.FC = () => {
             <div className="flex items-center gap-2">
               <Link
                 to={`/combos?action=create&eventId=${event.id}`}
-                className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>+ Create Combo Offer</span>
@@ -704,7 +704,7 @@ export const EventDetailsPage: React.FC = () => {
 
           {eventCombos.length === 0 ? (
             <div className="bg-white rounded-2xl border border-slate-200/80 p-12 text-center shadow-xs">
-              <div className="w-14 h-14 bg-pink-50 text-pink-600 rounded-2xl flex items-center justify-center mx-auto mb-3">
+              <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-3 border border-emerald-100">
                 <Gift className="w-7 h-7" />
               </div>
               <h3 className="text-base font-bold text-slate-900 mb-1">No Combos Configured for this Stall</h3>
@@ -713,7 +713,7 @@ export const EventDetailsPage: React.FC = () => {
               </p>
               <Link
                 to={`/combos?action=create&eventId=${event.id}`}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white font-bold rounded-xl text-xs transition-all shadow-xs"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl text-xs transition-colors shadow-xs"
               >
                 <Plus className="w-4 h-4" />
                 <span>Create First Combo Offer</span>
@@ -726,17 +726,17 @@ export const EventDetailsPage: React.FC = () => {
                 return (
                   <div
                     key={combo.id}
-                    className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs flex flex-col justify-between space-y-4"
+                    className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs flex flex-col justify-between space-y-4 hover:border-slate-300 transition-all"
                   >
                     <div className="space-y-3">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-pink-50 text-pink-700 border border-pink-200">
+                        <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase bg-slate-100 text-slate-700 border border-slate-200">
                           {combo.comboType.replace(/_/g, ' ')}
                         </span>
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                           combo.status === 'ACTIVE'
-                            ? 'bg-emerald-50 text-emerald-700'
-                            : 'bg-slate-100 text-slate-500'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
+                            : 'bg-slate-100 text-slate-500 border border-slate-200'
                         }`}>
                           {combo.status}
                         </span>
@@ -750,13 +750,13 @@ export const EventDetailsPage: React.FC = () => {
                       </div>
 
                       {/* Pricing */}
-                      <div className="p-3 bg-pink-50/60 rounded-xl border border-pink-100 flex items-baseline justify-between">
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 flex items-baseline justify-between">
                         <div>
-                          <span className="text-[10px] text-slate-500 uppercase font-semibold">Deal Price</span>
-                          <div className="text-xl font-black text-pink-700">₹{combo.price}</div>
+                          <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Deal Price</span>
+                          <div className="text-xl font-black text-slate-900 mt-0.5">₹{combo.price}</div>
                         </div>
                         {combo.savings !== undefined && combo.savings > 0 && (
-                          <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md">
+                          <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
                             Save ₹{combo.savings}
                           </span>
                         )}
@@ -779,12 +779,12 @@ export const EventDetailsPage: React.FC = () => {
                     </div>
 
                     <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                      <span className={`font-bold ${isOutOfStock ? 'text-rose-600' : 'text-emerald-700'}`}>
+                      <span className={`font-semibold ${isOutOfStock ? 'text-rose-600' : 'text-emerald-700'}`}>
                         {isOutOfStock ? '⚠️ Out of stock' : `✓ ${combo.availableStock ?? 'Ready'} bundles left`}
                       </span>
                       <Link
                         to={`/sales-entry?eventId=${event.id}`}
-                        className="text-pink-600 hover:text-pink-700 font-bold"
+                        className="text-emerald-700 hover:text-emerald-800 font-bold hover:underline"
                       >
                         Sell at POS →
                       </Link>

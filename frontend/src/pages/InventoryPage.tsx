@@ -54,7 +54,7 @@ export const InventoryPage: React.FC = () => {
         api.get('/products'),
       ]);
       if (invRes?.inventory) setInventory(invRes.inventory);
-      if (prodRes?.products) setProducts(prodRes.products);
+      if (prodRes?.products) setProducts(prodRes.products.filter((p: Product) => !p.isArchived));
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message || 'Failed to fetch inventory' });
     } finally {

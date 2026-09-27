@@ -144,7 +144,7 @@ export const EventsPage: React.FC = () => {
         api.get('/products'),
       ]);
       if (evRes?.events) setEvents(evRes.events);
-      if (prodRes?.products) setProducts(prodRes.products);
+      if (prodRes?.products) setProducts(prodRes.products.filter((p: Product) => !p.isArchived));
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message || 'Failed to load events data' });
     } finally {

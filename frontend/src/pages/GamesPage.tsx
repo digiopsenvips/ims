@@ -76,7 +76,7 @@ export const GamesPage: React.FC = () => {
       ]);
 
       if (gamesRes?.games) setGames(gamesRes.games);
-      if (prodRes?.products) setProducts(prodRes.products);
+      if (prodRes?.products) setProducts(prodRes.products.filter((p: Product) => !p.isArchived));
       if (eventsRes?.events) setEvents(eventsRes.events);
       if (projRes?.projects) setProjects(projRes.projects);
     } catch (err) {
