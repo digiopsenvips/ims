@@ -106,13 +106,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           show: isDeveloper || isAdmin,
         },
         {
-          label: 'Combos & Offers',
-          to: '/combos',
-          icon: Gift,
-          badge: 'DEALS',
-          show: true,
-        },
-        {
           label: 'Inventory',
           to: '/inventory',
           icon: Boxes,
