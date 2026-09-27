@@ -307,7 +307,7 @@ router.get(
 router.post(
   '/',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN, Role.HEAD),
+  requireRoles(Role.DEVELOPER, Role.ADMIN, Role.HEAD, Role.MEMBER),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const {
@@ -427,7 +427,7 @@ router.post(
 router.put(
   '/:id',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN, Role.HEAD),
+  requireRoles(Role.DEVELOPER, Role.ADMIN, Role.HEAD, Role.MEMBER),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -554,7 +554,7 @@ router.put(
 router.patch(
   '/:id/status',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN, Role.HEAD),
+  requireRoles(Role.DEVELOPER, Role.ADMIN, Role.HEAD, Role.MEMBER),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -587,7 +587,7 @@ router.patch(
 router.patch(
   '/:id/archive',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requireRoles(Role.DEVELOPER, Role.ADMIN, Role.HEAD, Role.MEMBER),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -617,7 +617,7 @@ router.patch(
 router.delete(
   '/:id',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requireRoles(Role.DEVELOPER, Role.ADMIN, Role.HEAD, Role.MEMBER),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { id } = req.params;

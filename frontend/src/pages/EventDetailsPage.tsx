@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { api } from '../lib/api';
-import { AppEvent, Game, Product, Project, Sale, EventAllocation } from '../types';
+import { AppEvent, Game, Product, Project, Sale, EventAllocation, Combo } from '../types';
 import {
   Store,
   Calendar,
@@ -37,6 +37,8 @@ import {
   Eye,
   ShoppingCart,
   Dices,
+  Gift,
+  Percent,
 } from 'lucide-react';
 
 function formatISTDateTime(iso?: string | null): string {
@@ -63,11 +65,12 @@ export const EventDetailsPage: React.FC = () => {
   const [event, setEvent] = useState<AppEvent | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [eventCombos, setEventCombos] = useState<Combo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Tab State
-  const validTabs = ['overview', 'games', 'products', 'sales', 'analytics'];
+  const validTabs = ['overview', 'combos', 'games', 'products', 'sales', 'analytics'];
   const activeTab = searchParams.get('tab') || 'overview';
   const setTab = (t: string) => {
     setSearchParams({ tab: t });
@@ -108,10 +111,11 @@ export const EventDetailsPage: React.FC = () => {
   const fetchEventData = async () => {
     if (!eventId) return;
     try {
-      const [evData, prodRes, projRes] = await Promise.all([
+      const [evData, prodRes, projRes, combosRes] = await Promise.all([
         api.get<any>(`/events/${eventId}`),
         api.get('/products'),
         api.get('/projects'),
+        api.get<any>(`/combos?eventId=${eventId}`),
       ]);
 
       const loadedEvent = evData?.event || evData;
@@ -123,6 +127,10 @@ export const EventDetailsPage: React.FC = () => {
 
       if (projRes?.projects) setProjects(projRes.projects);
       else if (Array.isArray(projRes)) setProjects(projRes);
+
+      if (combosRes?.combos && Array.isArray(combosRes.combos)) {
+        setEventCombos(combosRes.combos);
+      }
     } catch (err: any) {
       console.error('Failed to load event details:', err);
       setStatusMessage({ type: 'error', text: err.message || 'Failed to load event data' });
@@ -372,6 +380,14 @@ export const EventDetailsPage: React.FC = () => {
           {/* Quick Stall Actions */}
           <div className="flex flex-wrap items-center gap-2 shrink-0">
             <Link
+              to={`/combos?action=create&eventId=${event.id}`}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all"
+            >
+              <Gift className="w-4 h-4" />
+              <span>+ Create Combo</span>
+            </Link>
+
+            <Link
               to={`/sales-entry?eventId=${event.id}`}
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors"
             >
@@ -405,6 +421,7 @@ export const EventDetailsPage: React.FC = () => {
         <div className="flex items-center gap-1 border-b border-slate-100 pt-3 overflow-x-auto no-scrollbar">
           {[
             { id: 'overview', label: 'Overview', icon: Store },
+            { id: 'combos', label: `Combos (${eventCombos.length})`, icon: Gift },
             { id: 'games', label: `Games (${event.games?.length || 0})`, icon: Dices },
             { id: 'products', label: `Products (${event.allocations?.length || 0})`, icon: Package },
             { id: 'sales', label: `Sales (${eventSales.length})`, icon: ReceiptText },
@@ -658,6 +675,125 @@ export const EventDetailsPage: React.FC = () => {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB: COMBOS & SPECIAL OFFERS                              */}
+      {/* ========================================================= */}
+      {activeTab === 'combos' && (
+        <div className="space-y-4 animate-fadeIn">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-black text-slate-900 tracking-tight">Combos & Special Offers</h2>
+              <p className="text-xs text-slate-500">
+                Bundles and promotional deals configured for {event.name}. Component stock is atomically deducted from this stall.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Link
+                to={`/combos?action=create&eventId=${event.id}`}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-700 hover:to-rose-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ Create Combo Offer</span>
+              </Link>
+            </div>
+          </div>
+
+          {eventCombos.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-12 text-center shadow-xs">
+              <div className="w-14 h-14 bg-pink-50 text-pink-600 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                <Gift className="w-7 h-7" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 mb-1">No Combos Configured for this Stall</h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto mb-5">
+                Create bundle promotions (e.g. 3 scrunchies for ₹150 or Buy 2 Get 1 Free) that automatically deduct products from this event's allocated inventory.
+              </p>
+              <Link
+                to={`/combos?action=create&eventId=${event.id}`}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white font-bold rounded-xl text-xs transition-all shadow-xs"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Create First Combo Offer</span>
+              </Link>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {eventCombos.map(combo => {
+                const isOutOfStock = combo.isOutOfStock || (combo.availableStock !== undefined && combo.availableStock <= 0);
+                return (
+                  <div
+                    key={combo.id}
+                    className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-xs flex flex-col justify-between space-y-4"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-pink-50 text-pink-700 border border-pink-200">
+                          {combo.comboType.replace(/_/g, ' ')}
+                        </span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          combo.status === 'ACTIVE'
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : 'bg-slate-100 text-slate-500'
+                        }`}>
+                          {combo.status}
+                        </span>
+                      </div>
+
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900">{combo.name}</h3>
+                        {combo.description && (
+                          <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{combo.description}</p>
+                        )}
+                      </div>
+
+                      {/* Pricing */}
+                      <div className="p-3 bg-pink-50/60 rounded-xl border border-pink-100 flex items-baseline justify-between">
+                        <div>
+                          <span className="text-[10px] text-slate-500 uppercase font-semibold">Deal Price</span>
+                          <div className="text-xl font-black text-pink-700">₹{combo.price}</div>
+                        </div>
+                        {combo.savings !== undefined && combo.savings > 0 && (
+                          <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md">
+                            Save ₹{combo.savings}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Items */}
+                      <div className="space-y-1">
+                        <div className="text-[11px] font-bold text-slate-400 uppercase">Includes:</div>
+                        {combo.items.map((ci, idx) => (
+                          <div key={idx} className="text-xs flex items-center justify-between text-slate-700 py-0.5">
+                            <span>{ci.quantity}× {ci.productName}</span>
+                            {ci.availableStock !== undefined && (
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                ({ci.availableStock} in stall)
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                      <span className={`font-bold ${isOutOfStock ? 'text-rose-600' : 'text-emerald-700'}`}>
+                        {isOutOfStock ? '⚠️ Out of stock' : `✓ ${combo.availableStock ?? 'Ready'} bundles left`}
+                      </span>
+                      <Link
+                        to={`/sales-entry?eventId=${event.id}`}
+                        className="text-pink-600 hover:text-pink-700 font-bold"
+                      >
+                        Sell at POS →
+                      </Link>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

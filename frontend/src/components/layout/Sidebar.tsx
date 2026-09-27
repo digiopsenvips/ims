@@ -73,7 +73,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           to: '/combos',
           icon: Gift,
           badge: 'DEALS',
-          show: isDeveloper || isAdmin || isHead,
+          show: true,
         },
         {
           label: 'Games',
@@ -104,6 +104,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           to: '/projects-products',
           icon: FolderTree,
           show: isDeveloper || isAdmin,
+        },
+        {
+          label: 'Combos & Offers',
+          to: '/combos',
+          icon: Gift,
+          badge: 'DEALS',
+          show: true,
         },
         {
           label: 'Inventory',

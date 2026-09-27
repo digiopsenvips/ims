@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { api } from '../lib/api';
@@ -68,6 +69,8 @@ export const CombosPage: React.FC = () => {
   const [typeFilter, setTypeFilter] = useState<'ALL' | ComboType>('ALL');
   const [eventFilter, setEventFilter] = useState<string>('ALL');
 
+  const [searchParams, setSearchParams] = useSearchParams();
+
   // Modals
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [editingCombo, setEditingCombo] = useState<Combo | null>(null);
@@ -91,7 +94,8 @@ export const CombosPage: React.FC = () => {
     { productId: '', quantity: 1, isFree: false },
   ]);
 
-  const canManage = isDeveloper || isAdmin || isHead;
+  // Ensure option to create combos is accessible to all users
+  const canManage = isDeveloper || isAdmin || isHead || Boolean(user);
   const canViewRevenue = isDeveloper || isAdmin || Boolean(user?.permissions?.['view_revenue']);
 
   // Fetch all initial data
@@ -129,6 +133,25 @@ export const CombosPage: React.FC = () => {
   useEffect(() => {
     fetchData();
   }, []);
+
+  // Handle URL direct action trigger (e.g. /combos?action=create or /combos?action=create&eventId=...)
+  useEffect(() => {
+    if (searchParams.get('action') === 'create' && products.length > 0) {
+      const targetEvent = searchParams.get('eventId') || '';
+      setEditingCombo(null);
+      setFormName('');
+      setFormDescription('');
+      setFormComboType('FIXED_QUANTITY');
+      setFormPrice('150');
+      setFormEventId(targetEvent);
+      setFormProjectId('');
+      setFormMinItems('3');
+      setFormFreeItemsCount('1');
+      setFormStatus('ACTIVE');
+      setFormItems([{ productId: products[0]?.id || '', quantity: 3, isFree: false }]);
+      setShowCreateModal(true);
+    }
+  }, [searchParams, products]);
 
   // Real-time socket listeners
   useEffect(() => {

@@ -127,7 +127,7 @@ export const App: React.FC = () => {
         <Route
           path="combos"
           element={
-            <ProtectedRoute allowedRoles={['DEVELOPER', 'ADMIN', 'HEAD']}>
+            <ProtectedRoute>
               <CombosPage />
             </ProtectedRoute>
           }

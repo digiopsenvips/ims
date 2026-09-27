@@ -1049,7 +1049,7 @@ export const MemberSalePortalPage: React.FC = () => {
               {portalTab === 'COMBOS' ? (
                 /* Combos Stall Grid */
                 combosWithStallStock.length === 0 ? (
-                  <div className="bg-white p-8 rounded-xl border border-slate-200 text-center space-y-2">
+                  <div className="bg-white p-8 rounded-xl border border-slate-200 text-center space-y-3">
                     <div className="w-10 h-10 rounded-full bg-pink-50 text-pink-600 flex items-center justify-center mx-auto">
                       <Gift className="w-5 h-5" />
                     </div>
@@ -1057,9 +1057,27 @@ export const MemberSalePortalPage: React.FC = () => {
                     <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
                       There are currently no active combo deals mapped to this event. You can create combos in the Combos page or sell normal products.
                     </p>
+                    <Link
+                      to={`/combos?action=create&eventId=${selectedEventId}`}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Create Combo Offer</span>
+                    </Link>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between px-1">
+                      <span className="text-xs font-bold text-slate-700">Available Stall Bundles</span>
+                      <Link
+                        to={`/combos?action=create&eventId=${selectedEventId}`}
+                        className="text-xs font-bold text-pink-600 hover:text-pink-700 flex items-center gap-1 hover:underline"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Create Combo Offer</span>
+                      </Link>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
                     {combosWithStallStock.map(combo => {
                       const isOutOfStock = combo.isOutOfStock;
                       const inCart = cart.find(c => c.comboId === combo.id);
@@ -1155,7 +1173,8 @@ export const MemberSalePortalPage: React.FC = () => {
                       );
                     })}
                   </div>
-                )
+                </div>
+              )
               ) : (
                 <>
                   {/* Product Controls: Project Filter Tabs + Search Input */}
