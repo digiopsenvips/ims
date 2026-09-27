@@ -77,6 +77,10 @@ router.put(
         }
       }
 
+      if (typeof req.body.isArchived === 'boolean') {
+        updateData.isArchived = req.body.isArchived;
+      }
+
       const updated = await prisma.product.update({
         where: { id },
         data: updateData,
@@ -94,7 +98,7 @@ router.put(
   }
 );
 
-// DELETE /api/products/:id: Delete or soft-delete (Developer/Admin)
+// DELETE /api/products/:id: Delete or soft-retire (Developer/Admin)
 router.delete(
   '/:id',
   authenticateToken,
@@ -107,6 +111,7 @@ router.delete(
         where: { id },
         include: {
           sales: { select: { id: true } },
+          saleItems: { select: { id: true } },
           allocations: { select: { id: true } },
         },
       });
@@ -116,26 +121,21 @@ router.delete(
         return;
       }
 
-      if (product.sales.length > 0) {
-        if (req.user?.role === Role.DEVELOPER) {
-          await prisma.$transaction([
-            prisma.sale.deleteMany({ where: { productId: id } }),
-            prisma.eventAllocation.deleteMany({ where: { productId: id } }),
-            prisma.inventory.deleteMany({ where: { productId: id } }),
-            prisma.product.delete({ where: { id } }),
-          ]);
-          res.json({ message: `Product '${product.name}' and all its associated sales/inventory were deleted successfully by Developer` });
-          return;
-        }
+      // If the product has historical sales or line items, NEVER DELETE IT. Safely retire it.
+      if (product.sales.length > 0 || product.saleItems.length > 0 || product.allocations.length > 0) {
+        await prisma.product.update({
+          where: { id },
+          data: { isArchived: true },
+        });
 
-        res.status(400).json({
-          error: `Cannot hard delete product '${product.name}' (${product.id}) because it has ${product.sales.length} recorded sale(s). Developer access required to force delete.`,
+        res.json({
+          message: `Product '${product.name}' (${product.id}) has historical transactions and cannot be deleted. It has been safely RETIRED.`,
+          retired: true,
         });
         return;
       }
 
-      // If no sales, delete allocations and inventory, then product
-      await prisma.eventAllocation.deleteMany({ where: { productId: id } });
+      // If truly no historical dependencies exist, remove empty inventory and product
       await prisma.inventory.deleteMany({ where: { productId: id } });
       await prisma.product.delete({ where: { id } });
 

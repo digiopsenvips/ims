@@ -14,12 +14,15 @@ import {
   Pencil,
   Gift,
   ArrowRight,
+  Archive,
+  ArchiveRestore,
 } from 'lucide-react';
 
 export const ProjectsProductsPage: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<'ACTIVE' | 'RETIRED' | 'ALL'>('ACTIVE');
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Modals
@@ -184,11 +187,35 @@ export const ProjectsProductsPage: React.FC = () => {
     }
 
     try {
-      await api.delete(`/products/${productId}`);
-      setStatusMessage({ type: 'success', text: `Product '${productName}' deleted successfully.` });
+      const res = await api.delete(`/products/${productId}`);
+      setStatusMessage({ type: 'success', text: res?.message || `Product '${productName}' deleted successfully.` });
       fetchData();
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err.message || 'Cannot delete product' });
+    }
+  };
+
+  const handleToggleArchiveProduct = async (prod: Product) => {
+    const action = prod.isArchived ? 'restore' : 'retire';
+    const confirmMsg = prod.isArchived
+      ? `Reactivate product '${prod.name}' (${prod.id})? It will appear in active product listings again.`
+      : `Retire product '${prod.name}' (${prod.id})? It will be safely hidden from active sales and events, but all historical sales, line items, and receipts will remain permanently intact.`;
+
+    if (!window.confirm(confirmMsg)) {
+      return;
+    }
+
+    try {
+      await api.put(`/products/${prod.id}`, {
+        isArchived: !prod.isArchived,
+      });
+      setStatusMessage({
+        type: 'success',
+        text: `Product '${prod.name}' (${prod.id}) has been ${prod.isArchived ? 'restored to active products' : 'safely retired'}.`,
+      });
+      fetchData();
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err.message || `Failed to ${action} product` });
     }
   };
 
@@ -210,10 +237,18 @@ export const ProjectsProductsPage: React.FC = () => {
     }
   };
 
-  const filteredProducts =
-    selectedProjectId === 'all'
-      ? products
-      : products.filter(p => p.projectId === selectedProjectId);
+  // Status and project-based product filtering
+  const activeProductsCount = products.filter(p => !p.isArchived).length;
+  const retiredProductsCount = products.filter(p => !!p.isArchived).length;
+
+  const filteredProducts = products.filter(p => {
+    if (selectedProjectId !== 'all' && p.projectId !== selectedProjectId) {
+      return false;
+    }
+    if (statusFilter === 'ACTIVE') return !p.isArchived;
+    if (statusFilter === 'RETIRED') return !!p.isArchived;
+    return true; // 'ALL'
+  });
 
   return (
     <div className="space-y-5 max-w-7xl mx-auto">
@@ -323,8 +358,9 @@ export const ProjectsProductsPage: React.FC = () => {
         </div>
       )}
 
-      {/* Project Filter Pills */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-1">
+      {/* Filter Toolbar: Project and Status Tabs */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1">
+        {/* Project Filter Pills */}
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setSelectedProjectId('all')}
@@ -354,29 +390,66 @@ export const ProjectsProductsPage: React.FC = () => {
           })}
         </div>
 
-        {selectedProjectId !== 'all' && (
-          <div className="flex items-center gap-2">
+        {/* Right side: Status Filter Tabs & Project Actions */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Status Tabs: Active | Retired | All */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
             <button
-              onClick={() => {
-                const proj = projects.find(p => p.id === selectedProjectId);
-                if (proj) handleOpenEditProject(proj);
-              }}
-              className="px-3 py-1.5 text-xs font-semibold rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
-              title={`Rename ${projects.find(p => p.id === selectedProjectId)?.name} project`}
+              onClick={() => setStatusFilter('ACTIVE')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                statusFilter === 'ACTIVE'
+                  ? 'bg-white text-emerald-700 shadow-2xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
             >
-              <Pencil className="w-3.5 h-3.5" />
-              <span>Rename Project</span>
+              Active ({activeProductsCount})
             </button>
             <button
-              onClick={() => handleDeleteProject(selectedProjectId)}
-              className="px-3 py-1.5 text-xs font-semibold rounded-md border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
-              title={`Delete ${projects.find(p => p.id === selectedProjectId)?.name} project`}
+              onClick={() => setStatusFilter('RETIRED')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                statusFilter === 'RETIRED'
+                  ? 'bg-white text-amber-800 shadow-2xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
             >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Delete "{projects.find(p => p.id === selectedProjectId)?.name}"</span>
+              Retired ({retiredProductsCount})
+            </button>
+            <button
+              onClick={() => setStatusFilter('ALL')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                statusFilter === 'ALL'
+                  ? 'bg-white text-slate-900 shadow-2xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              All ({products.length})
             </button>
           </div>
-        )}
+
+          {selectedProjectId !== 'all' && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  const proj = projects.find(p => p.id === selectedProjectId);
+                  if (proj) handleOpenEditProject(proj);
+                }}
+                className="px-3 py-1.5 text-xs font-semibold rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                title={`Rename ${projects.find(p => p.id === selectedProjectId)?.name} project`}
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                <span>Rename</span>
+              </button>
+              <button
+                onClick={() => handleDeleteProject(selectedProjectId)}
+                className="px-3 py-1.5 text-xs font-semibold rounded-md border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                title={`Delete ${projects.find(p => p.id === selectedProjectId)?.name} project`}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Products Table */}
@@ -388,6 +461,7 @@ export const ProjectsProductsPage: React.FC = () => {
                 <th className="px-4 py-3">Auto Product ID</th>
                 <th className="px-4 py-3">Product Name</th>
                 <th className="px-4 py-3">Project</th>
+                <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3 text-right">Base Price (₹)</th>
                 <th className="px-4 py-3 text-right">Stock On Hand</th>
                 <th className="px-4 py-3 text-center">Actions</th>
@@ -396,23 +470,43 @@ export const ProjectsProductsPage: React.FC = () => {
             <tbody className="divide-y divide-slate-100">
               {filteredProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
-                    No products found under this project. Click "Add Product" above to create one.
+                  <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                    No products found matching the selected project and status criteria.
                   </td>
                 </tr>
               ) : (
                 filteredProducts.map(prod => (
-                  <tr key={prod.id} className="hover:bg-slate-50/50">
+                  <tr key={prod.id} className={`hover:bg-slate-50/50 ${prod.isArchived ? 'bg-slate-50/40 opacity-80' : ''}`}>
                     <td className="px-4 py-3 font-mono font-bold text-slate-900">
                       {prod.id}
                     </td>
                     <td className="px-4 py-3 font-semibold text-slate-900">
-                      {prod.name}
+                      <div className="flex items-center gap-2">
+                        <span>{prod.name}</span>
+                        {prod.isArchived && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-200">
+                            Retired
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 border border-slate-200">
                         {prod.project?.name || '—'}
                       </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {prod.isArchived ? (
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-200">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                          Retired
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          Active
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right font-medium text-slate-900">
                       {prod.basePrice !== null && prod.basePrice !== undefined
@@ -430,6 +524,17 @@ export const ProjectsProductsPage: React.FC = () => {
                           title="Edit product name and price"
                         >
                           <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleToggleArchiveProduct(prod)}
+                          className={`p-1 rounded transition-colors cursor-pointer ${
+                            prod.isArchived
+                              ? 'text-amber-600 hover:text-amber-800 hover:bg-amber-50'
+                              : 'text-slate-400 hover:text-amber-600 hover:bg-amber-50'
+                          }`}
+                          title={prod.isArchived ? 'Restore / Reactivate product' : 'Retire product (Hide from active sales & stalls)'}
+                        >
+                          {prod.isArchived ? <ArchiveRestore className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
                         </button>
                         <button
                           onClick={() => handleDeleteProduct(prod.id, prod.name)}
