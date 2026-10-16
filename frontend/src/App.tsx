@@ -81,11 +81,7 @@ export const App: React.FC = () => {
 
         <Route
           path="projects-products"
-          element={
-            <ProtectedRoute allowedRoles={['DEVELOPER', 'ADMIN']}>
-              <ProjectsProductsPage />
-            </ProtectedRoute>
-          }
+          element={<Navigate to="/products" replace />}
         />
 
         <Route

@@ -45,7 +45,9 @@ export const GamesPage: React.FC = () => {
   // Modals
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [editingGame, setEditingGame] = useState<Game | null>(null);
-  const [viewingGame, setViewingGame] = useState<Game | null>(null);
+  const [viewingGame, setViewingGame] = useState<any | null>(null);
+  const [isLoadingDetails, setIsLoadingDetails] = useState<boolean>(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
   const [qrGame, setQrGame] = useState<Game | null>(null);
 
   // Form State
@@ -139,6 +141,37 @@ export const GamesPage: React.FC = () => {
     setFormError(null);
     setShowCreateModal(true);
   };
+
+  const handleOpenGameDetails = async (game: Game) => {
+    // Show modal immediately with current summary data so UI responds instantly
+    setViewingGame(game);
+    setIsLoadingDetails(true);
+    setDetailsError(null);
+
+    try {
+      const res = await api.get(`/games/${game.id}`);
+      if (res?.game) {
+        setViewingGame(res.game);
+      }
+    } catch (err: any) {
+      console.error('Failed to load full game details:', err);
+      setDetailsError(err.message || 'Failed to load live game details from database');
+    } finally {
+      setIsLoadingDetails(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (viewingGame) setViewingGame(null);
+        if (showCreateModal) setShowCreateModal(false);
+        if (qrGame) setQrGame(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [viewingGame, showCreateModal, qrGame]);
 
   const handleToggleStatus = async (game: Game) => {
     try {
@@ -474,9 +507,10 @@ export const GamesPage: React.FC = () => {
                 <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-1.5">
                   <div className="flex items-center gap-1">
                     <button
-                      onClick={() => setViewingGame(game)}
+                      onClick={() => handleOpenGameDetails(game)}
                       className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
-                      title="View Details"
+                      title={`View Details for ${game.name}`}
+                      aria-label={`View Details for ${game.name}`}
                     >
                       <Eye className="w-4 h-4" />
                     </button>
@@ -484,7 +518,8 @@ export const GamesPage: React.FC = () => {
                     <button
                       onClick={() => setQrGame(game)}
                       className="p-1.5 text-slate-500 hover:text-purple-700 hover:bg-purple-50 rounded-md transition-colors cursor-pointer"
-                      title="Customer QR & Rules"
+                      title={`Customer Display Card & Rules for ${game.name}`}
+                      aria-label={`Customer Display Card & Rules for ${game.name}`}
                     >
                       <QrCode className="w-4 h-4" />
                     </button>
@@ -493,7 +528,8 @@ export const GamesPage: React.FC = () => {
                       <button
                         onClick={() => openEditModal(game)}
                         className="p-1.5 text-slate-500 hover:text-blue-700 hover:bg-blue-50 rounded-md transition-colors cursor-pointer"
-                        title="Edit Game Configuration"
+                        title={`Edit configuration for ${game.name}`}
+                        aria-label={`Edit configuration for ${game.name}`}
                       >
                         <Pencil className="w-4 h-4" />
                       </button>
@@ -507,7 +543,8 @@ export const GamesPage: React.FC = () => {
                             ? 'text-slate-400 hover:text-amber-600 hover:bg-amber-50'
                             : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
                         }`}
-                        title={game.status === 'ACTIVE' ? 'Deactivate Game' : 'Activate Game'}
+                        title={game.status === 'ACTIVE' ? `Deactivate ${game.name}` : `Activate ${game.name}`}
+                        aria-label={game.status === 'ACTIVE' ? `Deactivate ${game.name}` : `Activate ${game.name}`}
                       >
                         <Power className="w-4 h-4" />
                       </button>
@@ -516,6 +553,7 @@ export const GamesPage: React.FC = () => {
 
                   <Link
                     to={`/games/play?gameId=${game.id}${game.eventId ? `&eventId=${game.eventId}` : ''}`}
+                    aria-label={`Play ${game.name}`}
                     className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                       game.status === 'ACTIVE' && !hasOutOfStock
                         ? 'bg-purple-600 hover:bg-purple-700 text-white shadow-2xs'
@@ -783,78 +821,151 @@ export const GamesPage: React.FC = () => {
         </div>
       )}
 
-      {/* 5. VIEW GAME DETAILS MODAL */}
+      {/* 5. VIEW GAME DETAILS MODAL (FULL RECORD & LIVE SESSIONS) */}
       {viewingGame && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-xl border border-slate-200 space-y-4 my-8">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-800 flex items-center justify-center font-bold">
-                  <Gamepad2 className="w-4 h-4" />
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="game-details-title"
+          onClick={e => {
+            if (e.target === e.currentTarget) setViewingGame(null);
+          }}
+        >
+          <div className="bg-white rounded-2xl max-w-xl w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4 my-8 max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100 gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold shrink-0 mt-0.5">
+                  <Gamepad2 className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900 leading-tight">
-                    {viewingGame.name}
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    {viewingGame.projectName ? `Project ${viewingGame.projectName}` : 'Stall Game'} &bull; Entry: ₹{viewingGame.entryFee}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 id="game-details-title" className="text-base sm:text-lg font-bold text-slate-900 leading-tight">
+                      {viewingGame.name}
+                    </h3>
+                    <span
+                      className={`px-2 py-0.5 text-[10px] font-extrabold uppercase rounded border ${
+                        viewingGame.status === 'ACTIVE'
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : 'bg-slate-100 text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      {viewingGame.status}
+                    </span>
+                    {viewingGame.projectName && (
+                      <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded uppercase tracking-wider">
+                        Project {viewingGame.projectName}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Entry Fee: <strong className="text-emerald-700 font-bold">₹{viewingGame.entryFee}</strong> &bull; Stall:{' '}
+                    <strong className="text-slate-700">{viewingGame.eventName || 'Any Stall / Global'}</strong>
                   </p>
                 </div>
               </div>
+
               <button
                 onClick={() => setViewingGame(null)}
-                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 cursor-pointer"
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors"
+                aria-label="Close game details modal"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {viewingGame.description && (
-              <p className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                {viewingGame.description}
-              </p>
+            {/* Live Loading Indicator */}
+            {isLoadingDetails && (
+              <div className="p-2.5 bg-purple-50/80 border border-purple-200 text-purple-800 text-xs rounded-xl flex items-center gap-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600 shrink-0" />
+                <span>Loading live game sessions and updated stock from database...</span>
+              </div>
             )}
+
+            {/* Error Banner with Retry */}
+            {detailsError && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-800 text-xs rounded-xl flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span>{detailsError}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleOpenGameDetails(viewingGame)}
+                  className="px-2 py-1 bg-white border border-red-300 hover:bg-red-50 rounded text-[11px] font-bold text-red-700 cursor-pointer"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
+            {/* Description & Rules Section */}
+            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-1">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                <span>Rules & How to Play</span>
+              </div>
+              <p className="text-xs text-slate-700 leading-relaxed">
+                {viewingGame.description || 'No specific game rules provided. Outcome is verified and recorded by stall volunteer.'}
+              </p>
+            </div>
 
             {/* Reward Configuration & Current Stock */}
             <div className="space-y-2">
               <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Configured Rewards
+                Configured Rewards & Inventory Stock
               </div>
-              <div className="bg-amber-50/50 border border-amber-200 rounded-xl p-3 flex items-center justify-between">
-                <div>
+
+              {/* Win Reward */}
+              <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-3 flex items-center justify-between gap-2">
+                <div className="min-w-0">
                   <div className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
-                    <Trophy className="w-3.5 h-3.5 text-amber-600" />
+                    <Trophy className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                     <span>WIN Reward</span>
                   </div>
-                  <div className="text-xs text-amber-900 font-semibold mt-0.5">
-                    {viewingGame.winReward.productName} × {viewingGame.winReward.quantity}
+                  <div className="text-xs text-amber-900 font-semibold mt-0.5 truncate">
+                    {viewingGame.winReward?.productName} &times; {viewingGame.winReward?.quantity}
                   </div>
                 </div>
-                <div className="text-right">
+                <div className="text-right shrink-0">
                   <div className="text-[10px] text-slate-500 font-medium">Available Stock</div>
                   <div className="text-sm font-black text-slate-900">
-                    {viewingGame.winReward.availableStock}
+                    {viewingGame.winReward?.isOutOfStock ? (
+                      <span className="text-red-600 text-xs font-bold uppercase">Out of Stock</span>
+                    ) : (
+                      viewingGame.winReward?.availableStock ?? 0
+                    )}
                   </div>
                 </div>
               </div>
 
-              {viewingGame.loseReward && (
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between">
-                  <div>
+              {/* Lose Reward */}
+              {viewingGame.loseReward ? (
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
                     <div className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                      <Frown className="w-3.5 h-3.5 text-slate-500" />
+                      <Frown className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                       <span>LOSE Consolation</span>
                     </div>
-                    <div className="text-xs text-slate-700 font-semibold mt-0.5">
-                      {viewingGame.loseReward.productName} × {viewingGame.loseReward.quantity}
+                    <div className="text-xs text-slate-700 font-semibold mt-0.5 truncate">
+                      {viewingGame.loseReward.productName} &times; {viewingGame.loseReward.quantity}
                     </div>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right shrink-0">
                     <div className="text-[10px] text-slate-500 font-medium">Available Stock</div>
                     <div className="text-sm font-black text-slate-900">
-                      {viewingGame.loseReward.availableStock}
+                      {viewingGame.loseReward.isOutOfStock ? (
+                        <span className="text-red-600 text-xs font-bold uppercase">Out of Stock</span>
+                      ) : (
+                        viewingGame.loseReward.availableStock ?? 0
+                      )}
                     </div>
                   </div>
+                </div>
+              ) : (
+                <div className="p-2 text-[11px] text-slate-400 italic bg-slate-50 border border-dashed border-slate-200 rounded-lg text-center">
+                  No consolation reward configured for losses.
                 </div>
               )}
             </div>
@@ -865,37 +976,124 @@ export const GamesPage: React.FC = () => {
                 <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                   Performance Metrics
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
                     <div className="text-[10px] text-slate-400 font-semibold uppercase">Total Plays</div>
-                    <div className="text-base font-black text-slate-900 mt-0.5">{viewingGame.stats.totalPlays}</div>
+                    <div className="text-base font-black text-slate-900 mt-0.5">
+                      {viewingGame.stats.totalPlays ?? 0}
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                    <div className="text-[10px] text-slate-400 font-semibold uppercase">Wins / Losses</div>
+                    <div className="text-sm font-black text-slate-900 mt-0.5">
+                      <span className="text-emerald-700">{viewingGame.stats.wins ?? 0}W</span>
+                      <span className="text-slate-300 mx-1">/</span>
+                      <span className="text-slate-600">{viewingGame.stats.losses ?? 0}L</span>
+                    </div>
                   </div>
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
                     <div className="text-[10px] text-slate-400 font-semibold uppercase">Win Rate</div>
-                    <div className="text-base font-black text-purple-700 mt-0.5">{viewingGame.stats.winRate}%</div>
+                    <div className="text-base font-black text-purple-700 mt-0.5">
+                      {viewingGame.stats.winRate ?? 0}%
+                    </div>
                   </div>
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
                     <div className="text-[10px] text-slate-400 font-semibold uppercase">Total Revenue</div>
-                    <div className="text-base font-black text-emerald-700 mt-0.5">₹{viewingGame.stats.totalRevenue}</div>
+                    <div className="text-base font-black text-emerald-700 mt-0.5">
+                      ₹{viewingGame.stats.revenue ?? viewingGame.stats.totalRevenue ?? 0}
+                    </div>
                   </div>
                 </div>
               </div>
             )}
 
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+            {/* Recent Sessions Ledger Mini-Table */}
+            {viewingGame.recentSessions && viewingGame.recentSessions.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  <span>Recent Game Plays</span>
+                  <Link
+                    to={`/game-sessions?gameId=${viewingGame.id}`}
+                    className="text-purple-600 hover:text-purple-800 lowercase first-letter:uppercase tracking-normal font-semibold flex items-center gap-1"
+                  >
+                    <span>View all in ledger &rarr;</span>
+                  </Link>
+                </div>
+                <div className="border border-slate-200 rounded-xl overflow-hidden text-xs">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50 text-[10px] font-bold text-slate-400 uppercase border-b border-slate-200">
+                      <tr>
+                        <th className="py-1.5 px-2.5">Session</th>
+                        <th className="py-1.5 px-2.5">Result</th>
+                        <th className="py-1.5 px-2.5">Reward</th>
+                        <th className="py-1.5 px-2.5">Operator</th>
+                        <th className="py-1.5 px-2.5 text-right">Fee</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {viewingGame.recentSessions.slice(0, 5).map((s: any) => (
+                        <tr key={s.id} className="hover:bg-slate-50/50">
+                          <td className="py-2 px-2.5 font-mono text-[11px] text-purple-700 font-semibold">
+                            {s.sessionCode}
+                          </td>
+                          <td className="py-2 px-2.5">
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase ${
+                                s.result === 'WIN'
+                                  ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                  : 'bg-slate-100 text-slate-700'
+                              }`}
+                            >
+                              {s.result}
+                            </span>
+                          </td>
+                          <td className="py-2 px-2.5 text-slate-700 truncate max-w-[130px]">
+                            {s.rewardDescription}
+                          </td>
+                          <td className="py-2 px-2.5 text-slate-600 truncate max-w-[90px]">
+                            {s.sellerName}
+                          </td>
+                          <td className="py-2 px-2.5 text-right font-bold text-slate-900">
+                            ₹{s.entryFee}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Modal Footer Actions */}
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
               <span className="text-[11px] text-slate-400 font-medium">
                 Created: {new Date(viewingGame.createdAt).toLocaleDateString('en-IN')}
               </span>
               <div className="flex items-center gap-2">
                 <button
+                  type="button"
                   onClick={() => setViewingGame(null)}
-                  className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer"
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
                 >
                   Close
                 </button>
+                {canManage && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const g = viewingGame;
+                      setViewingGame(null);
+                      openEditModal(g);
+                    }}
+                    className="px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    <span>Edit Game</span>
+                  </button>
+                )}
                 <Link
-                  to={`/games/play?gameId=${viewingGame.id}`}
-                  className="px-3.5 py-1.5 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-lg shadow-xs cursor-pointer flex items-center gap-1"
+                  to={`/games/play?gameId=${viewingGame.id}${viewingGame.eventId ? `&eventId=${viewingGame.eventId}` : ''}`}
+                  className="px-3.5 py-1.5 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-lg shadow-xs transition-colors cursor-pointer flex items-center gap-1"
                 >
                   <Gamepad2 className="w-3.5 h-3.5" />
                   <span>Play Game</span>

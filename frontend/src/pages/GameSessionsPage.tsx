@@ -51,9 +51,67 @@ export const GameSessionsPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState(searchFromUrl);
   const [isLoading, setIsLoading] = useState(true);
   const [isFetching, setIsFetching] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const canViewRevenue = isDeveloper || isAdmin || hasPermission('view_revenue');
   const canViewPII = isDeveloper || isAdmin || hasPermission('view_customer_pii');
+
+  const handleExportCSV = async () => {
+    setIsExporting(true);
+    try {
+      const query = new URLSearchParams();
+      query.set('page', '1');
+      query.set('pageSize', '1000');
+      if (selectedEventId) query.set('eventId', selectedEventId);
+      if (selectedGameId) query.set('gameId', selectedGameId);
+      if (resultFilter !== 'ALL') query.set('result', resultFilter);
+      if (paymentFilter !== 'ALL') query.set('paymentMethod', paymentFilter);
+      if (searchFromUrl.trim()) query.set('search', searchFromUrl.trim());
+
+      const res = await api.get(`/games/sessions?${query.toString()}`);
+      const dataToExport: GameSession[] = res?.sessions || sessions;
+
+      const headers = [
+        'Session Code',
+        'Date & Time',
+        'Game Name',
+        'Stall / Event',
+        'Result',
+        'Reward Product',
+        'Entry Fee (₹)',
+        'Payment Method',
+        'Operator',
+        ...(canViewPII ? ['Player Name', 'Player Phone'] : []),
+      ];
+
+      const rows = dataToExport.map(s => [
+        `"${s.sessionCode || ''}"`,
+        `"${new Date(s.createdAt).toLocaleString('en-IN')}"`,
+        `"${s.gameName || ''}"`,
+        `"${s.eventName || 'N/A'}"`,
+        s.result,
+        `"${s.rewardDescription || (s.result === 'WIN' ? 'Win Reward' : 'Consolation')}"`,
+        s.entryFee,
+        s.paymentMethod,
+        `"${s.sellerName || 'Staff'}"`,
+        ...(canViewPII ? [`"${s.customerName || ''}"`, `"${s.customerPhone || ''}"`] : []),
+      ]);
+
+      const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `game_sessions_${Date.now()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error('Game sessions export failed:', err);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const updateUrlState = useCallback(
     (updates: {
@@ -198,6 +256,16 @@ export const GameSessionsPage: React.FC = () => {
           >
             Manage Games
           </Link>
+          <button
+            onClick={handleExportCSV}
+            disabled={isExporting || totalRecords === 0}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-xs"
+            title="Export game sessions to CSV"
+            aria-label="Export game sessions to CSV"
+          >
+            {isExporting ? <Loader2 className="w-4 h-4 animate-spin text-purple-600" /> : <Download className="w-4 h-4 text-slate-500" />}
+            <span>Export CSV</span>
+          </button>
         </div>
       </div>
 

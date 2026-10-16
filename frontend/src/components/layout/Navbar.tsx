@@ -19,11 +19,12 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
 
   const fetchActiveEvent = async () => {
     try {
-      const events = await api.get<AppEvent[]>('/events');
-      if (Array.isArray(events)) {
-        const active = events.find(e => e.status === 'ACTIVE');
-        setActiveEvent(active || null);
-      }
+      const res = await api.get<any>('/events');
+      const eventList: AppEvent[] = Array.isArray(res) ? res : (res?.events || []);
+      const now = Date.now();
+      const active = eventList.find(e => e.status === 'ACTIVE' && now < new Date(e.endDatetime).getTime()) ||
+        eventList.find(e => e.status === 'ACTIVE');
+      setActiveEvent(active || null);
     } catch {
       // Ignore background fetch error
     }
@@ -57,6 +58,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
     if (path === '/inventory') return 'Inventory';
     if (path === '/events') return 'Events';
     if (path.startsWith('/events/')) return 'Event Stall Details';
+    if (path === '/combos') return 'Combos & Offers';
     if (path === '/games') return 'Games Management';
     if (path === '/games/play' || path === '/play-game') return 'Play Game (Stall)';
     if (path === '/game-sessions') return 'Game Sessions';
