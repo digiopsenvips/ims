@@ -1450,6 +1450,23 @@ router.post(
             allocError = `Product ${pId} not allocated to event`;
             break;
           }
+
+          const salesAgg = await prisma.saleItem.aggregate({
+            where: {
+              productId: pId,
+              sale: { eventId },
+            },
+            _sum: { quantity: true },
+          });
+
+          const soldSoFar = salesAgg._sum.quantity || 0;
+          const remainingAllocated = alloc.allocatedQty - soldSoFar;
+
+          if (qty > remainingAllocated) {
+            allocError = `Sale quantity (${qty}) exceeds remaining stock allocated for ${alloc.productId} (${remainingAllocated} remaining)`;
+            break;
+          }
+
           const price = Number(alloc.priceAtEvent || clientUnitPrice || 0);
           validatedItems.push({
             productId: pId,
@@ -1482,6 +1499,16 @@ router.post(
           const cashVal = parseFloat(String(cashAmount ?? ''));
           const upiVal = parseFloat(String(upiAmount ?? ''));
           if (!isNaN(cashVal) && !isNaN(upiVal) && cashVal >= 0 && upiVal >= 0) {
+            const totalSplitCents = Math.round((cashVal + upiVal) * 100);
+            const grandTotalCents = Math.round(grandTotal * 100);
+            if (totalSplitCents !== grandTotalCents) {
+              results.push({
+                clientTxId,
+                status: 'failed',
+                error: `Split payment total (₹${(totalSplitCents / 100).toFixed(2)}) must exactly match bill total (₹${(grandTotalCents / 100).toFixed(2)})`,
+              });
+              continue;
+            }
             resolvedCashAmount = Math.round(cashVal * 100) / 100;
             resolvedUpiAmount = Math.round(upiVal * 100) / 100;
           } else {

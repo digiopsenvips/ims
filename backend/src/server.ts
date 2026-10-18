@@ -71,6 +71,12 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 import { reconcileAllExpiredEvents } from './services/eventLifecycle';
+import { initializeDatabaseSequences } from './services/dbInit';
+
+// Synchronize database sequences before accepting connections
+initializeDatabaseSequences().catch(err =>
+  console.error('[Database] Startup sequence sync error:', err)
+);
 
 server.listen(ENV.PORT, () => {
   console.log(`🚀 Enactus IMS Backend running on http://localhost:${ENV.PORT}`);

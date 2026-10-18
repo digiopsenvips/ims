@@ -792,8 +792,45 @@ export const MemberSalePortalPage: React.FC = () => {
         items: orderItems,
       };
 
-      // Record through SyncManager (writes all items to IndexedDB and triggers batch sync)
-      const { syncedImmediately, receiptNumber, saleId } = await syncManager.recordOrder(orderPayload);
+      let resolvedReceiptNumber: number | undefined;
+      let resolvedSaleId: number | undefined;
+      let isSynced = false;
+
+      const isOnline = syncManager.getStatus().isOnline && navigator.onLine;
+
+      if (isOnline) {
+        // Direct authoritative write to trusted backend
+        const salePayload = {
+          eventId: selectedEventId,
+          paymentMethod,
+          cashAmount: paymentMethod === 'CASH_UPI' ? cashNum : paymentMethod === 'CASH' ? totalAmount : 0,
+          upiAmount: paymentMethod === 'CASH_UPI' ? upiNum : paymentMethod === 'UPI' ? totalAmount : 0,
+          customerName: customerName.trim() || undefined,
+          customerPhone: customerPhone.trim() || undefined,
+          comboId: targetComboId,
+          comboName: targetComboName,
+          comboQuantity: targetComboQuantity,
+          transactionType: isSingleComboOrder ? 'COMBO' : 'SALE',
+          clientTxId: crypto.randomUUID(),
+          saleTime,
+          items: orderItems,
+        };
+
+        const response = await api.post('/sales', salePayload);
+        if (response && response.sale) {
+          resolvedReceiptNumber = response.sale.receiptNumber;
+          resolvedSaleId = response.sale.id;
+          isSynced = true;
+        } else {
+          throw new Error('Server returned invalid response');
+        }
+      } else {
+        // Truly offline: queue in IndexedDB for subsequent background sync
+        const result = await syncManager.recordOrder(orderPayload);
+        resolvedReceiptNumber = result.receiptNumber;
+        resolvedSaleId = result.saleId;
+        isSynced = result.syncedImmediately;
+      }
 
       // Optimistically decrement local remaining count in events for every physical component deducted
       if (currentEvent) {
@@ -818,16 +855,18 @@ export const MemberSalePortalPage: React.FC = () => {
         );
       }
 
-      const canonicalReceiptLabel = receiptNumber
-        ? `#${receiptNumber}`
-        : saleId
-        ? `#${saleId}`
-        : 'Confirmed';
+      const canonicalReceiptLabel = resolvedReceiptNumber
+        ? `#${resolvedReceiptNumber}`
+        : resolvedSaleId
+        ? `#${resolvedSaleId}`
+        : isSynced
+        ? 'Confirmed'
+        : 'Queued (Offline)';
 
-      // Fast success state: record completed bill with canonical receipt number
+      // Fast success state: record completed bill with verified canonical receipt number
       setLastCompletedBill({
         billNo: canonicalReceiptLabel,
-        receiptNumber,
+        receiptNumber: resolvedReceiptNumber,
         customerName: customerName.trim() || 'Walk-in Customer',
         customerPhone: customerPhone.trim() || '',
         items: [...cart],
@@ -837,10 +876,10 @@ export const MemberSalePortalPage: React.FC = () => {
         cashAmount: paymentMethod === 'CASH_UPI' ? cashNum : paymentMethod === 'CASH' ? totalAmount : 0,
         upiAmount: paymentMethod === 'CASH_UPI' ? upiNum : paymentMethod === 'UPI' ? totalAmount : 0,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        syncedImmediately,
+        syncedImmediately: isSynced,
       });
 
-      // Clear the current form immediately so the cashier is ready for the NEXT customer
+      // Clear the current form only AFTER verified persistence
       setCart([]);
       setSplitCash('');
       setSplitUpi('');
