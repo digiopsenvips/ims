@@ -24,8 +24,11 @@ router.get(
         whereClause.status = status as GameStatus;
       }
 
-      if (eventId) {
-        whereClause.eventId = String(eventId);
+      if (eventId && eventId !== 'ALL') {
+        whereClause.OR = [
+          { eventId: String(eventId) },
+          { eventId: null },
+        ];
       }
 
       if (projectId) {
@@ -34,10 +37,19 @@ router.get(
 
       if (search && typeof search === 'string' && search.trim()) {
         const term = search.trim();
-        whereClause.OR = [
+        const searchCondition = [
           { name: { contains: term, mode: 'insensitive' } },
           { description: { contains: term, mode: 'insensitive' } },
         ];
+        if (whereClause.OR) {
+          whereClause.AND = [
+            { OR: whereClause.OR },
+            { OR: searchCondition },
+          ];
+          delete whereClause.OR;
+        } else {
+          whereClause.OR = searchCondition;
+        }
       }
 
       const games = await prisma.game.findMany({
@@ -74,6 +86,41 @@ router.get(
         orderBy: { createdAt: 'desc' },
       });
 
+      // Gather all relevant event IDs to resolve event allocations accurately
+      const relevantEventIds = Array.from(
+        new Set([
+          ...games.map(g => g.eventId).filter(Boolean) as string[],
+          ...(eventId && eventId !== 'ALL' ? [String(eventId)] : []),
+        ])
+      );
+
+      const allocMap = new Map<string, number>();
+      const soldMap = new Map<string, number>();
+
+      if (relevantEventIds.length > 0) {
+        const allocations = await prisma.eventAllocation.findMany({
+          where: { eventId: { in: relevantEventIds } },
+        });
+        for (const a of allocations) {
+          allocMap.set(`${a.eventId}_${a.productId}`, a.allocatedQty);
+        }
+
+        const saleItems = await prisma.saleItem.findMany({
+          where: { sale: { eventId: { in: relevantEventIds } } },
+          select: {
+            productId: true,
+            quantity: true,
+            sale: { select: { eventId: true } },
+          },
+        });
+        for (const item of saleItems) {
+          if (item.sale?.eventId) {
+            const key = `${item.sale.eventId}_${item.productId}`;
+            soldMap.set(key, (soldMap.get(key) || 0) + item.quantity);
+          }
+        }
+      }
+
       const formatted = games.map(game => {
         const totalPlays = game.sessions.length;
         const wins = game.sessions.filter(s => s.result === GameResult.WIN).length;
@@ -82,8 +129,37 @@ router.get(
         const totalRevenue = game.sessions.reduce((sum, s) => sum + Number(s.entryFee), 0);
         const totalRewardsIssued = game.sessions.reduce((sum, s) => sum + (s.rewardQuantity || 1), 0);
 
-        const winRewardStock = game.winRewardProduct.inventory?.quantityOnHand ?? 0;
-        const loseRewardStock = game.loseRewardProduct?.inventory?.quantityOnHand ?? 0;
+        const winWarehouseStock = game.winRewardProduct.inventory?.quantityOnHand ?? 0;
+        const loseWarehouseStock = game.loseRewardProduct?.inventory?.quantityOnHand ?? 0;
+
+        const effectiveEventId = (eventId && eventId !== 'ALL' ? String(eventId) : null) || game.eventId;
+
+        const resolveStock = (productId: string, whStock: number) => {
+          if (effectiveEventId && allocMap.has(`${effectiveEventId}_${productId}`)) {
+            const allocated = allocMap.get(`${effectiveEventId}_${productId}`)!;
+            const sold = soldMap.get(`${effectiveEventId}_${productId}`) || 0;
+            const remaining = Math.max(0, allocated - sold);
+            return {
+              availableStock: remaining,
+              eventStock: remaining,
+              warehouseStock: whStock,
+              isLowStock: remaining > 0 && remaining <= 5,
+              isOutOfStock: remaining <= 0,
+            };
+          }
+          return {
+            availableStock: whStock,
+            eventStock: null,
+            warehouseStock: whStock,
+            isLowStock: whStock > 0 && whStock <= 5,
+            isOutOfStock: whStock <= 0,
+          };
+        };
+
+        const winStockInfo = resolveStock(game.winRewardProductId, winWarehouseStock);
+        const loseStockInfo = game.loseRewardProductId
+          ? resolveStock(game.loseRewardProductId, loseWarehouseStock)
+          : null;
 
         return {
           id: game.id,
@@ -101,18 +177,22 @@ router.get(
             productId: game.winRewardProductId,
             productName: game.winRewardProduct.name,
             quantity: game.winRewardQuantity,
-            availableStock: winRewardStock,
-            isLowStock: winRewardStock > 0 && winRewardStock <= 5,
-            isOutOfStock: winRewardStock <= 0,
+            availableStock: winStockInfo.availableStock,
+            eventStock: winStockInfo.eventStock,
+            warehouseStock: winStockInfo.warehouseStock,
+            isLowStock: winStockInfo.isLowStock,
+            isOutOfStock: winStockInfo.isOutOfStock,
           },
-          loseReward: game.loseRewardProduct
+          loseReward: game.loseRewardProduct && loseStockInfo
             ? {
-                productId: game.loseRewardProductId,
+                productId: game.loseRewardProductId!,
                 productName: game.loseRewardProduct.name,
                 quantity: game.loseRewardQuantity,
-                availableStock: loseRewardStock,
-                isLowStock: loseRewardStock > 0 && loseRewardStock <= 5,
-                isOutOfStock: loseRewardStock <= 0,
+                availableStock: loseStockInfo.availableStock,
+                eventStock: loseStockInfo.eventStock,
+                warehouseStock: loseStockInfo.warehouseStock,
+                isLowStock: loseStockInfo.isLowStock,
+                isOutOfStock: loseStockInfo.isOutOfStock,
               }
             : null,
           stats: {
@@ -436,12 +516,17 @@ router.get(
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
+      const { eventId } = req.query;
 
       const game = await prisma.game.findUnique({
         where: { id },
         include: {
           project: true,
-          event: true,
+          event: {
+            include: {
+              allocations: true,
+            },
+          },
           winRewardProduct: {
             include: { inventory: true },
           },
@@ -478,8 +563,56 @@ router.get(
         _sum: { entryFee: true, rewardQuantity: true },
       });
 
-      const winStock = game.winRewardProduct.inventory?.quantityOnHand ?? 0;
-      const loseStock = game.loseRewardProduct?.inventory?.quantityOnHand ?? 0;
+      const effectiveEventId = (eventId && eventId !== 'ALL' ? String(eventId) : null) || game.eventId;
+      const allocMap = new Map<string, number>();
+      const soldMap = new Map<string, number>();
+
+      if (effectiveEventId) {
+        const allocations = await prisma.eventAllocation.findMany({
+          where: { eventId: effectiveEventId },
+        });
+        for (const a of allocations) {
+          allocMap.set(a.productId, a.allocatedQty);
+        }
+
+        const saleItems = await prisma.saleItem.findMany({
+          where: { sale: { eventId: effectiveEventId } },
+          select: { productId: true, quantity: true },
+        });
+        for (const item of saleItems) {
+          soldMap.set(item.productId, (soldMap.get(item.productId) || 0) + item.quantity);
+        }
+      }
+
+      const winWarehouseStock = game.winRewardProduct.inventory?.quantityOnHand ?? 0;
+      const loseWarehouseStock = game.loseRewardProduct?.inventory?.quantityOnHand ?? 0;
+
+      const resolveSingleStock = (productId: string, whStock: number) => {
+        if (effectiveEventId && allocMap.has(productId)) {
+          const allocated = allocMap.get(productId)!;
+          const sold = soldMap.get(productId) || 0;
+          const remaining = Math.max(0, allocated - sold);
+          return {
+            availableStock: remaining,
+            eventStock: remaining,
+            warehouseStock: whStock,
+            isLowStock: remaining > 0 && remaining <= 5,
+            isOutOfStock: remaining <= 0,
+          };
+        }
+        return {
+          availableStock: whStock,
+          eventStock: null,
+          warehouseStock: whStock,
+          isLowStock: whStock > 0 && whStock <= 5,
+          isOutOfStock: whStock <= 0,
+        };
+      };
+
+      const winStockInfo = resolveSingleStock(game.winRewardProductId, winWarehouseStock);
+      const loseStockInfo = game.loseRewardProductId
+        ? resolveSingleStock(game.loseRewardProductId, loseWarehouseStock)
+        : null;
 
       res.json({
         game: {
@@ -496,18 +629,22 @@ router.get(
             productId: game.winRewardProductId,
             productName: game.winRewardProduct.name,
             quantity: game.winRewardQuantity,
-            availableStock: winStock,
-            isLowStock: winStock > 0 && winStock <= 5,
-            isOutOfStock: winStock <= 0,
+            availableStock: winStockInfo.availableStock,
+            eventStock: winStockInfo.eventStock,
+            warehouseStock: winStockInfo.warehouseStock,
+            isLowStock: winStockInfo.isLowStock,
+            isOutOfStock: winStockInfo.isOutOfStock,
           },
-          loseReward: game.loseRewardProduct
+          loseReward: game.loseRewardProduct && loseStockInfo
             ? {
-                productId: game.loseRewardProductId,
+                productId: game.loseRewardProductId!,
                 productName: game.loseRewardProduct.name,
                 quantity: game.loseRewardQuantity,
-                availableStock: loseStock,
-                isLowStock: loseStock > 0 && loseStock <= 5,
-                isOutOfStock: loseStock <= 0,
+                availableStock: loseStockInfo.availableStock,
+                eventStock: loseStockInfo.eventStock,
+                warehouseStock: loseStockInfo.warehouseStock,
+                isLowStock: loseStockInfo.isLowStock,
+                isOutOfStock: loseStockInfo.isOutOfStock,
               }
             : null,
           stats: {
@@ -971,22 +1108,58 @@ router.post(
         }
       }
 
-      // Check Inventory Stock
+      // Check Inventory Stock (Check Event Allocation first, then fallback to central warehouse)
+      let isEventAllocationReward = false;
+      let availableRewardStock = 0;
+
       if (rewardQuantity > 0) {
-        const currentInv = await prisma.inventory.findUnique({
-          where: { productId: rewardProductId },
-          include: { product: true },
+        const eventAllocation = await prisma.eventAllocation.findFirst({
+          where: {
+            eventId,
+            productId: rewardProductId,
+          },
         });
 
-        const stockOnHand = currentInv?.quantityOnHand ?? 0;
-        if (stockOnHand < rewardQuantity) {
-          res.status(400).json({
-            error: `Reward stock unavailable: ${rewardProductObj.name} is OUT OF STOCK (${stockOnHand} available, ${rewardQuantity} required). Inventory cannot become negative. Please reconfigure game rewards or restock inventory.`,
-            productId: rewardProductId,
-            productName: rewardProductObj.name,
-            availableStock: stockOnHand,
+        if (eventAllocation) {
+          isEventAllocationReward = true;
+          const salesAgg = await prisma.saleItem.aggregate({
+            where: {
+              productId: rewardProductId,
+              sale: { eventId },
+            },
+            _sum: { quantity: true },
           });
-          return;
+          const soldSoFar = salesAgg._sum.quantity || 0;
+          availableRewardStock = Math.max(0, eventAllocation.allocatedQty - soldSoFar);
+
+          if (availableRewardStock < rewardQuantity) {
+            res.status(400).json({
+              error: `Reward stock unavailable: ${rewardProductObj.name} is OUT OF STOCK at this stall (${availableRewardStock} remaining in stall allocation, ${rewardQuantity} required). Please restock stall allocation or reconfigure rewards.`,
+              productId: rewardProductId,
+              productName: rewardProductObj.name,
+              availableStock: availableRewardStock,
+              isEventAllocation: true,
+            });
+            return;
+          }
+        } else {
+          // Fallback: reward is not allocated to event, check central warehouse inventory
+          const currentInv = await prisma.inventory.findUnique({
+            where: { productId: rewardProductId },
+            include: { product: true },
+          });
+
+          availableRewardStock = currentInv?.quantityOnHand ?? 0;
+          if (availableRewardStock < rewardQuantity) {
+            res.status(400).json({
+              error: `Reward stock unavailable: ${rewardProductObj.name} is OUT OF STOCK (${availableRewardStock} available, ${rewardQuantity} required). Inventory cannot become negative. Please reconfigure game rewards or restock inventory.`,
+              productId: rewardProductId,
+              productName: rewardProductObj.name,
+              availableStock: availableRewardStock,
+              isEventAllocation: false,
+            });
+            return;
+          }
         }
       }
 
@@ -1055,19 +1228,45 @@ router.post(
           }
         }
 
-        // 1. Deduct Reward from Inventory atomically
+        // 1. Deduct Reward atomically
         if (rewardQuantity > 0) {
-          const updatedInv = await tx.inventory.update({
-            where: { productId: rewardProductId },
-            data: {
-              quantityOnHand: { decrement: rewardQuantity },
-              lastUpdated: new Date(),
-              notes: `Reward issued for game "${game.name}" (${normResult})`,
-            },
-          });
+          if (isEventAllocationReward) {
+            // Verify stall allocation concurrency inside the atomic transaction
+            const eventAllocTx = await tx.eventAllocation.findFirst({
+              where: { eventId, productId: rewardProductId },
+            });
+            if (!eventAllocTx) {
+              throw new Error(`Event allocation for ${rewardProductObj.name} not found.`);
+            }
+            const txSalesAgg = await tx.saleItem.aggregate({
+              where: {
+                productId: rewardProductId,
+                sale: { eventId },
+              },
+              _sum: { quantity: true },
+            });
+            const txSold = txSalesAgg._sum.quantity || 0;
+            const txRemaining = eventAllocTx.allocatedQty - txSold;
+            if (txRemaining < rewardQuantity) {
+              throw new Error(`Insufficient stall allocation for ${rewardProductObj.name} (${txRemaining} remaining, ${rewardQuantity} required).`);
+            }
+            // In the IMS inventory model, warehouse inventory was already decremented upon allocating to the event.
+            // The SaleItem record created below (with sale: { eventId }) tracks this reward as sold under the event,
+            // so event reconciliation (reconcileSingleEvent) returns unsold = allocatedQty - sold accurately upon event close.
+          } else {
+            // Reward not part of stall allocation: deduct directly from central warehouse inventory
+            const updatedInv = await tx.inventory.update({
+              where: { productId: rewardProductId },
+              data: {
+                quantityOnHand: { decrement: rewardQuantity },
+                lastUpdated: new Date(),
+                notes: `Reward issued for game "${game.name}" (${normResult})`,
+              },
+            });
 
-          if (updatedInv.quantityOnHand < 0) {
-            throw new Error(`Insufficient stock for ${rewardProductObj.name}. Inventory cannot become negative.`);
+            if (updatedInv.quantityOnHand < 0) {
+              throw new Error(`Insufficient stock for ${rewardProductObj.name}. Inventory cannot become negative.`);
+            }
           }
         }
 
@@ -1191,9 +1390,22 @@ router.post(
       }
 
       // Fetch remaining stock of the reward product
-      const remainingInv = await prisma.inventory.findUnique({
-        where: { productId: rewardProductId },
-      });
+      let finalRemainingRewardStock = 0;
+      if (isEventAllocationReward) {
+        const finalSalesAgg = await prisma.saleItem.aggregate({
+          where: { productId: rewardProductId, sale: { eventId } },
+          _sum: { quantity: true },
+        });
+        const finalAlloc = await prisma.eventAllocation.findFirst({
+          where: { eventId, productId: rewardProductId },
+        });
+        finalRemainingRewardStock = Math.max(0, (finalAlloc?.allocatedQty || 0) - (finalSalesAgg._sum.quantity || 0));
+      } else {
+        const remainingInv = await prisma.inventory.findUnique({
+          where: { productId: rewardProductId },
+        });
+        finalRemainingRewardStock = remainingInv?.quantityOnHand ?? 0;
+      }
 
       res.status(isDuplicate ? 200 : 201).json({
         message: isDuplicate ? 'Game session already recorded (idempotent)' : 'Game played and reward issued successfully!',
@@ -1214,7 +1426,7 @@ router.post(
           sellerName: req.user!.name,
           customerName: gameSession.customerName || 'Walk-in Player',
           customerPhone: gameSession.customerPhone || null,
-          remainingRewardStock: remainingInv?.quantityOnHand ?? 0,
+          remainingRewardStock: finalRemainingRewardStock,
           timestamp: gameSession.createdAt,
         },
         session: gameSession,

@@ -577,7 +577,9 @@ export const GamesPage: React.FC = () => {
                           </span>
                         ) : (
                           <span className="text-[10px] font-bold text-slate-600 bg-white border border-slate-200 px-1.5 py-0.5 rounded">
-                            Stock: {game.winReward.availableStock}
+                            {game.winReward.eventStock !== null && game.winReward.eventStock !== undefined
+                              ? `Stall: ${game.winReward.eventStock} | WH: ${game.winReward.warehouseStock}`
+                              : `Stock: ${game.winReward.availableStock}`}
                           </span>
                         )}
                       </div>
@@ -603,7 +605,9 @@ export const GamesPage: React.FC = () => {
                             </span>
                           ) : (
                             <span className="text-[10px] font-bold text-slate-600 bg-white border border-slate-200 px-1.5 py-0.5 rounded">
-                              Stock: {game.loseReward.availableStock}
+                              {game.loseReward.eventStock !== null && game.loseReward.eventStock !== undefined
+                                ? `Stall: ${game.loseReward.eventStock} | WH: ${game.loseReward.warehouseStock}`
+                                : `Stock: ${game.loseReward.availableStock}`}
                             </span>
                           )}
                         </div>
@@ -916,18 +920,60 @@ export const GamesPage: React.FC = () => {
                       required
                       value={formData.winRewardProductId}
                       onChange={e => setFormData({ ...formData, winRewardProductId: e.target.value })}
-                      className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-white cursor-pointer"
+                      className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-white cursor-pointer font-medium"
                     >
                       <option value="">Select a product...</option>
                       {products.map(p => {
-                        const stock = p.inventory?.quantityOnHand ?? 0;
+                        const selectedEvent = events.find(ev => ev.id === formData.eventId);
+                        const alloc = selectedEvent?.allocations?.find(a => a.productId === p.id);
+                        const eventStock = alloc ? alloc.remainingQty : 0;
+                        const whStock = p.inventory?.quantityOnHand ?? 0;
                         return (
                           <option key={p.id} value={p.id}>
-                            {p.name} [{p.id}] (Stock: {stock})
+                            {formData.eventId
+                              ? `${p.name} [${p.id}] — Event stock: ${eventStock} | Warehouse: ${whStock}`
+                              : `${p.name} [${p.id}] — Warehouse stock: ${whStock}`}
                           </option>
                         );
                       })}
                     </select>
+
+                    {/* Dynamic Stock Context Helper */}
+                    {formData.eventId && formData.winRewardProductId && (() => {
+                      const selectedEvent = events.find(ev => ev.id === formData.eventId);
+                      const selectedProd = products.find(p => p.id === formData.winRewardProductId);
+                      const alloc = selectedEvent?.allocations?.find(a => a.productId === formData.winRewardProductId);
+                      const whStock = selectedProd?.inventory?.quantityOnHand ?? 0;
+
+                      if (alloc && alloc.remainingQty > 0) {
+                        return (
+                          <div className="mt-1.5 p-2 bg-emerald-50 border border-emerald-200/90 rounded-lg text-[11px] text-emerald-800 flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>
+                              <strong>Allocated to {selectedEvent?.name}:</strong> {alloc.remainingQty} units available at stall ({whStock} in central warehouse)
+                            </span>
+                          </div>
+                        );
+                      }
+                      if (alloc && alloc.remainingQty <= 0) {
+                        return (
+                          <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200/90 rounded-lg text-[11px] text-amber-900 flex items-center gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            <span>
+                              <strong>Stall allocation exhausted:</strong> 0 units remaining at {selectedEvent?.name} ({whStock} in central warehouse)
+                            </span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="mt-1.5 p-2 bg-blue-50 border border-blue-200/90 rounded-lg text-[11px] text-blue-900 flex items-center gap-1.5">
+                          <Info className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                          <span>
+                            <strong>Not in stall allocation:</strong> Will draw directly from central warehouse ({whStock} available)
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-700 mb-1">
@@ -959,18 +1005,60 @@ export const GamesPage: React.FC = () => {
                     <select
                       value={formData.loseRewardProductId}
                       onChange={e => setFormData({ ...formData, loseRewardProductId: e.target.value })}
-                      className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-white cursor-pointer"
+                      className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-white cursor-pointer font-medium"
                     >
                       <option value="">No consolation reward</option>
                       {products.map(p => {
-                        const stock = p.inventory?.quantityOnHand ?? 0;
+                        const selectedEvent = events.find(ev => ev.id === formData.eventId);
+                        const alloc = selectedEvent?.allocations?.find(a => a.productId === p.id);
+                        const eventStock = alloc ? alloc.remainingQty : 0;
+                        const whStock = p.inventory?.quantityOnHand ?? 0;
                         return (
                           <option key={p.id} value={p.id}>
-                            {p.name} [{p.id}] (Stock: {stock})
+                            {formData.eventId
+                              ? `${p.name} [${p.id}] — Event stock: ${eventStock} | Warehouse: ${whStock}`
+                              : `${p.name} [${p.id}] — Warehouse stock: ${whStock}`}
                           </option>
                         );
                       })}
                     </select>
+
+                    {/* Dynamic Stock Context Helper */}
+                    {formData.eventId && formData.loseRewardProductId && (() => {
+                      const selectedEvent = events.find(ev => ev.id === formData.eventId);
+                      const selectedProd = products.find(p => p.id === formData.loseRewardProductId);
+                      const alloc = selectedEvent?.allocations?.find(a => a.productId === formData.loseRewardProductId);
+                      const whStock = selectedProd?.inventory?.quantityOnHand ?? 0;
+
+                      if (alloc && alloc.remainingQty > 0) {
+                        return (
+                          <div className="mt-1.5 p-2 bg-emerald-50 border border-emerald-200/90 rounded-lg text-[11px] text-emerald-800 flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>
+                              <strong>Allocated to {selectedEvent?.name}:</strong> {alloc.remainingQty} units available at stall ({whStock} in central warehouse)
+                            </span>
+                          </div>
+                        );
+                      }
+                      if (alloc && alloc.remainingQty <= 0) {
+                        return (
+                          <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200/90 rounded-lg text-[11px] text-amber-900 flex items-center gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            <span>
+                              <strong>Stall allocation exhausted:</strong> 0 units remaining at {selectedEvent?.name} ({whStock} in central warehouse)
+                            </span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="mt-1.5 p-2 bg-blue-50 border border-blue-200/90 rounded-lg text-[11px] text-blue-900 flex items-center gap-1.5">
+                          <Info className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                          <span>
+                            <strong>Not in stall allocation:</strong> Will draw directly from central warehouse ({whStock} available)
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-700 mb-1">

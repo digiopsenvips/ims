@@ -109,16 +109,26 @@ export const GamePlayPage: React.FC = () => {
   useEffect(() => {
     if (!socket) return;
     const handleUpdate = () => {
-      api.get('/games?status=ACTIVE').then(res => {
-        if (res?.games) setGames(res.games);
-      });
+      Promise.all([
+        api.get('/games?status=ACTIVE'),
+        api.get('/events'),
+      ])
+        .then(([gamesRes, eventsRes]) => {
+          if (gamesRes?.games) setGames(gamesRes.games);
+          if (eventsRes?.events) setEvents(eventsRes.events);
+        })
+        .catch(console.error);
     };
     socket.on('inventory:updated', handleUpdate);
     socket.on('game:updated', handleUpdate);
+    socket.on('game:played', handleUpdate);
+    socket.on('sale:created', handleUpdate);
 
     return () => {
       socket.off('inventory:updated', handleUpdate);
       socket.off('game:updated', handleUpdate);
+      socket.off('game:played', handleUpdate);
+      socket.off('sale:created', handleUpdate);
     };
   }, [socket]);
 
@@ -163,6 +173,30 @@ export const GamePlayPage: React.FC = () => {
         entryFee > 0
       : true;
 
+  // Live reward stock calculation for the selected stall/event
+  const getLiveStock = (productId?: string, rewardStock?: number, whStock?: number) => {
+    if (!productId) return { available: 0, isAllocated: false };
+    const alloc = currentEvent?.allocations?.find(a => a.productId === productId);
+    if (alloc) {
+      return { available: alloc.remainingQty, isAllocated: true };
+    }
+    return { available: whStock ?? rewardStock ?? 0, isAllocated: false };
+  };
+
+  const winLive = getLiveStock(
+    currentGame?.winReward.productId,
+    currentGame?.winReward.availableStock,
+    currentGame?.winReward.warehouseStock
+  );
+  const loseLive = getLiveStock(
+    currentGame?.loseReward?.productId,
+    currentGame?.loseReward?.availableStock,
+    currentGame?.loseReward?.warehouseStock
+  );
+
+  const isWinOutOfStock = currentGame ? winLive.available < currentGame.winReward.quantity : false;
+  const isLoseOutOfStock = currentGame?.loseReward ? loseLive.available < currentGame.loseReward.quantity : false;
+
   // Expected reward depending on recordedResult
   const targetReward =
     recordedResult === 'WIN'
@@ -178,7 +212,12 @@ export const GamePlayPage: React.FC = () => {
         }
       : null;
 
-  const isRewardOutOfStock = targetReward ? targetReward.isOutOfStock : false;
+  const isRewardOutOfStock =
+    recordedResult === 'WIN'
+      ? isWinOutOfStock
+      : recordedResult === 'LOSE'
+      ? isLoseOutOfStock
+      : false;
 
   // Handle final reward issuance
   const handleIssueReward = async () => {
@@ -588,16 +627,19 @@ export const GamePlayPage: React.FC = () => {
                       <div className="text-xs font-semibold text-amber-900 mt-1 truncate" title={currentGame.winReward.productName}>
                         {currentGame.winReward.productName} × {currentGame.winReward.quantity}
                       </div>
+                      <div className="text-[10px] text-amber-800/80 font-medium">
+                        {winLive.isAllocated ? 'Stall Allocation' : 'Central Warehouse'}
+                      </div>
                     </div>
                     <div className="text-right shrink-0">
                       <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Stock</div>
                       <div className="text-sm font-black text-slate-900">
-                        {currentGame.winReward.isOutOfStock ? (
+                        {isWinOutOfStock ? (
                           <span className="text-rose-600 text-[10px] font-bold uppercase">Out of Stock</span>
-                        ) : currentGame.winReward.isLowStock ? (
-                          <span className="text-amber-700 text-xs font-bold">{currentGame.winReward.availableStock}</span>
+                        ) : winLive.available <= 5 ? (
+                          <span className="text-amber-700 text-xs font-bold">{winLive.available}</span>
                         ) : (
-                          <span>{currentGame.winReward.availableStock}</span>
+                          <span>{winLive.available}</span>
                         )}
                       </div>
                     </div>
@@ -615,17 +657,22 @@ export const GamePlayPage: React.FC = () => {
                           ? `${currentGame.loseReward.productName} × ${currentGame.loseReward.quantity}`
                           : 'No consolation reward'}
                       </div>
+                      {currentGame.loseReward && (
+                        <div className="text-[10px] text-slate-500 font-medium">
+                          {loseLive.isAllocated ? 'Stall Allocation' : 'Central Warehouse'}
+                        </div>
+                      )}
                     </div>
                     <div className="text-right shrink-0">
                       <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Stock</div>
                       <div className="text-sm font-black text-slate-900">
                         {currentGame.loseReward ? (
-                          currentGame.loseReward.isOutOfStock ? (
+                          isLoseOutOfStock ? (
                             <span className="text-rose-600 text-[10px] font-bold uppercase">Out of Stock</span>
-                          ) : currentGame.loseReward.isLowStock ? (
-                            <span className="text-amber-700 text-xs font-bold">{currentGame.loseReward.availableStock}</span>
+                          ) : loseLive.available <= 5 ? (
+                            <span className="text-amber-700 text-xs font-bold">{loseLive.available}</span>
                           ) : (
-                            <span>{currentGame.loseReward.availableStock}</span>
+                            <span>{loseLive.available}</span>
                           )
                         ) : (
                           <span className="text-slate-400 text-xs">—</span>
@@ -854,7 +901,7 @@ export const GamePlayPage: React.FC = () => {
                       {currentGame?.winReward.productName}
                     </div>
                     <div className="text-[10px] text-slate-500 mt-0.5">
-                      {currentGame?.winReward.quantity} unit &bull; Stock: {currentGame?.winReward.availableStock ?? 0}
+                      {currentGame?.winReward.quantity} unit &bull; Stock: {winLive.available}
                     </div>
                   </div>
                 </button>
@@ -882,7 +929,7 @@ export const GamePlayPage: React.FC = () => {
                     </div>
                     <div className="text-[10px] text-slate-500 mt-0.5">
                       {currentGame?.loseReward
-                        ? `${currentGame.loseReward.quantity} unit • Stock: ${currentGame.loseReward.availableStock}`
+                        ? `${currentGame.loseReward.quantity} unit • Stock: ${loseLive.available}`
                         : 'No reward deducted'}
                     </div>
                   </div>

@@ -247,6 +247,8 @@ export interface GameRewardInfo {
   productName: string;
   quantity: number;
   availableStock: number;
+  eventStock?: number | null;
+  warehouseStock?: number;
   isLowStock: boolean;
   isOutOfStock: boolean;
 }
