@@ -279,6 +279,45 @@ export const GamesPage: React.FC = () => {
     return true;
   });
 
+  const getMaxStockForProduct = (productId: string, eventId: string): number => {
+    if (!productId) return 0;
+    const prod = products.find(p => p.id === productId);
+    const whStock = prod?.inventory?.quantityOnHand ?? 0;
+
+    if (eventId) {
+      const selectedEvent = events.find(ev => ev.id === eventId);
+      const alloc = selectedEvent?.allocations?.find(a => a.productId === productId);
+      if (alloc) {
+        return alloc.remainingQty;
+      }
+      return whStock;
+    }
+
+    const activeStallStock = events
+      .filter(ev => ev.status === 'ACTIVE')
+      .reduce((sum, ev) => {
+        const alloc = ev.allocations?.find(a => a.productId === productId);
+        return sum + (alloc ? alloc.remainingQty : 0);
+      }, 0);
+
+    return activeStallStock + whStock;
+  };
+
+  const maxWinStock = getMaxStockForProduct(formData.winRewardProductId, formData.eventId);
+  const maxLoseStock = getMaxStockForProduct(formData.loseRewardProductId, formData.eventId);
+
+  const handleSetMaxWin = () => {
+    if (maxWinStock > 0) {
+      setFormData(prev => ({ ...prev, winRewardQuantity: String(maxWinStock) }));
+    }
+  };
+
+  const handleSetMaxLose = () => {
+    if (maxLoseStock > 0) {
+      setFormData(prev => ({ ...prev, loseRewardQuantity: String(maxLoseStock) }));
+    }
+  };
+
   return (
     <div className="space-y-5 max-w-7xl mx-auto pb-12">
       {/* 1. Header with Title & Primary Actions */}
@@ -1018,17 +1057,35 @@ export const GamesPage: React.FC = () => {
                     })()}
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                      Quantity *
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      required
-                      value={formData.winRewardQuantity}
-                      onChange={e => setFormData({ ...formData, winRewardQuantity: e.target.value })}
-                      className="w-full text-xs border border-slate-300 rounded-lg p-2 font-bold"
-                    />
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-semibold text-slate-700">
+                        Quantity *
+                      </label>
+                      {maxWinStock > 0 && (
+                        <span className="text-[10px] text-amber-900/80 font-bold">
+                          Max: {maxWinStock}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        min="1"
+                        required
+                        value={formData.winRewardQuantity}
+                        onChange={e => setFormData({ ...formData, winRewardQuantity: e.target.value })}
+                        className="w-full text-xs border border-slate-300 rounded-lg p-2 font-bold min-w-0"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSetMaxWin}
+                        disabled={maxWinStock <= 0}
+                        title={maxWinStock > 0 ? `Set to max available stock (${maxWinStock})` : 'No stock available'}
+                        className="px-2.5 py-2 text-[10px] font-black uppercase rounded-lg border border-amber-300 bg-amber-100/90 text-amber-950 hover:bg-amber-200/90 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shrink-0 shadow-2xs"
+                      >
+                        MAX
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1135,16 +1192,34 @@ export const GamesPage: React.FC = () => {
                     })()}
                   </div>
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                      Quantity
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={formData.loseRewardQuantity}
-                      onChange={e => setFormData({ ...formData, loseRewardQuantity: e.target.value })}
-                      className="w-full text-xs border border-slate-300 rounded-lg p-2 font-bold"
-                    />
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-semibold text-slate-700">
+                        Quantity
+                      </label>
+                      {maxLoseStock > 0 && (
+                        <span className="text-[10px] text-slate-500 font-bold">
+                          Max: {maxLoseStock}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        min="1"
+                        value={formData.loseRewardQuantity}
+                        onChange={e => setFormData({ ...formData, loseRewardQuantity: e.target.value })}
+                        className="w-full text-xs border border-slate-300 rounded-lg p-2 font-bold min-w-0"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSetMaxLose}
+                        disabled={maxLoseStock <= 0}
+                        title={maxLoseStock > 0 ? `Set to max available stock (${maxLoseStock})` : 'No stock available'}
+                        className="px-2.5 py-2 text-[10px] font-black uppercase rounded-lg border border-slate-300 bg-white text-slate-800 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors shrink-0 shadow-2xs"
+                      >
+                        MAX
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
