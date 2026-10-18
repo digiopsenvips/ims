@@ -92,21 +92,33 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
 
       {/* Middle/Right: Active Stall Badge & Sync & Quick Actions */}
       <div className="flex items-center gap-3">
-        {activeEvent && (
+        {activeEvent ? (
           <div className="flex items-center gap-2 px-2.5 sm:px-3 py-1 bg-emerald-50 border border-emerald-200 rounded-full text-xs text-emerald-900 shadow-2xs">
             <span className="relative flex h-2 w-2 shrink-0">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
             <span className="font-black text-[11px] uppercase tracking-wide text-emerald-800 hidden sm:inline">
-              Active Stall:
+              Live Stall:
             </span>
-            <span className="font-bold text-slate-800 text-xs max-w-[110px] sm:max-w-[160px] truncate">
+            <span className="font-bold text-slate-800 text-xs max-w-[110px] sm:max-w-[160px] truncate" title={activeEvent.name}>
               {activeEvent.name}
             </span>
             <Link
               to={`/events/${activeEvent.id}`}
-              className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] uppercase rounded tracking-wider transition-colors shrink-0"
+              className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] uppercase rounded tracking-wider transition-colors shrink-0 cursor-pointer"
+              title="View stall allocations, games, and analytics"
+            >
+              Manage
+            </Link>
+          </div>
+        ) : (
+          <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-full text-xs text-slate-500">
+            <Store className="w-3.5 h-3.5 text-slate-400" />
+            <span className="text-[11px] font-medium text-slate-600">No Live Stall</span>
+            <Link
+              to="/events"
+              className="text-emerald-700 font-bold hover:underline text-[11px] ml-0.5"
             >
               Open Stall
             </Link>

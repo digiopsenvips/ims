@@ -686,92 +686,208 @@ router.put(
   }
 );
 
-// POST /api/events/:id/end: "End Event" action - returns unsold stock to main inventory!
+// Core transactional service for closing an event/stall and returning unsold inventory
+async function executeCloseEvent(id: string) {
+  const event = await prisma.event.findUnique({
+    where: { id },
+    include: {
+      allocations: {
+        include: { product: true },
+      },
+      sales: true,
+    },
+  });
+
+  if (!event || event.isDeleted) {
+    throw { status: 404, message: 'Event / Stall not found' };
+  }
+
+  if (event.status === EventStatus.ENDED && event.reconciledAt) {
+    throw { status: 400, message: 'Event / Stall has already been finalized and ended.' };
+  }
+
+  // Count sold quantities from sale_items
+  const soldMap: Record<string, number> = {};
+  const soldItems = await prisma.saleItem.groupBy({
+    by: ['productId'],
+    where: { sale: { eventId: id } },
+    _sum: { quantity: true },
+  });
+  for (const item of soldItems) {
+    soldMap[item.productId] = (soldMap[item.productId] || 0) + (item._sum.quantity || 0);
+  }
+
+  // Return unsold quantities to main warehouse inventory
+  const returnedItems: { productId: string; productName: string; returnedQty: number }[] = [];
+  const now = new Date();
+
+  await prisma.$transaction(async tx => {
+    for (const alloc of event.allocations) {
+      const sold = soldMap[alloc.productId] || 0;
+      const unsold = Math.max(0, alloc.allocatedQty - sold);
+
+      if (unsold > 0) {
+        await tx.inventory.update({
+          where: { productId: alloc.productId },
+          data: {
+            quantityOnHand: { increment: unsold },
+            lastUpdated: now,
+          },
+        });
+
+        returnedItems.push({
+          productId: alloc.productId,
+          productName: alloc.product.name,
+          returnedQty: unsold,
+        });
+      }
+    }
+
+    // Mark event as ENDED and set reconciledAt; adjust endDatetime if in the future
+    await tx.event.update({
+      where: { id },
+      data: {
+        status: EventStatus.ENDED,
+        reconciledAt: now,
+        endDatetime: event.endDatetime > now ? now : event.endDatetime,
+      },
+    });
+  });
+
+  // Real-time broadcasts
+  broadcast('event:updated', { eventId: id, action: 'ended' });
+  broadcast('event:status_changed', { eventId: id, status: 'ENDED' });
+  broadcast('inventory:updated', { action: 'event_ended_stock_returned', eventId: id });
+
+  return {
+    message: `Stall '${event.name}' successfully closed. Unsold stock returned to main inventory.`,
+    returnedItems,
+    status: EventStatus.ENDED,
+  };
+}
+
+// Core transactional service for opening an event/stall
+async function executeOpenEvent(id: string) {
+  const event = await prisma.event.findUnique({
+    where: { id },
+    include: {
+      allocations: {
+        include: { product: true },
+      },
+    },
+  });
+
+  if (!event || event.isDeleted) {
+    throw { status: 404, message: 'Event / Stall not found' };
+  }
+
+  if (event.status === EventStatus.ENDED || event.reconciledAt) {
+    throw {
+      status: 400,
+      message: 'This event/stall has already concluded and its inventory reconciled. It cannot be reopened.',
+    };
+  }
+
+  const now = new Date();
+  if (event.status === EventStatus.ACTIVE && now < event.endDatetime) {
+    return {
+      message: `Stall '${event.name}' is already active and open.`,
+      event,
+      status: EventStatus.ACTIVE,
+    };
+  }
+
+  // Adjust start time to now if scheduled for the future
+  const newStart = event.startDatetime > now ? now : event.startDatetime;
+  let newEnd = event.endDatetime;
+  if (now >= event.endDatetime) {
+    // Extend endDatetime by 8 hours if it was in the past
+    newEnd = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  }
+
+  const updated = await prisma.event.update({
+    where: { id },
+    data: {
+      status: EventStatus.ACTIVE,
+      startDatetime: newStart,
+      endDatetime: newEnd,
+    },
+    include: {
+      allocations: {
+        include: { product: true },
+      },
+    },
+  });
+
+  // Real-time broadcasts
+  broadcast('event:updated', { eventId: id, action: 'started' });
+  broadcast('event:status_changed', { eventId: id, status: 'ACTIVE' });
+  broadcast('inventory:updated', { action: 'event_opened', eventId: id });
+
+  return {
+    message: `Stall '${event.name}' is now open and ready for sales!`,
+    event: updated,
+    status: EventStatus.ACTIVE,
+  };
+}
+
+// POST /api/events/:id/open or /api/events/:id/start: Open a stall for live transactions
 router.post(
-  '/:id/end',
+  ['/:id/open', '/:id/start'],
   authenticateToken,
   requirePermission('edit_events'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { id } = req.params;
+    try {
+      const result = await executeOpenEvent(id);
+      res.json(result);
+    } catch (error: any) {
+      console.error('Open stall error:', error);
+      res.status(error.status || 500).json({ error: error.message || 'Failed to open stall' });
+    }
+  }
+);
+
+// POST /api/events/:id/end or /api/events/:id/close: End/close stall and reconcile unsold stock
+router.post(
+  ['/:id/end', '/:id/close'],
+  authenticateToken,
+  requirePermission('edit_events'),
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const { id } = req.params;
+    try {
+      const result = await executeCloseEvent(id);
+      res.json(result);
+    } catch (error: any) {
+      console.error('Close stall error:', error);
+      res.status(error.status || 500).json({ error: error.message || 'Failed to close stall' });
+    }
+  }
+);
+
+// PATCH /api/events/:id/status: Direct status transition endpoint
+router.patch(
+  '/:id/status',
+  authenticateToken,
+  requirePermission('edit_events'),
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const { id } = req.params;
+    const { status } = req.body;
+    const norm = String(status || '').toUpperCase();
 
     try {
-      const event = await prisma.event.findUnique({
-        where: { id },
-        include: {
-          allocations: {
-            include: { product: true },
-          },
-          sales: true,
-        },
-      });
-
-      if (!event) {
-        res.status(404).json({ error: 'Event not found' });
-        return;
+      if (norm === 'ENDED' || norm === 'CLOSED') {
+        const result = await executeCloseEvent(id);
+        res.json(result);
+      } else if (norm === 'ACTIVE' || norm === 'OPEN') {
+        const result = await executeOpenEvent(id);
+        res.json(result);
+      } else {
+        res.status(400).json({ error: `Invalid status '${status}'. Supported statuses are ACTIVE or ENDED.` });
       }
-
-      if (event.status === EventStatus.ENDED && event.reconciledAt) {
-        res.status(400).json({ error: 'Event has already been finalized and ended.' });
-        return;
-      }
-
-      // Count sold quantities from sale_items
-      const soldMap: Record<string, number> = {};
-      const soldItems = await prisma.saleItem.groupBy({
-        by: ['productId'],
-        where: { sale: { eventId: id } },
-        _sum: { quantity: true },
-      });
-      for (const item of soldItems) {
-        soldMap[item.productId] = (soldMap[item.productId] || 0) + (item._sum.quantity || 0);
-      }
-
-      // Return unsold quantities to main inventory
-      const returnedItems: { productId: string; productName: string; returnedQty: number }[] = [];
-
-      await prisma.$transaction(async tx => {
-        for (const alloc of event.allocations) {
-          const sold = soldMap[alloc.productId] || 0;
-          const unsold = Math.max(0, alloc.allocatedQty - sold);
-
-          if (unsold > 0) {
-            await tx.inventory.update({
-              where: { productId: alloc.productId },
-              data: {
-                quantityOnHand: { increment: unsold },
-                lastUpdated: new Date(),
-              },
-            });
-
-            returnedItems.push({
-              productId: alloc.productId,
-              productName: alloc.product.name,
-              returnedQty: unsold,
-            });
-          }
-        }
-
-        // Mark event as ENDED and set reconciledAt
-        await tx.event.update({
-          where: { id },
-          data: {
-            status: EventStatus.ENDED,
-            reconciledAt: new Date(),
-          },
-        });
-      });
-
-      // Real-time broadcasts
-      broadcast('event:updated', { eventId: id, action: 'ended' });
-      broadcast('inventory:updated', { action: 'event_ended_stock_returned', eventId: id });
-
-      res.json({
-        message: `Event '${event.name}' successfully ended. Unsold stock returned to main inventory.`,
-        returnedItems,
-      });
-    } catch (error) {
-      console.error('End event error:', error);
-      res.status(500).json({ error: 'Failed to end event' });
+    } catch (error: any) {
+      console.error('Patch event status error:', error);
+      res.status(error.status || 500).json({ error: error.message || 'Failed to update event status' });
     }
   }
 );

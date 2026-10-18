@@ -105,6 +105,7 @@ export const EventDetailsPage: React.FC = () => {
   const [editName, setEditName] = useState('');
   const [editLocation, setEditLocation] = useState('');
   const [isEndingEvent, setIsEndingEvent] = useState(false);
+  const [isOpeningStall, setIsOpeningStall] = useState(false);
 
   const canManage = isDeveloper || isAdmin || isHead || hasPermission('edit_events');
 
@@ -162,18 +163,33 @@ export const EventDetailsPage: React.FC = () => {
     };
   }, [socket, eventId]);
 
-  // Handle End Event
+  // Handle Close Stall / End Event
   const handleEndEvent = async () => {
-    if (!event || !confirm(`Are you sure you want to end "${event.name}"? Unsold inventory will be returned.`)) return;
+    if (!event || !confirm(`Are you sure you want to close "${event.name}"? Unsold inventory will be returned to main warehouse.`)) return;
     setIsEndingEvent(true);
     try {
-      await api.patch(`/events/${event.id}/status`, { status: 'ENDED' });
-      setStatusMessage({ type: 'success', text: 'Event ended and stock reconciled successfully!' });
+      const res = await api.post(`/events/${event.id}/close`);
+      setStatusMessage({ type: 'success', text: res?.message || 'Stall closed and stock reconciled successfully!' });
       await fetchEventData();
     } catch (err: any) {
-      setStatusMessage({ type: 'error', text: err.message || 'Failed to end event' });
+      setStatusMessage({ type: 'error', text: err.message || 'Failed to close stall' });
     } finally {
       setIsEndingEvent(false);
+    }
+  };
+
+  // Handle Open Stall
+  const handleOpenStall = async () => {
+    if (!event || !confirm(`Open stall "${event.name}" for live sales now?`)) return;
+    setIsOpeningStall(true);
+    try {
+      const res = await api.post(`/events/${event.id}/open`);
+      setStatusMessage({ type: 'success', text: res?.message || 'Stall is now live and accepting sales!' });
+      await fetchEventData();
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err.message || 'Failed to open stall' });
+    } finally {
+      setIsOpeningStall(false);
     }
   };
 
@@ -403,15 +419,27 @@ export const EventDetailsPage: React.FC = () => {
               <span>🎮 Play Game</span>
             </Link>
 
+            {canManage && !isEnded && !isActive && (
+              <button
+                onClick={handleOpenStall}
+                disabled={isOpeningStall}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                title="Open stall for live sales now"
+              >
+                <Store className="w-3.5 h-3.5" />
+                <span>{isOpeningStall ? 'Opening...' : 'Open Stall'}</span>
+              </button>
+            )}
+
             {canManage && !isEnded && isActive && (
               <button
                 onClick={handleEndEvent}
                 disabled={isEndingEvent}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-                title="End event and return unsold items"
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+                title="Close stall and return unsold inventory to main warehouse"
               >
-                <PowerOff className="w-3.5 h-3.5" />
-                <span>End Event</span>
+                <PowerOff className="w-3.5 h-3.5 text-rose-600" />
+                <span>{isEndingEvent ? 'Closing...' : 'Close Stall'}</span>
               </button>
             )}
           </div>

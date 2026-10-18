@@ -26,6 +26,9 @@ export function computeEventStatus(
   if (now.getTime() >= end.getTime()) {
     return EventStatus.ENDED;
   }
+  if (currentStatus === EventStatus.ACTIVE) {
+    return EventStatus.ACTIVE;
+  }
   if (now.getTime() >= start.getTime()) {
     return EventStatus.ACTIVE;
   }

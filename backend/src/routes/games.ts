@@ -1373,6 +1373,17 @@ router.post(
           },
         });
 
+        // Deduct from central warehouse if reward was drawn from warehouse stock rather than stall allocation
+        if (!isEventAllocationReward && rewardQuantity > 0) {
+          await tx.inventory.update({
+            where: { productId: rewardProductId },
+            data: {
+              quantityOnHand: { decrement: rewardQuantity },
+              lastUpdated: new Date(),
+            },
+          });
+        }
+
         // 5. Create GameSession Record
         const newSession = await tx.gameSession.create({
           data: {

@@ -966,6 +966,17 @@ export const MemberSalePortalPage: React.FC = () => {
                     ))}
                   </optgroup>
                 )}
+                {events.filter(e => e.status === 'UPCOMING' && Date.now() < new Date(e.startDatetime).getTime()).length > 0 && (
+                  <optgroup label="Upcoming Stalls (Not Started)">
+                    {events
+                      .filter(e => e.status === 'UPCOMING' && Date.now() < new Date(e.startDatetime).getTime())
+                      .map(ev => (
+                        <option key={ev.id} value={ev.id}>
+                          {ev.name} (Upcoming)
+                        </option>
+                      ))}
+                  </optgroup>
+                )}
                 {concludedEvents.length > 0 && (
                   <optgroup label="Concluded Stalls (Read-only)">
                     {concludedEvents.map(ev => (
