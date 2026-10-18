@@ -30,6 +30,17 @@ app.use(
 );
 app.use(express.json());
 
+// Root Info Endpoint
+app.get('/', (req, res) => {
+  res.json({
+    status: 'online',
+    app: 'Enactus VIPS-TC Inventory & Sales Management System (Backend API)',
+    version: '1.0.0',
+    frontend: 'https://ims-ecru-three.vercel.app',
+    healthCheck: '/api/health',
+  });
+});
+
 // Health Check
 app.get('/api/health', (req, res) => {
   res.json({
