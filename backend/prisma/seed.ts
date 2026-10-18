@@ -1,4 +1,4 @@
-import { PrismaClient, Role, EventStatus, PaymentMethod } from '@prisma/client';
+import { PrismaClient, Role, EventStatus, PaymentMethod, GameStatus, ComboStatus, ComboType } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
@@ -18,8 +18,12 @@ async function main() {
   console.log('🌱 Starting database seed...');
 
   // 1. Clean existing records in reverse dependency order
+  await prisma.gameSession.deleteMany();
   await prisma.saleItem.deleteMany();
   await prisma.sale.deleteMany();
+  await prisma.comboItem.deleteMany();
+  await prisma.combo.deleteMany();
+  await prisma.game.deleteMany();
   try {
     await prisma.$executeRawUnsafe(`CREATE SEQUENCE IF NOT EXISTS receipt_number_seq START WITH 1;`);
     await prisma.$executeRawUnsafe(`ALTER SEQUENCE receipt_number_seq RESTART WITH 1;`);
@@ -356,6 +360,45 @@ async function main() {
     // Ignore sequence error if DB doesn't support
   }
 
+  // 10. Sample Game (Ring Toss)
+  await prisma.game.create({
+    data: {
+      name: 'Ring Toss',
+      description: 'Toss 3 rings onto the target bottles to win an instant handcrafted prize!',
+      entryFee: 30.00,
+      status: GameStatus.ACTIVE,
+      projectId: projectUpcycle.id,
+      eventId: sampleEvent.id,
+      winRewardProductId: upc2.id,
+      winRewardQuantity: 1,
+      loseRewardProductId: tah3.id,
+      loseRewardQuantity: 1,
+    }
+  });
+
+  console.log('🎯 Seeded sample Ring Toss game');
+
+  // 11. Sample Combo Offer (Festive Celebration Bundle)
+  await prisma.combo.create({
+    data: {
+      name: 'Diwali Festive Craft Bundle',
+      description: 'Handcrafted Candle + Organic Clay Diya Set + Denim Tote Bag at a special bundle price.',
+      price: 649.00,
+      comboType: ComboType.FIXED_QUANTITY,
+      status: ComboStatus.ACTIVE,
+      eventId: sampleEvent.id,
+      projectId: projectTahsin.id,
+      items: {
+        create: [
+          { productId: tah1.id, quantity: 1 },
+          { productId: tah2.id, quantity: 1 },
+          { productId: upc1.id, quantity: 1 },
+        ]
+      }
+    }
+  });
+
+  console.log('🎁 Seeded sample Festive Combo Offer');
   console.log('💰 Seeded sample completed sales');
   console.log('✅ Seed completed successfully!');
 }
