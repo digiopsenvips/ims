@@ -43,12 +43,40 @@ router.get(
         },
       });
 
+      // Get all active events to compute remaining stock at live stalls
+      const activeEvents = await prisma.event.findMany({
+        where: { status: 'ACTIVE' },
+        select: { id: true, name: true, location: true },
+      });
+      const activeEventIds = activeEvents.map(e => e.id);
+
+      // Aggregate sold units across active events
+      const activeSales = activeEventIds.length > 0
+        ? await prisma.saleItem.groupBy({
+            by: ['productId'],
+            where: {
+              sale: { eventId: { in: activeEventIds } },
+            },
+            _sum: { quantity: true },
+          })
+        : [];
+
+      const soldMap = new Map<string, number>();
+      for (const s of activeSales) {
+        soldMap.set(s.productId, s._sum.quantity || 0);
+      }
+
       // Calculate total allocated to active events and total sales
       const formatted = inventory.map(item => {
-        const activeAllocated = item.product.allocations.reduce(
+        const totalAllocated = item.product.allocations.reduce(
           (sum, a) => sum + a.allocatedQty,
           0
         );
+        const totalSoldAtActive = soldMap.get(item.productId) || 0;
+        const activeStallStock = Math.max(0, totalAllocated - totalSoldAtActive);
+        const warehouseStock = item.quantityOnHand;
+        const totalAvailable = warehouseStock + activeStallStock;
+
         return {
           id: item.id,
           productId: item.productId,
@@ -56,9 +84,10 @@ router.get(
           projectId: item.product.projectId,
           projectName: item.product.project.name,
           basePrice: item.product.basePrice,
-          quantityOnHand: item.quantityOnHand,
-          activeAllocatedQty: activeAllocated,
-          totalAvailable: item.quantityOnHand,
+          warehouseStock,
+          quantityOnHand: warehouseStock,
+          activeAllocatedQty: activeStallStock,
+          totalAvailable,
           notes: item.notes,
           lastUpdated: item.lastUpdated,
         };

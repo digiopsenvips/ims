@@ -255,8 +255,18 @@ router.get(
         const rev = g.sessions.reduce((sum, s) => sum + Number(s.entryFee), 0);
         const wins = g.sessions.filter(s => s.result === 'WIN').length;
         const losses = g.sessions.filter(s => s.result === 'LOSE').length;
-        const winStock = g.winRewardProduct.inventory?.quantityOnHand ?? 0;
-        const loseStock = g.loseRewardProduct?.inventory?.quantityOnHand ?? 0;
+
+        const winAlloc = enrichedAllocations.find(a => a.productId === g.winRewardProductId);
+        const winStock = winAlloc
+          ? winAlloc.remainingQty
+          : (g.winRewardProduct.inventory?.quantityOnHand ?? 0);
+
+        const loseAlloc = g.loseRewardProductId
+          ? enrichedAllocations.find(a => a.productId === g.loseRewardProductId)
+          : null;
+        const loseStock = loseAlloc
+          ? loseAlloc.remainingQty
+          : (g.loseRewardProduct?.inventory?.quantityOnHand ?? 0);
 
         return {
           id: g.id,

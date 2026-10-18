@@ -86,9 +86,17 @@ router.get(
         orderBy: { createdAt: 'desc' },
       });
 
+      // Get all active event IDs to resolve stall allocations for general/unassigned games
+      const activeEvents = await prisma.event.findMany({
+        where: { status: 'ACTIVE' },
+        select: { id: true },
+      });
+      const activeEventIds = activeEvents.map(e => e.id);
+
       // Gather all relevant event IDs to resolve event allocations accurately
       const relevantEventIds = Array.from(
         new Set([
+          ...activeEventIds,
           ...games.map(g => g.eventId).filter(Boolean) as string[],
           ...(eventId && eventId !== 'ALL' ? [String(eventId)] : []),
         ])
@@ -147,12 +155,24 @@ router.get(
               isOutOfStock: remaining <= 0,
             };
           }
+
+          // If no specific event is targeted, check active stall allocations across active events
+          let totalActiveStallRemaining = 0;
+          for (const aEventId of activeEventIds) {
+            if (allocMap.has(`${aEventId}_${productId}`)) {
+              const allocated = allocMap.get(`${aEventId}_${productId}`)!;
+              const sold = soldMap.get(`${aEventId}_${productId}`) || 0;
+              totalActiveStallRemaining += Math.max(0, allocated - sold);
+            }
+          }
+
+          const combinedStock = whStock + totalActiveStallRemaining;
           return {
-            availableStock: whStock,
-            eventStock: null,
+            availableStock: combinedStock,
+            eventStock: totalActiveStallRemaining > 0 ? totalActiveStallRemaining : null,
             warehouseStock: whStock,
-            isLowStock: whStock > 0 && whStock <= 5,
-            isOutOfStock: whStock <= 0,
+            isLowStock: combinedStock > 0 && combinedStock <= 5,
+            isOutOfStock: combinedStock <= 0,
           };
         };
 
@@ -567,20 +587,38 @@ router.get(
       const allocMap = new Map<string, number>();
       const soldMap = new Map<string, number>();
 
+      let activeEventIds: string[] = [];
       if (effectiveEventId) {
+        activeEventIds = [effectiveEventId];
+      } else {
+        const activeEvents = await prisma.event.findMany({
+          where: { status: 'ACTIVE' },
+          select: { id: true },
+        });
+        activeEventIds = activeEvents.map(e => e.id);
+      }
+
+      if (activeEventIds.length > 0) {
         const allocations = await prisma.eventAllocation.findMany({
-          where: { eventId: effectiveEventId },
+          where: { eventId: { in: activeEventIds } },
         });
         for (const a of allocations) {
-          allocMap.set(a.productId, a.allocatedQty);
+          allocMap.set(`${a.eventId}_${a.productId}`, a.allocatedQty);
         }
 
         const saleItems = await prisma.saleItem.findMany({
-          where: { sale: { eventId: effectiveEventId } },
-          select: { productId: true, quantity: true },
+          where: { sale: { eventId: { in: activeEventIds } } },
+          select: {
+            productId: true,
+            quantity: true,
+            sale: { select: { eventId: true } },
+          },
         });
         for (const item of saleItems) {
-          soldMap.set(item.productId, (soldMap.get(item.productId) || 0) + item.quantity);
+          if (item.sale?.eventId) {
+            const key = `${item.sale.eventId}_${item.productId}`;
+            soldMap.set(key, (soldMap.get(key) || 0) + item.quantity);
+          }
         }
       }
 
@@ -588,9 +626,9 @@ router.get(
       const loseWarehouseStock = game.loseRewardProduct?.inventory?.quantityOnHand ?? 0;
 
       const resolveSingleStock = (productId: string, whStock: number) => {
-        if (effectiveEventId && allocMap.has(productId)) {
-          const allocated = allocMap.get(productId)!;
-          const sold = soldMap.get(productId) || 0;
+        if (effectiveEventId && allocMap.has(`${effectiveEventId}_${productId}`)) {
+          const allocated = allocMap.get(`${effectiveEventId}_${productId}`)!;
+          const sold = soldMap.get(`${effectiveEventId}_${productId}`) || 0;
           const remaining = Math.max(0, allocated - sold);
           return {
             availableStock: remaining,
@@ -600,12 +638,24 @@ router.get(
             isOutOfStock: remaining <= 0,
           };
         }
+
+        // Aggregate across active events
+        let totalActiveStallRemaining = 0;
+        for (const aEventId of activeEventIds) {
+          if (allocMap.has(`${aEventId}_${productId}`)) {
+            const allocated = allocMap.get(`${aEventId}_${productId}`)!;
+            const sold = soldMap.get(`${aEventId}_${productId}`) || 0;
+            totalActiveStallRemaining += Math.max(0, allocated - sold);
+          }
+        }
+
+        const combinedStock = whStock + totalActiveStallRemaining;
         return {
-          availableStock: whStock,
-          eventStock: null,
+          availableStock: combinedStock,
+          eventStock: totalActiveStallRemaining > 0 ? totalActiveStallRemaining : null,
           warehouseStock: whStock,
-          isLowStock: whStock > 0 && whStock <= 5,
-          isOutOfStock: whStock <= 0,
+          isLowStock: combinedStock > 0 && combinedStock <= 5,
+          isOutOfStock: combinedStock <= 0,
         };
       };
 

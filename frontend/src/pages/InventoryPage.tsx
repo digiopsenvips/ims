@@ -35,7 +35,7 @@ export const InventoryPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProject, setSelectedProject] = useState<string>('ALL');
-  const [stockLevelFilter, setStockLevelFilter] = useState<'ALL' | 'IN_STOCK' | 'LOW_STOCK' | 'OUT_OF_STOCK'>('ALL');
+  const [stockLevelFilter, setStockLevelFilter] = useState<'ALL' | 'IN_STOCK' | 'LOW_STOCK' | 'DEPLOYED' | 'OUT_OF_STOCK'>('ALL');
   const [recentlyUpdatedId, setRecentlyUpdatedId] = useState<string | null>(null);
 
   // Bulk Intake Modal
@@ -203,10 +203,13 @@ export const InventoryPage: React.FC = () => {
         return false;
       }
 
-      // Stock level filter
-      if (stockLevelFilter === 'OUT_OF_STOCK' && i.quantityOnHand > 0) return false;
-      if (stockLevelFilter === 'LOW_STOCK' && (i.quantityOnHand <= 0 || i.quantityOnHand > 5)) return false;
-      if (stockLevelFilter === 'IN_STOCK' && i.quantityOnHand <= 5) return false;
+      // Stock level filter based on total organization inventory
+      const totalAvailable = i.totalAvailable !== undefined ? i.totalAvailable : (i.quantityOnHand + (i.activeAllocatedQty || 0));
+
+      if (stockLevelFilter === 'OUT_OF_STOCK' && totalAvailable > 0) return false;
+      if (stockLevelFilter === 'LOW_STOCK' && (totalAvailable <= 0 || totalAvailable > 5)) return false;
+      if (stockLevelFilter === 'IN_STOCK' && totalAvailable <= 5) return false;
+      if (stockLevelFilter === 'DEPLOYED' && i.activeAllocatedQty <= 0) return false;
 
       return true;
     });
@@ -214,6 +217,7 @@ export const InventoryPage: React.FC = () => {
 
   const totalMainStock = useMemo(() => inventory.reduce((sum, i) => sum + i.quantityOnHand, 0), [inventory]);
   const totalAllocated = useMemo(() => inventory.reduce((sum, i) => sum + i.activeAllocatedQty, 0), [inventory]);
+  const totalOrgStock = useMemo(() => totalMainStock + totalAllocated, [totalMainStock, totalAllocated]);
 
   const hasActiveFilters = searchQuery.trim() !== '' || selectedProject !== 'ALL' || stockLevelFilter !== 'ALL';
 
@@ -264,13 +268,13 @@ export const InventoryPage: React.FC = () => {
         <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
           <div>
             <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              Total Warehouse Stock
+              Central Warehouse Stock
             </div>
             <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-1 tracking-tight">
               {totalMainStock}
             </div>
             <div className="text-[11px] text-slate-500 mt-0.5">
-              Units available for allocation
+              Available for stall allocation
             </div>
           </div>
           <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0 border border-slate-200/60">
@@ -281,13 +285,13 @@ export const InventoryPage: React.FC = () => {
         <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
           <div>
             <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              Active Stall Allocations
+              Active Stall Stock
             </div>
-            <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-1 tracking-tight">
+            <div className="text-2xl sm:text-3xl font-black text-emerald-700 mt-1 tracking-tight">
               {totalAllocated}
             </div>
             <div className="text-[11px] text-slate-500 mt-0.5">
-              Units deployed across live events
+              Units deployed across live stalls
             </div>
           </div>
           <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 border border-emerald-200/60">
@@ -298,13 +302,13 @@ export const InventoryPage: React.FC = () => {
         <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
           <div>
             <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              Catalogued SKUs
+              Total Organization Inventory
             </div>
             <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-1 tracking-tight">
-              {inventory.length}
+              {totalOrgStock}
             </div>
             <div className="text-[11px] text-slate-500 mt-0.5">
-              Active products across initiatives
+              Combined stock ({inventory.length} SKUs)
             </div>
           </div>
           <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0 border border-slate-200/60">
@@ -396,6 +400,7 @@ export const InventoryPage: React.FC = () => {
               <option value="ALL">All Stock Levels</option>
               <option value="IN_STOCK">In Stock (&gt;5)</option>
               <option value="LOW_STOCK">Low Stock (1–5)</option>
+              <option value="DEPLOYED">Deployed at Stalls</option>
               <option value="OUT_OF_STOCK">Out of Stock (0)</option>
             </select>
 
@@ -438,8 +443,9 @@ export const InventoryPage: React.FC = () => {
                 <th className="px-4 py-3">Auto ID</th>
                 <th className="px-4 py-3">Product Name</th>
                 <th className="px-4 py-3">Project</th>
-                <th className="px-4 py-3 text-right">Live Stock On Hand</th>
+                <th className="px-4 py-3 text-right">Warehouse Stock</th>
                 <th className="px-4 py-3 text-right">Active Stall Stock</th>
+                <th className="px-4 py-3 text-right">Total Available</th>
                 <th className="px-4 py-3 text-right">Ref Price (₹)</th>
                 <th className="px-4 py-3">Batch Notes</th>
                 <th className="px-4 py-3">Last Updated</th>
@@ -449,14 +455,14 @@ export const InventoryPage: React.FC = () => {
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-14 text-center text-slate-400">
+                  <td colSpan={canEditInventory ? 10 : 9} className="px-4 py-14 text-center text-slate-400">
                     <Boxes className="w-6 h-6 mx-auto mb-2 animate-bounce text-slate-400" />
                     <p className="font-medium text-slate-600">Loading live inventory...</p>
                   </td>
                 </tr>
               ) : filteredInventory.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center">
+                  <td colSpan={canEditInventory ? 10 : 9} className="px-4 py-12 text-center">
                     <div className="max-w-sm mx-auto space-y-2">
                       <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mx-auto mb-1">
                         <Search className="w-5 h-5" />
@@ -507,23 +513,45 @@ export const InventoryPage: React.FC = () => {
                           {item.projectName}
                         </span>
                       </td>
-                      <td className="px-4 py-3.5 text-right">
+                      <td className="px-4 py-3.5 text-right font-medium">
                         {item.quantityOnHand === 0 ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200">
-                            0 Out
-                          </span>
-                        ) : item.quantityOnHand <= 5 ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200">
-                            {item.quantityOnHand} Low
-                          </span>
+                          <span className="text-slate-400 font-mono">0</span>
                         ) : (
-                          <span className="font-black text-sm text-slate-900">
+                          <span className="font-semibold text-slate-800 font-mono">
                             {item.quantityOnHand}
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3.5 text-right font-medium text-slate-600">
-                        {item.activeAllocatedQty}
+                      <td className="px-4 py-3.5 text-right font-medium">
+                        {item.activeAllocatedQty > 0 ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 font-mono">
+                            {item.activeAllocatedQty}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 font-mono">0</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3.5 text-right font-medium">
+                        {item.totalAvailable === 0 ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold text-red-700 bg-red-50 border border-red-200 font-mono">
+                            0 Out
+                          </span>
+                        ) : item.quantityOnHand === 0 && item.activeAllocatedQty > 0 ? (
+                          <span
+                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 font-mono"
+                            title={`${item.activeAllocatedQty} units currently active at event stalls`}
+                          >
+                            {item.totalAvailable} Deployed
+                          </span>
+                        ) : item.totalAvailable <= 5 ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 font-mono">
+                            {item.totalAvailable} Low
+                          </span>
+                        ) : (
+                          <span className="font-black text-sm text-slate-900 font-mono">
+                            {item.totalAvailable}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3.5 text-right font-medium text-slate-900">
                         {item.basePrice !== null && item.basePrice !== undefined

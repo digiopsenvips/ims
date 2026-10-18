@@ -76,10 +76,12 @@ export const GamesPage: React.FC = () => {
 
   const canManage = isDeveloper || isAdmin;
 
-  const loadData = async () => {
+  const loadData = async (targetEventId?: string) => {
     try {
+      const activeFilter = targetEventId !== undefined ? targetEventId : eventFilter;
+      const gamesUrl = activeFilter && activeFilter !== 'ALL' ? `/games?eventId=${activeFilter}` : '/games';
       const [gamesRes, prodRes, eventsRes, projRes] = await Promise.all([
-        api.get('/games'),
+        api.get(gamesUrl),
         api.get('/products'),
         api.get('/events'),
         api.get('/projects'),
@@ -103,24 +105,25 @@ export const GamesPage: React.FC = () => {
   // Listen for socket events
   useEffect(() => {
     if (!socket) return;
-    socket.on('game:updated', loadData);
-    socket.on('game:played', loadData);
-    socket.on('inventory:updated', loadData);
+    socket.on('game:updated', () => loadData());
+    socket.on('game:played', () => loadData());
+    socket.on('inventory:updated', () => loadData());
 
     return () => {
-      socket.off('game:updated', loadData);
-      socket.off('game:played', loadData);
-      socket.off('inventory:updated', loadData);
+      socket.off('game:updated', () => loadData());
+      socket.off('game:played', () => loadData());
+      socket.off('inventory:updated', () => loadData());
     };
   }, [socket]);
 
   const openCreateModal = () => {
     setEditingGame(null);
+    const activeEvent = events.find(e => e.status === 'ACTIVE');
     setFormData({
       name: '',
       description: '',
       projectId: projects[0]?.id || '',
-      eventId: events[0]?.id || '',
+      eventId: activeEvent ? activeEvent.id : (events[0]?.id || ''),
       entryFee: '30',
       status: 'ACTIVE',
       winRewardProductId: products[0]?.id || '',
@@ -261,7 +264,7 @@ export const GamesPage: React.FC = () => {
 
   const filteredGames = games.filter(g => {
     if (statusFilter !== 'ALL' && g.status !== statusFilter) return false;
-    if (eventFilter !== 'ALL' && g.eventId !== eventFilter) return false;
+    if (eventFilter !== 'ALL' && g.eventId && g.eventId !== eventFilter) return false;
     if (searchQuery.trim()) {
       const term = searchQuery.toLowerCase();
       const matchName = g.name.toLowerCase().includes(term);
@@ -399,7 +402,11 @@ export const GamesPage: React.FC = () => {
             </span>
             <select
               value={eventFilter}
-              onChange={e => setEventFilter(e.target.value)}
+              onChange={e => {
+                const val = e.target.value;
+                setEventFilter(val);
+                loadData(val);
+              }}
               className="h-9 text-xs font-semibold bg-white border border-slate-300 rounded-lg py-1 px-3 text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900 cursor-pointer min-w-[170px]"
             >
               <option value="ALL">All Stalls & Events</option>
@@ -407,7 +414,7 @@ export const GamesPage: React.FC = () => {
                 const ended = ev.status === 'ENDED' || new Date(ev.endDatetime).getTime() < Date.now();
                 return (
                   <option key={ev.id} value={ev.id}>
-                    {ev.name} {ended ? '(Concluded)' : ''}
+                    {ev.name} {ev.status === 'ACTIVE' ? '(🟢 Active Stall)' : ended ? '(Concluded)' : ''}
                   </option>
                 );
               })}
@@ -893,14 +900,17 @@ export const GamesPage: React.FC = () => {
                   <select
                     value={formData.eventId}
                     onChange={e => setFormData({ ...formData, eventId: e.target.value })}
-                    className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-white cursor-pointer"
+                    className="w-full text-xs border border-slate-300 rounded-lg p-2 bg-white cursor-pointer font-medium"
                   >
-                    <option value="">Any Stall / Event</option>
-                    {events.map(ev => (
-                      <option key={ev.id} value={ev.id}>
-                        {ev.name} ({ev.status})
-                      </option>
-                    ))}
+                    <option value="">Any Stall / Event (General Game)</option>
+                    {events.map(ev => {
+                      const isEnded = ev.status === 'ENDED' || new Date(ev.endDatetime).getTime() < Date.now();
+                      return (
+                        <option key={ev.id} value={ev.id}>
+                          {ev.name} {ev.status === 'ACTIVE' ? '(🟢 Active Stall)' : isEnded ? '(Concluded)' : `(${ev.status})`}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
               </div>
@@ -924,55 +934,87 @@ export const GamesPage: React.FC = () => {
                     >
                       <option value="">Select a product...</option>
                       {products.map(p => {
-                        const selectedEvent = events.find(ev => ev.id === formData.eventId);
-                        const alloc = selectedEvent?.allocations?.find(a => a.productId === p.id);
-                        const eventStock = alloc ? alloc.remainingQty : 0;
                         const whStock = p.inventory?.quantityOnHand ?? 0;
-                        return (
-                          <option key={p.id} value={p.id}>
-                            {formData.eventId
-                              ? `${p.name} [${p.id}] — Event stock: ${eventStock} | Warehouse: ${whStock}`
-                              : `${p.name} [${p.id}] — Warehouse stock: ${whStock}`}
-                          </option>
-                        );
+                        if (formData.eventId) {
+                          const selectedEvent = events.find(ev => ev.id === formData.eventId);
+                          const alloc = selectedEvent?.allocations?.find(a => a.productId === p.id);
+                          const eventStock = alloc ? alloc.remainingQty : 0;
+                          const total = eventStock + whStock;
+                          return (
+                            <option key={p.id} value={p.id}>
+                              {p.name} [{p.id}] — Stall: {eventStock} | Warehouse: {whStock} (Total: {total})
+                            </option>
+                          );
+                        } else {
+                          const activeStallStock = events
+                            .filter(ev => ev.status === 'ACTIVE')
+                            .reduce((sum, ev) => {
+                              const alloc = ev.allocations?.find(a => a.productId === p.id);
+                              return sum + (alloc ? alloc.remainingQty : 0);
+                            }, 0);
+                          const total = activeStallStock + whStock;
+                          return (
+                            <option key={p.id} value={p.id}>
+                              {p.name} [{p.id}] — Total Available: {total} (Active Stalls: {activeStallStock}, Warehouse: {whStock})
+                            </option>
+                          );
+                        }
                       })}
                     </select>
 
                     {/* Dynamic Stock Context Helper */}
-                    {formData.eventId && formData.winRewardProductId && (() => {
-                      const selectedEvent = events.find(ev => ev.id === formData.eventId);
+                    {formData.winRewardProductId && (() => {
                       const selectedProd = products.find(p => p.id === formData.winRewardProductId);
-                      const alloc = selectedEvent?.allocations?.find(a => a.productId === formData.winRewardProductId);
                       const whStock = selectedProd?.inventory?.quantityOnHand ?? 0;
 
-                      if (alloc && alloc.remainingQty > 0) {
+                      if (formData.eventId) {
+                        const selectedEvent = events.find(ev => ev.id === formData.eventId);
+                        const alloc = selectedEvent?.allocations?.find(a => a.productId === formData.winRewardProductId);
+                        if (alloc && alloc.remainingQty > 0) {
+                          return (
+                            <div className="mt-1.5 p-2 bg-emerald-50 border border-emerald-200/90 rounded-lg text-[11px] text-emerald-800 flex items-center gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>
+                                <strong>Allocated to {selectedEvent?.name}:</strong> {alloc.remainingQty} units available at stall ({whStock} in central warehouse)
+                              </span>
+                            </div>
+                          );
+                        }
+                        if (alloc && alloc.remainingQty <= 0) {
+                          return (
+                            <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200/90 rounded-lg text-[11px] text-amber-900 flex items-center gap-1.5">
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                              <span>
+                                <strong>Stall allocation exhausted:</strong> 0 units remaining at {selectedEvent?.name} ({whStock} in central warehouse)
+                              </span>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="mt-1.5 p-2 bg-blue-50 border border-blue-200/90 rounded-lg text-[11px] text-blue-900 flex items-center gap-1.5">
+                            <Info className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                            <span>
+                              <strong>Not in stall allocation:</strong> Will draw directly from central warehouse ({whStock} available)
+                            </span>
+                          </div>
+                        );
+                      } else {
+                        const activeStallStock = events
+                          .filter(ev => ev.status === 'ACTIVE')
+                          .reduce((sum, ev) => {
+                            const alloc = ev.allocations?.find(a => a.productId === formData.winRewardProductId);
+                            return sum + (alloc ? alloc.remainingQty : 0);
+                          }, 0);
+                        const total = activeStallStock + whStock;
                         return (
                           <div className="mt-1.5 p-2 bg-emerald-50 border border-emerald-200/90 rounded-lg text-[11px] text-emerald-800 flex items-center gap-1.5">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                             <span>
-                              <strong>Allocated to {selectedEvent?.name}:</strong> {alloc.remainingQty} units available at stall ({whStock} in central warehouse)
+                              <strong>General Stall Game:</strong> {total} units total available ({activeStallStock} deployed across active stalls, {whStock} in warehouse)
                             </span>
                           </div>
                         );
                       }
-                      if (alloc && alloc.remainingQty <= 0) {
-                        return (
-                          <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200/90 rounded-lg text-[11px] text-amber-900 flex items-center gap-1.5">
-                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                            <span>
-                              <strong>Stall allocation exhausted:</strong> 0 units remaining at {selectedEvent?.name} ({whStock} in central warehouse)
-                            </span>
-                          </div>
-                        );
-                      }
-                      return (
-                        <div className="mt-1.5 p-2 bg-blue-50 border border-blue-200/90 rounded-lg text-[11px] text-blue-900 flex items-center gap-1.5">
-                          <Info className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                          <span>
-                            <strong>Not in stall allocation:</strong> Will draw directly from central warehouse ({whStock} available)
-                          </span>
-                        </div>
-                      );
                     })()}
                   </div>
                   <div>
@@ -1009,55 +1051,87 @@ export const GamesPage: React.FC = () => {
                     >
                       <option value="">No consolation reward</option>
                       {products.map(p => {
-                        const selectedEvent = events.find(ev => ev.id === formData.eventId);
-                        const alloc = selectedEvent?.allocations?.find(a => a.productId === p.id);
-                        const eventStock = alloc ? alloc.remainingQty : 0;
                         const whStock = p.inventory?.quantityOnHand ?? 0;
-                        return (
-                          <option key={p.id} value={p.id}>
-                            {formData.eventId
-                              ? `${p.name} [${p.id}] — Event stock: ${eventStock} | Warehouse: ${whStock}`
-                              : `${p.name} [${p.id}] — Warehouse stock: ${whStock}`}
-                          </option>
-                        );
+                        if (formData.eventId) {
+                          const selectedEvent = events.find(ev => ev.id === formData.eventId);
+                          const alloc = selectedEvent?.allocations?.find(a => a.productId === p.id);
+                          const eventStock = alloc ? alloc.remainingQty : 0;
+                          const total = eventStock + whStock;
+                          return (
+                            <option key={p.id} value={p.id}>
+                              {p.name} [{p.id}] — Stall: {eventStock} | Warehouse: {whStock} (Total: {total})
+                            </option>
+                          );
+                        } else {
+                          const activeStallStock = events
+                            .filter(ev => ev.status === 'ACTIVE')
+                            .reduce((sum, ev) => {
+                              const alloc = ev.allocations?.find(a => a.productId === p.id);
+                              return sum + (alloc ? alloc.remainingQty : 0);
+                            }, 0);
+                          const total = activeStallStock + whStock;
+                          return (
+                            <option key={p.id} value={p.id}>
+                              {p.name} [{p.id}] — Total Available: {total} (Active Stalls: {activeStallStock}, Warehouse: {whStock})
+                            </option>
+                          );
+                        }
                       })}
                     </select>
 
                     {/* Dynamic Stock Context Helper */}
-                    {formData.eventId && formData.loseRewardProductId && (() => {
-                      const selectedEvent = events.find(ev => ev.id === formData.eventId);
+                    {formData.loseRewardProductId && (() => {
                       const selectedProd = products.find(p => p.id === formData.loseRewardProductId);
-                      const alloc = selectedEvent?.allocations?.find(a => a.productId === formData.loseRewardProductId);
                       const whStock = selectedProd?.inventory?.quantityOnHand ?? 0;
 
-                      if (alloc && alloc.remainingQty > 0) {
+                      if (formData.eventId) {
+                        const selectedEvent = events.find(ev => ev.id === formData.eventId);
+                        const alloc = selectedEvent?.allocations?.find(a => a.productId === formData.loseRewardProductId);
+                        if (alloc && alloc.remainingQty > 0) {
+                          return (
+                            <div className="mt-1.5 p-2 bg-emerald-50 border border-emerald-200/90 rounded-lg text-[11px] text-emerald-800 flex items-center gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>
+                                <strong>Allocated to {selectedEvent?.name}:</strong> {alloc.remainingQty} units available at stall ({whStock} in central warehouse)
+                              </span>
+                            </div>
+                          );
+                        }
+                        if (alloc && alloc.remainingQty <= 0) {
+                          return (
+                            <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200/90 rounded-lg text-[11px] text-amber-900 flex items-center gap-1.5">
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                              <span>
+                                <strong>Stall allocation exhausted:</strong> 0 units remaining at {selectedEvent?.name} ({whStock} in central warehouse)
+                              </span>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="mt-1.5 p-2 bg-blue-50 border border-blue-200/90 rounded-lg text-[11px] text-blue-900 flex items-center gap-1.5">
+                            <Info className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                            <span>
+                              <strong>Not in stall allocation:</strong> Will draw directly from central warehouse ({whStock} available)
+                            </span>
+                          </div>
+                        );
+                      } else {
+                        const activeStallStock = events
+                          .filter(ev => ev.status === 'ACTIVE')
+                          .reduce((sum, ev) => {
+                            const alloc = ev.allocations?.find(a => a.productId === formData.loseRewardProductId);
+                            return sum + (alloc ? alloc.remainingQty : 0);
+                          }, 0);
+                        const total = activeStallStock + whStock;
                         return (
                           <div className="mt-1.5 p-2 bg-emerald-50 border border-emerald-200/90 rounded-lg text-[11px] text-emerald-800 flex items-center gap-1.5">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                             <span>
-                              <strong>Allocated to {selectedEvent?.name}:</strong> {alloc.remainingQty} units available at stall ({whStock} in central warehouse)
+                              <strong>General Stall Game:</strong> {total} units total available ({activeStallStock} deployed across active stalls, {whStock} in warehouse)
                             </span>
                           </div>
                         );
                       }
-                      if (alloc && alloc.remainingQty <= 0) {
-                        return (
-                          <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200/90 rounded-lg text-[11px] text-amber-900 flex items-center gap-1.5">
-                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                            <span>
-                              <strong>Stall allocation exhausted:</strong> 0 units remaining at {selectedEvent?.name} ({whStock} in central warehouse)
-                            </span>
-                          </div>
-                        );
-                      }
-                      return (
-                        <div className="mt-1.5 p-2 bg-blue-50 border border-blue-200/90 rounded-lg text-[11px] text-blue-900 flex items-center gap-1.5">
-                          <Info className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                          <span>
-                            <strong>Not in stall allocation:</strong> Will draw directly from central warehouse ({whStock} available)
-                          </span>
-                        </div>
-                      );
                     })()}
                   </div>
                   <div>
