@@ -3,29 +3,29 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { api } from '../lib/api';
-import { GameSession, Game, AppEvent, PaymentMethod } from '../types';
+import { GameSession, Game, AppEvent } from '../types';
 import {
   History,
   Search,
-  Filter,
   Trophy,
-  Frown,
-  Calendar,
-  Layers,
+  XCircle,
   ChevronLeft,
   ChevronRight,
   Download,
   Loader2,
   Gamepad2,
-  User as UserIcon,
   Phone,
-  ArrowUpDown,
   CreditCard,
   Banknote,
+  RotateCcw,
+  X,
+  Layers,
+  Store,
+  CheckCircle2,
 } from 'lucide-react';
 
 export const GameSessionsPage: React.FC = () => {
-  const { user, isDeveloper, isAdmin, isHead, hasPermission } = useAuth();
+  const { isDeveloper, isAdmin, hasPermission } = useAuth();
   const { socket } = useSocket();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -56,6 +56,14 @@ export const GameSessionsPage: React.FC = () => {
   const canViewRevenue = isDeveloper || isAdmin || hasPermission('view_revenue');
   const canViewPII = isDeveloper || isAdmin || hasPermission('view_customer_pii');
 
+  const hasActiveFilters = Boolean(
+    searchFromUrl.trim() ||
+    selectedGameId ||
+    selectedEventId ||
+    resultFilter !== 'ALL' ||
+    paymentFilter !== 'ALL'
+  );
+
   const handleExportCSV = async () => {
     setIsExporting(true);
     try {
@@ -72,6 +80,7 @@ export const GameSessionsPage: React.FC = () => {
       const dataToExport: GameSession[] = res?.sessions || sessions;
 
       const headers = [
+        'Receipt ID',
         'Session Code',
         'Date & Time',
         'Game Name',
@@ -85,6 +94,7 @@ export const GameSessionsPage: React.FC = () => {
       ];
 
       const rows = dataToExport.map(s => [
+        `"#${s.receiptNumber}"`,
         `"${s.sessionCode || ''}"`,
         `"${new Date(s.createdAt).toLocaleString('en-IN')}"`,
         `"${s.gameName || ''}"`,
@@ -159,6 +169,11 @@ export const GameSessionsPage: React.FC = () => {
     [searchParams, currentPage, pageSize, selectedEventId, selectedGameId, resultFilter, paymentFilter, searchFromUrl, setSearchParams]
   );
 
+  const handleResetFilters = () => {
+    setSearchQuery('');
+    setSearchParams(new URLSearchParams(), { replace: true });
+  };
+
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -167,6 +182,11 @@ export const GameSessionsPage: React.FC = () => {
     searchTimeoutRef.current = setTimeout(() => {
       updateUrlState({ page: 1, search: val });
     }, 300);
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery('');
+    updateUrlState({ page: 1, search: '' });
   };
 
   const fetchSessionData = useCallback(async () => {
@@ -206,7 +226,7 @@ export const GameSessionsPage: React.FC = () => {
     });
   }, []);
 
-  // Socket listener
+  // Socket listener for live game play updates
   useEffect(() => {
     if (!socket) return;
     socket.on('game:played', fetchSessionData);
@@ -224,153 +244,245 @@ export const GameSessionsPage: React.FC = () => {
 
   return (
     <div className="space-y-5 max-w-7xl mx-auto pb-12">
-      {/* Header */}
+      {/* Page Header */}
       <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-purple-100 text-purple-800 flex items-center justify-center font-black shadow-xs">
-              <History className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-                Game Sessions Ledger
-              </h1>
-              <p className="text-xs text-slate-500">
-                Official chronological record of every physical game play, physical outcome, and issued reward.
-              </p>
-            </div>
+        <div className="flex items-start sm:items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-700 border border-purple-200/70 flex items-center justify-center font-black shadow-xs shrink-0">
+            <History className="w-5 h-5" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-slate-900 tracking-tight">
+              Game Sessions Ledger
+            </h1>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Official chronological record of every physical game play, physical outcome, and issued reward.
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto">
           <Link
             to="/games/play"
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition-colors cursor-pointer"
           >
             <Gamepad2 className="w-4 h-4" />
             <span>Play Game</span>
           </Link>
           <Link
             to="/games"
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer shadow-xs"
           >
-            Manage Games
+            <span>Manage Games</span>
           </Link>
           <button
             onClick={handleExportCSV}
             disabled={isExporting || totalRecords === 0}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-xs"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-xs"
             title="Export game sessions to CSV"
             aria-label="Export game sessions to CSV"
           >
-            {isExporting ? <Loader2 className="w-4 h-4 animate-spin text-purple-600" /> : <Download className="w-4 h-4 text-slate-500" />}
+            {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600" /> : <Download className="w-3.5 h-3.5 text-slate-500" />}
             <span>Export CSV</span>
           </button>
         </div>
       </div>
 
-      {/* Filter and Metric Bar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-4">
-        {/* Search */}
-        <div className="w-full md:w-72 relative">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search session #, receipt, player..."
-            value={searchQuery}
-            onChange={handleSearchChange}
-            className="w-full pl-9 pr-8 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-900"
-          />
-          {isFetching && (
-            <Loader2 className="w-3.5 h-3.5 absolute right-3 top-3 text-slate-400 animate-spin" />
-          )}
-        </div>
-
-        {/* Dropdowns / Buttons */}
-        <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
-          {/* Game filter */}
-          <select
-            value={selectedGameId}
-            onChange={e => updateUrlState({ page: 1, gameId: e.target.value })}
-            className="text-xs font-semibold bg-white border border-slate-300 rounded-lg py-1.5 px-2.5 text-slate-800 cursor-pointer"
-          >
-            <option value="">All Games</option>
-            {games.map(g => (
-              <option key={g.id} value={g.id}>
-                {g.name}
-              </option>
-            ))}
-          </select>
-
-          {/* Event filter */}
-          <select
-            value={selectedEventId}
-            onChange={e => updateUrlState({ page: 1, eventId: e.target.value })}
-            className="text-xs font-semibold bg-white border border-slate-300 rounded-lg py-1.5 px-2.5 text-slate-800 cursor-pointer"
-          >
-            <option value="">All Stalls</option>
-            {events.map(ev => (
-              <option key={ev.id} value={ev.id}>
-                {ev.name}
-              </option>
-            ))}
-          </select>
-
-          {/* Result Filter */}
-          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs">
-            {(['ALL', 'WIN', 'LOSE'] as const).map(r => (
-              <button
-                key={r}
-                onClick={() => updateUrlState({ page: 1, result: r })}
-                className={`px-2 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
-                  resultFilter === r ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'
-                }`}
-              >
-                {r === 'WIN' ? '🏆 WINS' : r === 'LOSE' ? '❌ LOSSES' : 'ALL'}
-              </button>
-            ))}
-          </div>
-
-          {/* Payment Filter */}
-          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs">
-            {(['ALL', 'UPI', 'CASH', 'CASH_UPI'] as const).map(p => (
-              <button
-                key={p}
-                onClick={() => updateUrlState({ page: 1, payment: p })}
-                className={`px-2 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
-                  paymentFilter === p ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'
-                }`}
-              >
-                {p === 'CASH_UPI' ? 'SPLIT' : p}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Mini stats summary */}
-        <div className="flex items-center gap-4 text-xs shrink-0">
+      {/* Summary KPI Cards */}
+      <div className={`grid grid-cols-1 ${canViewRevenue ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-4`}>
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
           <div>
-            <span className="text-slate-500">Sessions:</span>{' '}
-            <span className="font-bold text-slate-900">{totalRecords}</span>
-          </div>
-          <div>
-            <span className="text-slate-500">Rewards:</span>{' '}
-            <span className="font-bold text-purple-700">{summary.totalRewardsIssued}</span>
-          </div>
-          {canViewRevenue && (
-            <div>
-              <span className="text-slate-500">Revenue:</span>{' '}
-              <span className="font-black text-emerald-700">₹{summary.totalRevenue}</span>
+            <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+              Total Sessions
             </div>
-          )}
+            <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-1 tracking-tight">
+              {totalRecords}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5">
+              Physical rounds recorded
+            </div>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0 border border-slate-200/60">
+            <History className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+          <div>
+            <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+              Rewards Issued
+            </div>
+            <div className="text-2xl sm:text-3xl font-black text-purple-700 mt-1 tracking-tight">
+              {summary.totalRewardsIssued}
+            </div>
+            <div className="text-[11px] text-slate-500 mt-0.5">
+              Prizes & consolations handed out
+            </div>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center shrink-0 border border-purple-200/60">
+            <Trophy className="w-5 h-5" />
+          </div>
+        </div>
+
+        {canViewRevenue && (
+          <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+            <div>
+              <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                Total Game Revenue
+              </div>
+              <div className="text-2xl sm:text-3xl font-black text-emerald-700 mt-1 tracking-tight">
+                ₹{summary.totalRevenue}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Entry fees collected
+              </div>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 border border-emerald-200/60">
+              <Banknote className="w-5 h-5" />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Filter Toolbar */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-3">
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+          {/* Search Box */}
+          <div className="relative flex-1 max-w-md">
+            <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search session #, receipt, player name or phone..."
+              value={searchQuery}
+              onChange={handleSearchChange}
+              className="w-full pl-9 pr-8 py-2 text-xs border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-purple-600/20 focus:border-purple-600 transition-all"
+            />
+            {isFetching ? (
+              <Loader2 className="w-3.5 h-3.5 absolute right-3 top-2.5 text-slate-400 animate-spin" />
+            ) : searchQuery ? (
+              <button
+                onClick={handleClearSearch}
+                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer p-0.5"
+                title="Clear search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            ) : null}
+          </div>
+
+          {/* Select Dropdowns */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Game filter */}
+            <select
+              value={selectedGameId}
+              onChange={e => updateUrlState({ page: 1, gameId: e.target.value })}
+              className="text-xs font-semibold bg-white border border-slate-300 rounded-xl py-2 px-3 text-slate-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-600/20 focus:border-purple-600"
+            >
+              <option value="">All Games</option>
+              {games.map(g => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+            </select>
+
+            {/* Stall/Event filter */}
+            <select
+              value={selectedEventId}
+              onChange={e => updateUrlState({ page: 1, eventId: e.target.value })}
+              className="text-xs font-semibold bg-white border border-slate-300 rounded-xl py-2 px-3 text-slate-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-600/20 focus:border-purple-600"
+            >
+              <option value="">All Stalls</option>
+              {events.map(ev => (
+                <option key={ev.id} value={ev.id}>
+                  {ev.name}
+                </option>
+              ))}
+            </select>
+
+            {hasActiveFilters && (
+              <button
+                onClick={handleResetFilters}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors cursor-pointer"
+                title="Reset all filters"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Reset</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Secondary Filter Controls: Result & Payment Pills */}
+        <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* Outcome Filter */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                Result:
+              </span>
+              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+                {(['ALL', 'WIN', 'LOSE'] as const).map(r => (
+                  <button
+                    key={r}
+                    onClick={() => updateUrlState({ page: 1, result: r })}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                      resultFilter === r
+                        ? 'bg-white text-purple-700 shadow-2xs font-extrabold'
+                        : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    {r === 'WIN' ? '🏆 Wins' : r === 'LOSE' ? '❌ Losses' : 'All'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Payment Filter */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                Payment:
+              </span>
+              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+                {(['ALL', 'UPI', 'CASH', 'CASH_UPI'] as const).map(p => (
+                  <button
+                    key={p}
+                    onClick={() => updateUrlState({ page: 1, payment: p })}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                      paymentFilter === p
+                        ? 'bg-white text-slate-900 shadow-2xs font-extrabold'
+                        : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    {p === 'CASH_UPI' ? 'Split' : p}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Rows per page selector */}
+          <div className="flex items-center gap-2 self-end sm:self-auto text-slate-500 text-xs">
+            <span>Per page:</span>
+            <select
+              value={pageSize}
+              onChange={e => updateUrlState({ page: 1, pageSize: parseInt(e.target.value, 10) })}
+              className="font-semibold bg-white border border-slate-200 rounded-lg py-1 px-2 text-slate-800 cursor-pointer focus:outline-none"
+            >
+              {[10, 25, 50, 100].map(s => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
-      {/* Sessions Table */}
-      <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden relative">
+      {/* Sessions Table Container */}
+      <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold uppercase tracking-wider text-[10px]">
+          <table className="w-full text-left text-xs min-w-[1100px]">
+            <thead className="bg-slate-50/80 text-slate-500 border-b border-slate-200 font-semibold uppercase tracking-wider text-[10px]">
               <tr>
                 <th className="px-4 py-3">Receipt ID</th>
                 <th className="px-4 py-3">Session Code</th>
@@ -388,15 +500,53 @@ export const GameSessionsPage: React.FC = () => {
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-12 text-center text-slate-400">
-                    <Loader2 className="w-5 h-5 mx-auto mb-2 animate-spin text-slate-400" />
-                    Loading game sessions...
+                  <td colSpan={11} className="px-4 py-16 text-center text-slate-400">
+                    <Loader2 className="w-6 h-6 mx-auto mb-2.5 animate-spin text-purple-600" />
+                    <p className="font-medium text-slate-600">Loading game sessions...</p>
                   </td>
                 </tr>
               ) : sessions.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-8 text-center text-slate-400">
-                    No matching game sessions found.
+                  <td colSpan={11} className="px-4 py-14 text-center">
+                    {hasActiveFilters ? (
+                      <div className="max-w-sm mx-auto space-y-2">
+                        <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mx-auto mb-2">
+                          <Search className="w-5 h-5" />
+                        </div>
+                        <h3 className="text-sm font-bold text-slate-900">No matching game sessions</h3>
+                        <p className="text-xs text-slate-500">
+                          No sessions match your active filters or search terms. Try clearing or broadening your search criteria.
+                        </p>
+                        <div className="pt-2">
+                          <button
+                            onClick={handleResetFilters}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-900 text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Clear Filters</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="max-w-md mx-auto space-y-2.5">
+                        <div className="w-12 h-12 rounded-2xl bg-purple-50 text-purple-600 border border-purple-200/60 flex items-center justify-center mx-auto mb-2">
+                          <Gamepad2 className="w-6 h-6" />
+                        </div>
+                        <h3 className="text-base font-bold text-slate-900">No Game Sessions Recorded Yet</h3>
+                        <p className="text-xs text-slate-500 leading-relaxed">
+                          When visitors play stall games during an active event, physical game outcomes, entry fee collections, and issued rewards will appear here in real time.
+                        </p>
+                        <div className="pt-2">
+                          <Link
+                            to="/games/play"
+                            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition-colors cursor-pointer"
+                          >
+                            <Gamepad2 className="w-4 h-4" />
+                            <span>Open Play Game Terminal</span>
+                          </Link>
+                        </div>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ) : (
@@ -405,32 +555,51 @@ export const GameSessionsPage: React.FC = () => {
                     <td className="px-4 py-3 font-bold text-slate-900">
                       #{s.receiptNumber}
                     </td>
-                    <td className="px-4 py-3 font-mono font-semibold text-purple-700">
-                      {s.sessionCode}
+                    <td className="px-4 py-3">
+                      <span className="font-mono font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100 text-[11px]">
+                        {s.sessionCode}
+                      </span>
                     </td>
                     <td className="px-4 py-3 font-semibold text-slate-800">
                       {s.gameName}
                     </td>
                     <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-extrabold uppercase ${
-                          s.result === 'WIN'
-                            ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                            : 'bg-slate-100 text-slate-700 border border-slate-200'
-                        }`}
-                      >
-                        {s.result === 'WIN' ? '🏆 WIN' : '❌ LOSE'}
-                      </span>
+                      {s.result === 'WIN' ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-emerald-50 text-emerald-800 border border-emerald-200">
+                          <Trophy className="w-3 h-3 text-emerald-600" />
+                          <span>WIN</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-slate-100 text-slate-700 border border-slate-200">
+                          <XCircle className="w-3 h-3 text-slate-500" />
+                          <span>LOSS</span>
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 font-medium text-slate-900">
-                      {s.rewardDescription}
+                      {s.rewardDescription || '—'}
                     </td>
                     <td className="px-4 py-3 text-right font-black text-slate-900">
                       ₹{s.entryFee}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="px-1.5 py-0.5 text-[10px] font-bold rounded bg-slate-100 text-slate-700 border border-slate-200">
-                        {s.paymentMethod === 'CASH_UPI' ? 'CASH + UPI' : s.paymentMethod}
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded bg-slate-100 text-slate-700 border border-slate-200">
+                        {s.paymentMethod === 'CASH_UPI' ? (
+                          <>
+                            <Banknote className="w-3 h-3" />
+                            <span>Split</span>
+                          </>
+                        ) : s.paymentMethod === 'UPI' ? (
+                          <>
+                            <CreditCard className="w-3 h-3 text-blue-600" />
+                            <span>UPI</span>
+                          </>
+                        ) : (
+                          <>
+                            <Banknote className="w-3 h-3 text-emerald-600" />
+                            <span>Cash</span>
+                          </>
+                        )}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-700">
@@ -444,7 +613,10 @@ export const GameSessionsPage: React.FC = () => {
                         <div>
                           <div className="font-semibold text-slate-900">{s.customerName}</div>
                           {canViewPII && s.customerPhone && (
-                            <div className="text-[10px] text-slate-400 font-mono">{s.customerPhone}</div>
+                            <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+                              <Phone className="w-2.5 h-2.5" />
+                              <span>{s.customerPhone}</span>
+                            </div>
                           )}
                         </div>
                       ) : (
@@ -468,7 +640,7 @@ export const GameSessionsPage: React.FC = () => {
         </div>
 
         {/* Pagination Bar */}
-        <div className="px-4 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-xs">
+        <div className="px-4 py-3.5 bg-slate-50/80 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
           <div className="text-slate-500">
             Showing <strong className="text-slate-900">{fromRecord}–{toRecord}</strong> of{' '}
             <strong className="text-slate-900">{totalRecords}</strong> sessions
@@ -478,18 +650,20 @@ export const GameSessionsPage: React.FC = () => {
             <button
               onClick={() => updateUrlState({ page: currentPage - 1 })}
               disabled={currentPage <= 1}
-              className="p-1.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-2xs transition-colors"
             >
               <ChevronLeft className="w-3.5 h-3.5" />
+              <span>Previous</span>
             </button>
-            <span className="px-2 font-bold text-slate-700">
+            <span className="px-3 font-semibold text-slate-700">
               Page {currentPage} of {totalPages}
             </span>
             <button
               onClick={() => updateUrlState({ page: currentPage + 1 })}
               disabled={currentPage >= totalPages}
-              className="p-1.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 cursor-pointer"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer shadow-2xs transition-colors"
             >
+              <span>Next</span>
               <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
