@@ -21,6 +21,7 @@ dist/
 .DS_Store
 *.pem
 Screenshot*
+*.sql
 
 # debug
 npm-debug.log*
