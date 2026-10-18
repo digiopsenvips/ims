@@ -26,6 +26,11 @@ import {
   ExternalLink,
   ChevronRight,
   TrendingUp,
+  Copy,
+  Check,
+  Info,
+  Calendar,
+  Building2,
 } from 'lucide-react';
 
 export const GamesPage: React.FC = () => {
@@ -41,6 +46,9 @@ export const GamesPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
   const [eventFilter, setEventFilter] = useState<string>('ALL');
+  const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [isTogglingStatus, setIsTogglingStatus] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState<boolean>(false);
 
   // Modals
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
@@ -173,13 +181,44 @@ export const GamesPage: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [viewingGame, showCreateModal, qrGame]);
 
+  useEffect(() => {
+    if (!statusMessage) return;
+    const timer = setTimeout(() => setStatusMessage(null), 4000);
+    return () => clearTimeout(timer);
+  }, [statusMessage]);
+
+  const isEventEnded = (eventId?: string | null) => {
+    if (!eventId) return false;
+    const ev = events.find(e => e.id === eventId);
+    if (!ev) return false;
+    return ev.status === 'ENDED' || new Date(ev.endDatetime).getTime() < Date.now();
+  };
+
   const handleToggleStatus = async (game: Game) => {
+    const nextStatus = game.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    const confirmMsg =
+      game.status === 'ACTIVE'
+        ? `Are you sure you want to deactivate "${game.name}"? Volunteers will not be able to record plays for this game until it is reactivated.`
+        : `Activate "${game.name}" for live stall play?`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsTogglingStatus(game.id);
     try {
-      const nextStatus = game.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
       await api.patch(`/games/${game.id}/status`, { status: nextStatus });
-      loadData();
+      setStatusMessage({
+        text: `"${game.name}" is now ${nextStatus === 'ACTIVE' ? 'Active (Playable)' : 'Inactive'}.`,
+        type: 'success',
+      });
+      await loadData();
     } catch (err: any) {
-      alert(err.message || 'Failed to update status');
+      console.error('Failed to update status:', err);
+      setStatusMessage({
+        text: err.message || 'Failed to update game status.',
+        type: 'error',
+      });
+    } finally {
+      setIsTogglingStatus(null);
     }
   };
 
@@ -239,37 +278,35 @@ export const GamesPage: React.FC = () => {
 
   return (
     <div className="space-y-5 max-w-7xl mx-auto pb-12">
-      {/* 1. Header with Stats & Actions */}
+      {/* 1. Header with Title & Primary Actions */}
       <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-purple-600 text-white flex items-center justify-center font-black shadow-xs">
-              <Gamepad2 className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight">
-                Game Management
-              </h1>
-              <p className="text-xs text-slate-500">
-                Configure physical stall games, reward products, entry pricing, and live inventory links.
-              </p>
-            </div>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-purple-50 border border-purple-200 text-purple-700 flex items-center justify-center font-black shadow-2xs shrink-0">
+            <Gamepad2 className="w-5 h-5" />
+          </div>
+          <div>
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+              Games Management
+            </h1>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Configure physical stall games, reward products, entry pricing, and live inventory links.
+            </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
           <Link
             to="/games/play"
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors cursor-pointer"
+            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 shadow-2xs transition-colors cursor-pointer"
           >
             <Gamepad2 className="w-4 h-4" />
-            <span>🎮 Play Game Terminal</span>
+            <span>Play Game Terminal</span>
           </Link>
 
           {canManage && (
             <button
               onClick={openCreateModal}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg bg-slate-900 hover:bg-slate-800 text-white shadow-xs transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs transition-colors cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Create Game</span>
@@ -278,30 +315,75 @@ export const GamesPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. Search & Filters Bar */}
-      <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
-        <div className="w-full md:w-80 relative">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-400" />
+      {/* Status Feedback Notification Banner */}
+      {statusMessage && (
+        <div
+          className={`p-3 rounded-xl border flex items-center justify-between gap-2 text-xs font-semibold animate-fadeIn ${
+            statusMessage.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-rose-50 border-rose-200 text-rose-800'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {statusMessage.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            )}
+            <span>{statusMessage.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setStatusMessage(null)}
+            className="p-1 hover:bg-black/5 rounded cursor-pointer transition-colors"
+            title="Dismiss message"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* 2. Redesigned Search & Filters Bar */}
+      <div className="bg-white p-3 sm:p-4 rounded-xl border border-slate-200 shadow-2xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+        {/* Search Field with Usable Width */}
+        <div className="relative flex-1 min-w-[220px]">
+          <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
           <input
             type="text"
             placeholder="Search game, reward, event, project..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-900"
+            className="w-full pl-9 pr-8 py-2 text-xs bg-slate-50 focus:bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-900 min-h-[36px] transition-colors text-slate-800 placeholder:text-slate-400"
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="w-5 h-5 flex items-center justify-center text-slate-400 hover:text-slate-700 absolute right-2.5 top-1/2 -translate-y-1/2 rounded cursor-pointer"
+              title="Clear search"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
-        <div className="flex items-center gap-3 w-full md:w-auto flex-wrap">
-          {/* Status Filter */}
+        {/* Filter Controls: Status + Event */}
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Status Segmented Control */}
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Status:</span>
-            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0">
+              Status:
+            </span>
+            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-xs h-9">
               {(['ALL', 'ACTIVE', 'INACTIVE'] as const).map(s => (
                 <button
                   key={s}
+                  type="button"
                   onClick={() => setStatusFilter(s)}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
-                    statusFilter === s ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'
+                  className={`px-3 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+                    statusFilter === s
+                      ? 'bg-slate-900 text-white shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
                   {s}
@@ -310,67 +392,116 @@ export const GamesPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Event Filter */}
+          {/* Event Dropdown */}
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Event:</span>
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0">
+              Stall:
+            </span>
             <select
               value={eventFilter}
               onChange={e => setEventFilter(e.target.value)}
-              className="text-xs font-semibold bg-white border border-slate-300 rounded-lg py-1 px-2.5 text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900 cursor-pointer"
+              className="h-9 text-xs font-semibold bg-white border border-slate-300 rounded-lg py-1 px-3 text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900 cursor-pointer min-w-[170px]"
             >
-              <option value="ALL">All Events / Stalls</option>
-              {events.map(ev => (
-                <option key={ev.id} value={ev.id}>
-                  {ev.name}
-                </option>
-              ))}
+              <option value="ALL">All Stalls & Events</option>
+              {events.map(ev => {
+                const ended = ev.status === 'ENDED' || new Date(ev.endDatetime).getTime() < Date.now();
+                return (
+                  <option key={ev.id} value={ev.id}>
+                    {ev.name} {ended ? '(Concluded)' : ''}
+                  </option>
+                );
+              })}
             </select>
           </div>
+
+          {/* Reset Filters Link */}
+          {(searchQuery || statusFilter !== 'ALL' || eventFilter !== 'ALL') && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                setStatusFilter('ALL');
+                setEventFilter('ALL');
+              }}
+              className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer flex items-center gap-1 px-2 py-1 hover:bg-indigo-50 rounded-md transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Reset</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* 3. Games Grid */}
+      {/* 3. Games Grid & Empty State */}
       {isLoading ? (
-        <div className="bg-white border border-slate-200 rounded-xl p-12 text-center text-slate-400">
-          <Loader2 className="w-6 h-6 mx-auto mb-2 animate-spin text-slate-400" />
-          Loading games catalog...
+        <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400">
+          <Loader2 className="w-7 h-7 mx-auto mb-2.5 animate-spin text-purple-600" />
+          <span className="text-xs font-semibold">Loading games catalog and reward stocks...</span>
         </div>
       ) : filteredGames.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-xl p-12 text-center">
+        <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
           <Gamepad2 className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-          <h3 className="text-sm font-bold text-slate-900">No games found</h3>
+          <h3 className="text-sm font-bold text-slate-900">
+            {games.length === 0 ? 'No games created yet' : 'No games found matching criteria'}
+          </h3>
           <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
             {games.length === 0
-              ? 'No games configured yet. Click "Create Game" above to launch Ring Toss, Bottle Flip, or other stall games.'
-              : 'No games match your active filters or search terms.'}
+              ? 'Click "Create Game" above to launch Ring Toss, Bottle Flip, or other stall attractions.'
+              : 'Try searching with a different term, or reset your status and stall filters.'}
           </p>
-          {canManage && games.length === 0 && (
+          {games.length === 0 && canManage ? (
             <button
               onClick={openCreateModal}
-              className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg bg-purple-600 hover:bg-purple-700 text-white shadow-xs cursor-pointer"
+              className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Create First Game</span>
             </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                setStatusFilter('ALL');
+                setEventFilter('ALL');
+              }}
+              className="mt-4 inline-flex items-center gap-1 px-3.5 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reset all filters</span>
+            </button>
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        /* Responsive Card Grid with Sensible Column Widths */
+        <div
+          className={`grid gap-5 ${
+            filteredGames.length === 1 && !searchQuery && statusFilter === 'ALL' && eventFilter === 'ALL'
+              ? 'grid-cols-1 lg:grid-cols-2 max-w-5xl'
+              : filteredGames.length === 2
+              ? 'grid-cols-1 md:grid-cols-2'
+              : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3'
+          }`}
+        >
           {filteredGames.map(game => {
             const hasLowStock = game.winReward.isLowStock || game.loseReward?.isLowStock;
             const hasOutOfStock = game.winReward.isOutOfStock || game.loseReward?.isOutOfStock;
+            const eventEnded = isEventEnded(game.eventId);
 
             return (
               <div
                 key={game.id}
-                className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs flex flex-col justify-between hover:border-slate-300 transition-all"
+                className="bg-white border border-slate-200 rounded-2xl p-5 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between"
               >
                 <div>
-                  {/* Top Bar: Title, Project & Status */}
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h2 className="text-base font-bold text-slate-900 tracking-tight">
+                  {/* Top Bar: Title, Project Tag & Entry Fee */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h2
+                          className="text-base font-bold text-slate-900 tracking-tight leading-snug break-words"
+                          title={game.name}
+                        >
                           {game.name}
                         </h2>
                         <span
@@ -384,52 +515,65 @@ export const GamesPage: React.FC = () => {
                         </span>
                       </div>
                       {game.projectName && (
-                        <span className="text-[10px] font-bold text-purple-700 uppercase tracking-wider mt-0.5 inline-block">
+                        <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200/80 px-2 py-0.5 rounded uppercase tracking-wider inline-block mt-1">
                           Project {game.projectName}
                         </span>
                       )}
                     </div>
 
-                    <div className="text-right">
-                      <div className="text-xs font-bold text-slate-400 uppercase">Entry Fee</div>
-                      <div className="text-base font-black text-emerald-700">
+                    <div className="text-right shrink-0">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Entry Fee
+                      </div>
+                      <div className="text-base font-black text-slate-900 mt-0.5">
                         ₹{game.entryFee}
                       </div>
                     </div>
                   </div>
 
+                  {/* Description (wraps cleanly) */}
                   {game.description && (
-                    <p className="text-xs text-slate-500 mt-2 line-clamp-2">
+                    <p className="text-xs text-slate-500 mt-2.5 line-clamp-2 leading-relaxed">
                       {game.description}
                     </p>
                   )}
 
-                  {/* Event association */}
+                  {/* Assigned Event / Stall info */}
                   <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs">
-                    <span className="text-slate-400 font-medium">Stall / Event:</span>
-                    <span className="font-semibold text-slate-700 truncate max-w-[180px]">
-                      {game.eventName || 'Any Stall'}
+                    <span className="text-slate-400 font-medium flex items-center gap-1">
+                      <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                      Stall:
                     </span>
+                    <div className="text-right flex items-center gap-1 truncate max-w-[190px]">
+                      <span className="font-semibold text-slate-700 truncate">
+                        {game.eventName || 'All Stalls (Global)'}
+                      </span>
+                      {eventEnded && (
+                        <span className="text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded shrink-0">
+                          Concluded
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Rewards Config Block */}
-                  <div className="mt-3 bg-slate-50 border border-slate-200/80 rounded-lg p-2.5 space-y-2">
+                  <div className="mt-3 bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-2">
                     {/* Win Reward */}
-                    <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center justify-between text-xs gap-2">
                       <div className="flex items-center gap-1.5 min-w-0">
                         <Trophy className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                        <span className="font-semibold text-slate-800 truncate">
+                        <span className="font-semibold text-slate-800 truncate" title={game.winReward.productName}>
                           WIN: {game.winReward.productName} × {game.winReward.quantity}
                         </span>
                       </div>
                       <div className="shrink-0 text-right">
                         {game.winReward.isOutOfStock ? (
                           <span className="px-1.5 py-0.5 text-[9px] font-black uppercase rounded bg-red-100 text-red-800 border border-red-200">
-                            🔴 Out of Stock
+                            Out of Stock
                           </span>
                         ) : game.winReward.isLowStock ? (
                           <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded bg-amber-100 text-amber-800 border border-amber-200">
-                            ⚠ Low: {game.winReward.availableStock}
+                            Low: {game.winReward.availableStock}
                           </span>
                         ) : (
                           <span className="text-[10px] font-bold text-slate-600 bg-white border border-slate-200 px-1.5 py-0.5 rounded">
@@ -440,22 +584,22 @@ export const GamesPage: React.FC = () => {
                     </div>
 
                     {/* Lose Reward */}
-                    {game.loseReward && (
-                      <div className="flex items-center justify-between text-xs pt-1.5 border-t border-slate-200/60">
+                    {game.loseReward ? (
+                      <div className="flex items-center justify-between text-xs pt-1.5 border-t border-slate-200/60 gap-2">
                         <div className="flex items-center gap-1.5 min-w-0">
                           <Frown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span className="font-semibold text-slate-700 truncate">
+                          <span className="font-semibold text-slate-700 truncate" title={game.loseReward.productName}>
                             LOSE: {game.loseReward.productName} × {game.loseReward.quantity}
                           </span>
                         </div>
                         <div className="shrink-0 text-right">
                           {game.loseReward.isOutOfStock ? (
                             <span className="px-1.5 py-0.5 text-[9px] font-black uppercase rounded bg-red-100 text-red-800 border border-red-200">
-                              🔴 Out of Stock
+                              Out of Stock
                             </span>
                           ) : game.loseReward.isLowStock ? (
                             <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase rounded bg-amber-100 text-amber-800 border border-amber-200">
-                              ⚠ Low: {game.loseReward.availableStock}
+                              Low: {game.loseReward.availableStock}
                             </span>
                           ) : (
                             <span className="text-[10px] font-bold text-slate-600 bg-white border border-slate-200 px-1.5 py-0.5 rounded">
@@ -464,6 +608,10 @@ export const GamesPage: React.FC = () => {
                           )}
                         </div>
                       </div>
+                    ) : (
+                      <div className="text-[10px] text-slate-400 pt-1 border-t border-slate-200/60 italic">
+                        No consolation reward configured
+                      </div>
                     )}
                   </div>
 
@@ -471,18 +619,18 @@ export const GamesPage: React.FC = () => {
                   {hasOutOfStock ? (
                     <div className="mt-2.5 p-2 rounded-lg bg-red-50 border border-red-200 flex items-center gap-2 text-xs text-red-800 font-semibold">
                       <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
-                      <span>🔴 Reward out of stock! Game play will be restricted.</span>
+                      <span>Reward out of stock! Game play will be restricted.</span>
                     </div>
                   ) : hasLowStock ? (
                     <div className="mt-2.5 p-2 rounded-lg bg-amber-50 border border-amber-200 flex items-center gap-2 text-xs text-amber-800 font-semibold">
                       <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                      <span>⚠ Low reward stock warning</span>
+                      <span>Low reward stock warning</span>
                     </div>
                   ) : null}
 
                   {/* Performance stats mini-strip */}
                   {game.stats && (
-                    <div className="mt-3 grid grid-cols-4 gap-1 text-center bg-slate-50/60 p-2 rounded-lg border border-slate-100 text-[10px]">
+                    <div className="mt-3 grid grid-cols-4 gap-1 text-center bg-slate-50 p-2 rounded-lg border border-slate-100 text-[10px]">
                       <div>
                         <div className="text-slate-400 font-semibold uppercase">Plays</div>
                         <div className="font-bold text-slate-900 mt-0.5">{game.stats.totalPlays}</div>
@@ -507,6 +655,7 @@ export const GamesPage: React.FC = () => {
                 <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-1.5">
                   <div className="flex items-center gap-1">
                     <button
+                      type="button"
                       onClick={() => handleOpenGameDetails(game)}
                       className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
                       title={`View Details for ${game.name}`}
@@ -516,16 +665,18 @@ export const GamesPage: React.FC = () => {
                     </button>
 
                     <button
+                      type="button"
                       onClick={() => setQrGame(game)}
                       className="p-1.5 text-slate-500 hover:text-purple-700 hover:bg-purple-50 rounded-md transition-colors cursor-pointer"
-                      title={`Customer Display Card & Rules for ${game.name}`}
-                      aria-label={`Customer Display Card & Rules for ${game.name}`}
+                      title={`Customer Display Placard & QR Code for ${game.name}`}
+                      aria-label={`Customer Display Placard & QR Code for ${game.name}`}
                     >
                       <QrCode className="w-4 h-4" />
                     </button>
 
                     {canManage && (
                       <button
+                        type="button"
                         onClick={() => openEditModal(game)}
                         className="p-1.5 text-slate-500 hover:text-blue-700 hover:bg-blue-50 rounded-md transition-colors cursor-pointer"
                         title={`Edit configuration for ${game.name}`}
@@ -537,8 +688,10 @@ export const GamesPage: React.FC = () => {
 
                     {canManage && (
                       <button
+                        type="button"
+                        disabled={isTogglingStatus === game.id}
                         onClick={() => handleToggleStatus(game)}
-                        className={`p-1.5 rounded-md transition-colors cursor-pointer ${
+                        className={`p-1.5 rounded-md transition-colors cursor-pointer disabled:opacity-50 ${
                           game.status === 'ACTIVE'
                             ? 'text-slate-400 hover:text-amber-600 hover:bg-amber-50'
                             : 'text-slate-400 hover:text-emerald-600 hover:bg-emerald-50'
@@ -546,27 +699,92 @@ export const GamesPage: React.FC = () => {
                         title={game.status === 'ACTIVE' ? `Deactivate ${game.name}` : `Activate ${game.name}`}
                         aria-label={game.status === 'ACTIVE' ? `Deactivate ${game.name}` : `Activate ${game.name}`}
                       >
-                        <Power className="w-4 h-4" />
+                        {isTogglingStatus === game.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-slate-500" />
+                        ) : (
+                          <Power className="w-4 h-4" />
+                        )}
                       </button>
                     )}
                   </div>
 
+                  {/* Play Action Button */}
                   <Link
                     to={`/games/play?gameId=${game.id}${game.eventId ? `&eventId=${game.eventId}` : ''}`}
                     aria-label={`Play ${game.name}`}
+                    title={
+                      eventEnded
+                        ? 'Assigned stall has concluded (view read-only)'
+                        : hasOutOfStock
+                        ? 'Reward is out of stock'
+                        : game.status !== 'ACTIVE'
+                        ? 'Game is currently inactive'
+                        : `Launch Play Terminal for ${game.name}`
+                    }
                     className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                      game.status === 'ACTIVE' && !hasOutOfStock
+                      game.status === 'ACTIVE' && !hasOutOfStock && !eventEnded
                         ? 'bg-purple-600 hover:bg-purple-700 text-white shadow-2xs'
-                        : 'bg-slate-100 text-slate-400 pointer-events-none'
+                        : 'bg-slate-100 text-slate-400 hover:bg-slate-200 hover:text-slate-600'
                     }`}
                   >
-                    <span>Play</span>
+                    <span>
+                      {eventEnded ? 'Stall Closed' : hasOutOfStock ? 'Out of Stock' : game.status !== 'ACTIVE' ? 'Inactive' : 'Play'}
+                    </span>
                     <ChevronRight className="w-3.5 h-3.5" />
                   </Link>
                 </div>
               </div>
             );
           })}
+
+          {/* Useful companion card when only 1 game exists (avoids huge awkward blank area without adding fake records) */}
+          {filteredGames.length === 1 && !searchQuery && statusFilter === 'ALL' && eventFilter === 'ALL' && (
+            canManage ? (
+              <div
+                onClick={openCreateModal}
+                className="border-2 border-dashed border-slate-200 hover:border-slate-300 rounded-2xl p-6 bg-slate-50/50 hover:bg-slate-50/90 transition-all flex flex-col items-center justify-center text-center cursor-pointer min-h-[340px] group"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center mb-3 group-hover:scale-105 transition-transform shadow-2xs">
+                  <Plus className="w-6 h-6 stroke-[2.5]" />
+                </div>
+                <h3 className="text-sm font-bold text-slate-800">Add Another Stall Game</h3>
+                <p className="text-xs text-slate-500 max-w-xs mt-1 leading-relaxed">
+                  Set up Bottle Flip, Dart Throw, or Spin the Wheel to increase stall footfall and drive product sales.
+                </p>
+                <span className="mt-4 inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-white border border-slate-200 group-hover:border-slate-300 rounded-lg text-xs font-bold text-slate-700 shadow-2xs">
+                  <Plus className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Create Game</span>
+                </span>
+              </div>
+            ) : (
+              <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50/60 flex flex-col justify-between min-h-[340px]">
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-purple-700">
+                    <Info className="w-4 h-4" />
+                    <span className="text-xs font-bold uppercase tracking-wider">Stall Games Guide</span>
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-800">How Stall Games Operate</h3>
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Stall games let volunteers collect entry fees and issue inventory rewards directly from active event stock.
+                  </p>
+                  <ul className="text-xs text-slate-500 space-y-1.5 list-disc list-inside">
+                    <li>Entry fees are tracked into event game revenue automatically.</li>
+                    <li>Winning rewards deduct real-time inventory from the product catalog.</li>
+                    <li>QR placards can be scanned by visitors to view rules on their phones.</li>
+                  </ul>
+                </div>
+                <div className="pt-4 border-t border-slate-200/80 flex items-center justify-between">
+                  <span className="text-[11px] text-slate-400 font-medium">Volunteer Terminal</span>
+                  <Link
+                    to="/games/play"
+                    className="text-xs font-bold text-purple-700 hover:text-purple-900 flex items-center gap-1"
+                  >
+                    <span>Open Terminal &rarr;</span>
+                  </Link>
+                </div>
+              </div>
+            )
+          )}
         </div>
       )}
 
@@ -1105,74 +1323,126 @@ export const GamesPage: React.FC = () => {
       )}
 
       {/* 6. CUSTOMER QR & RULES PREVIEW MODAL */}
-      {qrGame && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-200 space-y-4 text-center my-8">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                Customer Display Card
-              </span>
-              <button
-                onClick={() => setQrGame(null)}
-                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {qrGame && (() => {
+        const playUrl = `${window.location.origin}/play/${qrGame.id}`;
+        const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(playUrl)}`;
 
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-              <div className="text-[11px] font-black tracking-widest text-slate-400 uppercase">
-                ENACTUS VIPS-TC STALL
-              </div>
-              <div className="text-2xl font-black text-slate-900 tracking-tight">
-                🎯 {qrGame.name}
-              </div>
-              <div className="inline-block px-3 py-1 bg-purple-100 text-purple-900 text-sm font-black rounded-full border border-purple-200">
-                ₹{qrGame.entryFee} / Play
-              </div>
-
-              {/* Simulated QR Code placeholder / direct link */}
-              <div className="w-40 h-40 mx-auto bg-white border-2 border-slate-900 rounded-xl p-2 flex flex-col items-center justify-center shadow-xs">
-                <QrCode className="w-28 h-28 text-slate-900" />
-                <span className="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-tight">
-                  Scan to View Rules
+        return (
+          <div
+            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="qr-modal-title"
+            onClick={e => {
+              if (e.target === e.currentTarget) setQrGame(null);
+            }}
+          >
+            <div className="bg-white rounded-2xl max-w-sm w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4 text-center my-8 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                <span id="qr-modal-title" className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  Customer Stall Placard
                 </span>
+                <button
+                  onClick={() => setQrGame(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors"
+                  aria-label="Close customer placard"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
 
-              <div className="text-xs text-left bg-white p-3 rounded-xl border border-slate-200 space-y-1.5">
-                <div className="font-bold text-slate-800 text-[11px] uppercase tracking-wider">
-                  Rewards:
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3.5">
+                <div className="text-[10px] font-black tracking-widest text-slate-400 uppercase">
+                  ENACTUS VIPS-TC STALL
                 </div>
-                <div className="text-xs font-semibold text-emerald-800 flex items-center gap-1.5">
-                  <Trophy className="w-3.5 h-3.5 text-amber-500" />
-                  <span>WIN: {qrGame.winReward.productName} × {qrGame.winReward.quantity}</span>
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 tracking-tight">
+                    🎯 {qrGame.name}
+                  </h3>
+                  {qrGame.description && (
+                    <p className="text-[11px] text-slate-500 mt-1 max-w-[250px] mx-auto line-clamp-2">
+                      {qrGame.description}
+                    </p>
+                  )}
                 </div>
-                {qrGame.loseReward && (
-                  <div className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
-                    <Frown className="w-3.5 h-3.5 text-slate-400" />
-                    <span>LOSE: {qrGame.loseReward.productName} × {qrGame.loseReward.quantity}</span>
+
+                <div className="inline-block px-3.5 py-1 bg-purple-100 text-purple-900 text-sm font-black rounded-full border border-purple-200">
+                  ₹{qrGame.entryFee} / Play
+                </div>
+
+                {/* Real Scannable QR Code */}
+                <div className="w-44 h-44 mx-auto bg-white border-2 border-slate-900 rounded-2xl p-2.5 flex flex-col items-center justify-center shadow-xs relative overflow-hidden">
+                  <img
+                    src={qrImageUrl}
+                    alt={`Scannable QR code to play ${qrGame.name}`}
+                    className="w-36 h-36 object-contain rounded-md"
+                    loading="lazy"
+                  />
+                  <span className="text-[9px] font-bold text-slate-500 mt-1 uppercase tracking-tight">
+                    Scan to View Game Rules
+                  </span>
+                </div>
+
+                {/* Rewards Card */}
+                <div className="text-xs text-left bg-white p-3 rounded-xl border border-slate-200 space-y-1.5 shadow-2xs">
+                  <div className="font-bold text-slate-800 text-[11px] uppercase tracking-wider">
+                    Stall Rewards:
                   </div>
-                )}
+                  <div className="text-xs font-semibold text-emerald-800 flex items-center gap-1.5">
+                    <Trophy className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                    <span>WIN: {qrGame.winReward.productName} × {qrGame.winReward.quantity}</span>
+                  </div>
+                  {qrGame.loseReward && (
+                    <div className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
+                      <Frown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span>LOSE: {qrGame.loseReward.productName} × {qrGame.loseReward.quantity}</span>
+                    </div>
+                  )}
+                </div>
+
+                <p className="text-[10px] text-slate-400 italic">
+                  * Outcome is officially verified and recorded by stall volunteer.
+                </p>
               </div>
 
-              <p className="text-[10px] text-slate-400 italic">
-                * Outcome is officially verified and recorded by stall volunteer.
-              </p>
-            </div>
+              {/* Action Buttons */}
+              <div className="flex items-center justify-center gap-2 pt-1 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(playUrl);
+                    setCopiedLink(true);
+                    setTimeout(() => setCopiedLink(false), 2000);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer"
+                  title="Copy customer link to clipboard"
+                >
+                  {copiedLink ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      <span className="text-emerald-700">Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Copy Link</span>
+                    </>
+                  )}
+                </button>
 
-            <div className="flex items-center justify-center gap-2">
-              <Link
-                to={`/play/${qrGame.id}`}
-                target="_blank"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-purple-700 hover:text-purple-900 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                <span>Open Customer Screen</span>
-              </Link>
+                <Link
+                  to={`/play/${qrGame.id}`}
+                  target="_blank"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-purple-700 hover:text-purple-900 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Open Screen</span>
+                </Link>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };
