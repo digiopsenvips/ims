@@ -77,8 +77,6 @@ export const SalesManagementPage: React.FC = () => {
   const [editCustomerPhone, setEditCustomerPhone] = useState<string>('');
   const [editSaleTime, setEditSaleTime] = useState<string>('');
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
-  const [showClearModal, setShowClearModal] = useState<boolean>(false);
-  const [isClearing, setIsClearing] = useState<boolean>(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const canViewRevenue = isDeveloper || isAdmin || hasPermission('view_revenue');
@@ -363,21 +361,7 @@ export const SalesManagementPage: React.FC = () => {
     }
   };
 
-  const handleClearAllSales = async () => {
-    setIsClearing(true);
-    try {
-      const res = await api.delete('/sales/purge-all');
-      setSales([]);
-      setShowClearModal(false);
-      setActionMessage(res?.message || 'All sales records cleared successfully! Receipt counter reset to #1.');
-      updateUrlState({ page: 1 });
-      setTimeout(() => setActionMessage(null), 4000);
-    } catch (err: any) {
-      alert(err.message || 'Failed to clear sales');
-    } finally {
-      setIsClearing(false);
-    }
-  };
+
 
   // Export CSV Handler (fetches ALL matching records with canonical Receipt No.)
   const handleExportCSV = async () => {
@@ -474,16 +458,7 @@ export const SalesManagementPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto">
-          {isDeveloper && (
-            <button
-              onClick={() => setShowClearModal(true)}
-              className="px-3.5 py-2 text-xs font-bold rounded-md border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
-              title="Purge all sales records to restart with fresh project data"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Clear All Demo Sales</span>
-            </button>
-          )}
+
 
           {canExport && (
             <button
@@ -1162,42 +1137,7 @@ export const SalesManagementPage: React.FC = () => {
       )}
 
       {/* Clear All Sales Confirmation Modal */}
-      {showClearModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-sm p-6 text-center space-y-4 animate-in fade-in zoom-in-95 duration-150">
-            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
-              <AlertTriangle className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-900">
-                Clear All Demo Sales?
-              </h3>
-              <p className="text-xs text-slate-500 mt-1">
-                This will permanently delete all sales records from the database so you can record fresh project sales. This action cannot be undone.
-              </p>
-            </div>
 
-            <div className="flex items-center gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowClearModal(false)}
-                disabled={isClearing}
-                className="flex-1 py-2.5 border border-slate-300 text-slate-700 font-semibold text-xs rounded-md hover:bg-slate-50 transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleClearAllSales}
-                disabled={isClearing}
-                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-md shadow-sm transition-colors cursor-pointer disabled:opacity-50"
-              >
-                {isClearing ? 'Clearing...' : 'Yes, Delete All'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

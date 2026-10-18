@@ -1554,6 +1554,11 @@ router.delete(
   authenticateToken,
   requireRoles(Role.DEVELOPER),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const { confirmText } = req.body || {};
+    if (confirmText !== 'PERMANENTLY_PURGE_PRODUCTION_SALES') {
+      res.status(400).json({ error: 'Safety block: purge-all requires explicit confirmation parameter' });
+      return;
+    }
     try {
       const { count } = await prisma.$transaction(async tx => {
         await tx.gameSession.deleteMany({});

@@ -120,6 +120,15 @@ export const GamePlayPage: React.FC = () => {
   const currentGame = games.find(g => g.id === selectedGameId);
   const currentEvent = events.find(e => e.id === selectedEventId);
 
+  const isEventEnded = Boolean(
+    currentEvent?.status === 'ENDED' ||
+      (currentEvent?.endDatetime && Date.now() >= new Date(currentEvent.endDatetime).getTime())
+  );
+  const isEventUpcoming = Boolean(
+    currentEvent?.status === 'UPCOMING' ||
+      (currentEvent?.startDatetime && Date.now() < new Date(currentEvent.startDatetime).getTime())
+  );
+
   const entryFee = currentGame?.entryFee ?? 0;
 
   // Split calculations
@@ -156,6 +165,14 @@ export const GamePlayPage: React.FC = () => {
   // Handle final reward issuance
   const handleIssueReward = async () => {
     if (!currentGame || !currentEvent || !recordedResult) return;
+    if (isEventEnded) {
+      setErrorMessage('This event has ended and is no longer accepting transactions.');
+      return;
+    }
+    if (isEventUpcoming) {
+      setErrorMessage('This event has not started yet.');
+      return;
+    }
     if (isSubmitting) return; // Prevent double click
 
     setErrorMessage(null);
@@ -384,11 +401,16 @@ export const GamePlayPage: React.FC = () => {
                     onChange={e => setSelectedEventId(e.target.value)}
                     className="w-full text-xs font-semibold bg-slate-50 border border-slate-300 rounded-lg p-2.5 pr-8 text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900 cursor-pointer appearance-none"
                   >
-                    {events.map(ev => (
-                      <option key={ev.id} value={ev.id}>
-                        {ev.name} ({ev.status})
-                      </option>
-                    ))}
+                    {events.map(ev => {
+                      const isPast =
+                        ev.status === 'ENDED' ||
+                        (ev.endDatetime && Date.now() >= new Date(ev.endDatetime).getTime());
+                      return (
+                        <option key={ev.id} value={ev.id}>
+                          {ev.name} {isPast ? '(Ended / Closed)' : `(${ev.status})`}
+                        </option>
+                      );
+                    })}
                   </select>
                   <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                 </div>
@@ -418,6 +440,30 @@ export const GamePlayPage: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {isEventEnded && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-900 text-xs rounded-xl flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold">This stall/event has ended.</span>
+                  <p className="text-rose-800 text-[11px] mt-0.5">
+                    Game plays and reward deductions cannot be recorded for closed stalls. Please select an active event to record new plays.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {isEventUpcoming && (
+              <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-xl flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold">This stall/event has not started yet.</span>
+                  <p className="text-amber-800 text-[11px] mt-0.5">
+                    Game plays cannot be recorded before the scheduled start time.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Current Game Overview Card */}
             {currentGame && (
@@ -680,13 +726,23 @@ export const GamePlayPage: React.FC = () => {
               <button
                 type="button"
                 onClick={handleIssueReward}
-                disabled={isSubmitting || isRewardOutOfStock || !isSplitValid}
+                disabled={isSubmitting || isRewardOutOfStock || !isSplitValid || isEventEnded || isEventUpcoming}
                 className="w-full py-4 px-4 rounded-xl text-sm font-black text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:pointer-events-none shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 {isSubmitting ? (
                   <>
                     <Loader2 className="w-5 h-5 animate-spin" />
                     <span>Deducting Stock & Generating Receipt...</span>
+                  </>
+                ) : isEventEnded ? (
+                  <>
+                    <AlertTriangle className="w-5 h-5" />
+                    <span>STALL CLOSED (EVENT ENDED)</span>
+                  </>
+                ) : isEventUpcoming ? (
+                  <>
+                    <AlertTriangle className="w-5 h-5" />
+                    <span>STALL NOT STARTED YET</span>
                   </>
                 ) : (
                   <>
