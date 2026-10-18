@@ -60,6 +60,74 @@ export const getPendingSalesCount = async (): Promise<number> => {
   return db.countFromIndex('offline_sales', 'by-status', 'pending');
 };
 
+// Get all sales with 'failed' status
+export const getFailedSales = async (): Promise<QueuedSale[]> => {
+  const db = await getDB();
+  return db.getAllFromIndex('offline_sales', 'by-status', 'failed');
+};
+
+// Get total count of failed sales
+export const getFailedSalesCount = async (): Promise<number> => {
+  const db = await getDB();
+  return db.countFromIndex('offline_sales', 'by-status', 'failed');
+};
+
+// Get all queued sales regardless of status
+export const getAllQueuedSales = async (): Promise<QueuedSale[]> => {
+  const db = await getDB();
+  return db.getAll('offline_sales');
+};
+
+// Update status of an individual offline sale
+export const updateOfflineSaleStatus = async (
+  clientTxId: string,
+  status: 'pending' | 'syncing' | 'failed',
+  errorMessage?: string
+): Promise<void> => {
+  const db = await getDB();
+  const tx = db.transaction('offline_sales', 'readwrite');
+  const record = await tx.store.get(clientTxId);
+  if (record) {
+    record.syncStatus = status;
+    if (errorMessage !== undefined) {
+      (record as any).errorMessage = errorMessage;
+    }
+    (record as any).lastAttemptAt = Date.now();
+    await tx.store.put(record);
+  }
+  await tx.done;
+};
+
+// Delete a single offline sale
+export const deleteOfflineSale = async (clientTxId: string): Promise<void> => {
+  const db = await getDB();
+  await db.delete('offline_sales', clientTxId);
+};
+
+// Clear all failed offline sales
+export const clearFailedOfflineSales = async (): Promise<void> => {
+  const db = await getDB();
+  const tx = db.transaction('offline_sales', 'readwrite');
+  const failed = await tx.store.index('by-status').getAll('failed');
+  for (const item of failed) {
+    await tx.store.delete(item.clientTxId);
+  }
+  await tx.done;
+};
+
+// Reset all failed sales back to pending for retry
+export const retryFailedOfflineSales = async (): Promise<void> => {
+  const db = await getDB();
+  const tx = db.transaction('offline_sales', 'readwrite');
+  const failed = await tx.store.index('by-status').getAll('failed');
+  for (const item of failed) {
+    item.syncStatus = 'pending';
+    delete (item as any).errorMessage;
+    await tx.store.put(item);
+  }
+  await tx.done;
+};
+
 // Mark sales as synced or delete them
 export const removeSyncedSales = async (clientTxIds: string[]): Promise<void> => {
   const db = await getDB();

@@ -1458,13 +1458,21 @@ export const MemberSalePortalPage: React.FC = () => {
                             </div>
                             <div className="text-[10px] mt-0.5">
                               {isOutOfStock ? (
-                                <span className="text-rose-600 font-bold bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100">0 left</span>
+                                <span className="text-rose-600 font-bold bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100">0 at stall</span>
                               ) : item.remainingQty <= 5 ? (
-                                <span className="text-amber-700 font-bold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/80">
-                                  {item.remainingQty} left
+                                <span
+                                  className="text-amber-700 font-bold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/80"
+                                  title={`Stall Allocation: ${item.allocatedQty} | Sold: ${item.soldQty || 0} | Remaining at Stall: ${item.remainingQty}`}
+                                >
+                                  {item.remainingQty} at stall
                                 </span>
                               ) : (
-                                <span className="text-slate-500 font-medium">{item.remainingQty} left</span>
+                                <span
+                                  className="text-slate-500 font-medium"
+                                  title={`Stall Allocation: ${item.allocatedQty} | Sold: ${item.soldQty || 0} | Remaining at Stall: ${item.remainingQty}`}
+                                >
+                                  {item.remainingQty} at stall
+                                </span>
                               )}
                             </div>
                           </div>

@@ -5,7 +5,7 @@ import { AuthenticatedRequest } from '../types';
 import { sanitizeSaleForUser, sanitizeSalesListForUser } from '../middleware/piiSanitizer';
 import { requireRoles } from '../middleware/rbac';
 import { broadcast } from '../sockets';
-import { PaymentMethod, Role, Prisma, TransactionType } from '@prisma/client';
+import { PaymentMethod, Role, Prisma, TransactionType, EventStatus } from '@prisma/client';
 import { computeEventStatus, reconcileSingleEvent } from '../services/eventLifecycle';
 
 const router = Router();
@@ -1174,6 +1174,15 @@ router.post(
             continue;
           }
 
+          if (event.reconciledAt) {
+            results.push({
+              clientTxId,
+              status: 'failed',
+              error: 'Event has already been reconciled and completed. Unsold stock was returned to warehouse.',
+            });
+            continue;
+          }
+
           interface ResolvedSyncComp {
             productId: string;
             quantity: number;
@@ -1284,62 +1293,85 @@ router.post(
             resolvedUpiAmount = comboPriceTotal;
           }
 
-          const [{ nextVal }] = await prisma.$queryRaw<[{ nextVal: bigint | number }]>`
-            SELECT nextval('receipt_number_seq')::bigint as "nextVal"
-          `;
-          const receiptNumber = Number(nextVal);
+          const txResult = await prisma.$transaction(async tx => {
+            if (clientTxId) {
+              const existing = await tx.sale.findUnique({
+                where: { clientTxId: String(clientTxId) },
+              });
+              if (existing) {
+                return { isExisting: true, sale: existing };
+              }
+            }
 
-          const createdComboSale = await prisma.sale.create({
-            data: {
-              receiptNumber,
-              clientTxId: clientTxId ? String(clientTxId) : null,
-              eventId,
-              memberId: req.user!.id,
-              sellerUserIdAtSale: req.user!.id,
-              sellerUsernameAtSale: req.user!.username,
-              sellerNameAtSale: req.user!.name,
-              transactionType: TransactionType.COMBO,
-              comboId: combo.id,
-              comboName: combo.name,
-              totalAmount: comboPriceTotal,
-              paymentMethod: normMethod,
-              cashAmount: resolvedCashAmount,
-              upiAmount: resolvedUpiAmount,
-              customerName: customerName ? String(customerName).trim() : null,
-              customerPhone: customerPhone ? String(customerPhone).trim() : null,
-              saleTime: saleTime ? new Date(saleTime) : new Date(),
-              items: {
-                create: validatedItems.map(item => ({
-                  productId: item.productId,
-                  quantity: item.quantity,
-                  unitPrice: item.unitPrice,
-                  lineTotal: item.lineTotal,
-                })),
+            const [{ nextVal }] = await tx.$queryRaw<[{ nextVal: bigint | number }]>`
+              SELECT nextval('receipt_number_seq')::bigint as "nextVal"
+            `;
+            const receiptNumber = Number(nextVal);
+
+            const created = await tx.sale.create({
+              data: {
+                receiptNumber,
+                clientTxId: clientTxId ? String(clientTxId) : null,
+                eventId,
+                memberId: req.user!.id,
+                sellerUserIdAtSale: req.user!.id,
+                sellerUsernameAtSale: req.user!.username,
+                sellerNameAtSale: req.user!.name,
+                transactionType: TransactionType.COMBO,
+                comboId: combo.id,
+                comboName: combo.name,
+                totalAmount: comboPriceTotal,
+                paymentMethod: normMethod,
+                cashAmount: resolvedCashAmount,
+                upiAmount: resolvedUpiAmount,
+                customerName: customerName ? String(customerName).trim() : null,
+                customerPhone: customerPhone ? String(customerPhone).trim() : null,
+                saleTime: saleTime ? new Date(saleTime) : new Date(),
+                items: {
+                  create: validatedItems.map(item => ({
+                    productId: item.productId,
+                    quantity: item.quantity,
+                    unitPrice: item.unitPrice,
+                    lineTotal: item.lineTotal,
+                  })),
+                },
               },
-            },
+            });
+
+            return { isExisting: false, sale: created };
           });
+
+          if (txResult.isExisting) {
+            results.push({
+              clientTxId,
+              status: 'already_synced',
+              saleId: txResult.sale.id,
+              receiptNumber: txResult.sale.receiptNumber,
+            });
+            continue;
+          }
 
           syncedCount++;
           results.push({
             clientTxId,
             status: 'success',
-            saleId: createdComboSale.id,
-            receiptNumber: createdComboSale.receiptNumber,
+            saleId: txResult.sale.id,
+            receiptNumber: txResult.sale.receiptNumber,
           });
 
           broadcast('sale:created', {
-            id: createdComboSale.id,
-            receiptNumber: createdComboSale.receiptNumber,
-            serialNumber: createdComboSale.receiptNumber,
-            eventId: createdComboSale.eventId,
+            id: txResult.sale.id,
+            receiptNumber: txResult.sale.receiptNumber,
+            serialNumber: txResult.sale.receiptNumber,
+            eventId: txResult.sale.eventId,
             eventName: event.name,
-            totalAmount: Number(createdComboSale.totalAmount),
-            paymentMethod: createdComboSale.paymentMethod,
+            totalAmount: Number(txResult.sale.totalAmount),
+            paymentMethod: txResult.sale.paymentMethod,
             cashAmount: resolvedCashAmount,
             upiAmount: resolvedUpiAmount,
             memberName: req.user!.name,
             memberUsername: req.user!.username,
-            saleTime: createdComboSale.saleTime,
+            saleTime: txResult.sale.saleTime,
             itemsCount: validatedItems.length,
             totalUnits,
             transactionType: 'COMBO',
@@ -1349,13 +1381,13 @@ router.post(
           broadcast('inventory:updated', {
             action: 'sales_recorded',
             eventId,
-            saleId: createdComboSale.id,
+            saleId: txResult.sale.id,
           });
 
           broadcast('combo:sold', {
             comboId: combo.id,
             eventId,
-            receiptNumber: createdComboSale.receiptNumber,
+            receiptNumber: txResult.sale.receiptNumber,
           });
 
           continue;
@@ -1395,25 +1427,12 @@ router.post(
           continue;
         }
 
-        const eventStatus = computeEventStatus(event.startDatetime, event.endDatetime, event.status);
-        const isPastEnd = new Date().getTime() >= new Date(event.endDatetime).getTime();
-
-        if (eventStatus === 'ENDED' || event.status === 'ENDED' || isPastEnd) {
-          if (!event.reconciledAt) {
-            reconcileSingleEvent(event.id).catch(err =>
-              console.error('Failed to reconcile ended event on sync:', err)
-            );
-          }
+        if (event.reconciledAt) {
           results.push({
             clientTxId,
             status: 'failed',
-            error: 'This event has ended and is no longer accepting sales.',
+            error: 'Event has already been reconciled and completed. Unsold inventory has been returned to warehouse.',
           });
-          continue;
-        }
-
-        if (eventStatus === 'UPCOMING' || new Date().getTime() < new Date(event.startDatetime).getTime()) {
-          results.push({ clientTxId, status: 'failed', error: 'This event has not started yet.' });
           continue;
         }
 
@@ -1477,58 +1496,89 @@ router.post(
           resolvedUpiAmount = grandTotal;
         }
 
-        // 4. Atomically allocate next canonical sequential receipt number from Postgres sequence
-        const [{ nextVal }] = await prisma.$queryRaw<[{ nextVal: bigint | number }]>`
-          SELECT nextval('receipt_number_seq')::bigint as "nextVal"
-        `;
-        const receiptNumber = Number(nextVal);
+        // 4. Atomically allocate receipt number and create sale inside transaction
+        const txResult = await prisma.$transaction(async tx => {
+          if (clientTxId) {
+            const existing = await tx.sale.findUnique({
+              where: { clientTxId: String(clientTxId) },
+            });
+            if (existing) {
+              return { isExisting: true, sale: existing, totalUnits: 0 };
+            }
+          }
 
-        // Create single transaction record with items
-        const created = await prisma.sale.create({
-          data: {
-            receiptNumber,
-            clientTxId: clientTxId ? String(clientTxId) : null,
-            eventId,
-            memberId: req.user!.id,
-            sellerUserIdAtSale: req.user!.id,
-            sellerUsernameAtSale: req.user!.username,
-            sellerNameAtSale: req.user!.name,
-            totalAmount: grandTotal,
-            paymentMethod: normMethod,
-            cashAmount: resolvedCashAmount,
-            upiAmount: resolvedUpiAmount,
-            customerName: customerName ? String(customerName).trim() : null,
-            customerPhone: customerPhone ? String(customerPhone).trim() : null,
-            saleTime: saleTime ? new Date(saleTime) : new Date(),
-            items: {
-              create: validatedItems.map(item => ({
-                productId: item.productId,
-                quantity: item.quantity,
-                unitPrice: item.unitPrice,
-                lineTotal: item.lineTotal,
-              })),
+          const [{ nextVal }] = await tx.$queryRaw<[{ nextVal: bigint | number }]>`
+            SELECT nextval('receipt_number_seq')::bigint as "nextVal"
+          `;
+          const receiptNumber = Number(nextVal);
+
+          const created = await tx.sale.create({
+            data: {
+              receiptNumber,
+              clientTxId: clientTxId ? String(clientTxId) : null,
+              eventId,
+              memberId: req.user!.id,
+              sellerUserIdAtSale: req.user!.id,
+              sellerUsernameAtSale: req.user!.username,
+              sellerNameAtSale: req.user!.name,
+              totalAmount: grandTotal,
+              paymentMethod: normMethod,
+              cashAmount: resolvedCashAmount,
+              upiAmount: resolvedUpiAmount,
+              customerName: customerName ? String(customerName).trim() : null,
+              customerPhone: customerPhone ? String(customerPhone).trim() : null,
+              saleTime: saleTime ? new Date(saleTime) : new Date(),
+              items: {
+                create: validatedItems.map(item => ({
+                  productId: item.productId,
+                  quantity: item.quantity,
+                  unitPrice: item.unitPrice,
+                  lineTotal: item.lineTotal,
+                })),
+              },
             },
-          },
+          });
+
+          return {
+            isExisting: false,
+            sale: created,
+            totalUnits: validatedItems.reduce((sum, i) => sum + i.quantity, 0),
+          };
         });
 
+        if (txResult.isExisting) {
+          results.push({
+            clientTxId,
+            status: 'already_synced',
+            saleId: txResult.sale.id,
+            receiptNumber: txResult.sale.receiptNumber,
+          });
+          continue;
+        }
+
         syncedCount++;
-        results.push({ clientTxId, status: 'success', saleId: created.id, receiptNumber: created.receiptNumber });
+        results.push({
+          clientTxId,
+          status: 'success',
+          saleId: txResult.sale.id,
+          receiptNumber: txResult.sale.receiptNumber,
+        });
 
         broadcast('sale:created', {
-          id: created.id,
-          receiptNumber: created.receiptNumber,
-          serialNumber: created.receiptNumber,
-          eventId: created.eventId,
+          id: txResult.sale.id,
+          receiptNumber: txResult.sale.receiptNumber,
+          serialNumber: txResult.sale.receiptNumber,
+          eventId: txResult.sale.eventId,
           eventName: event.name,
-          totalAmount: Number(created.totalAmount),
-          paymentMethod: created.paymentMethod,
-          cashAmount: Number(created.cashAmount ?? resolvedCashAmount),
-          upiAmount: Number(created.upiAmount ?? resolvedUpiAmount),
+          totalAmount: Number(txResult.sale.totalAmount),
+          paymentMethod: txResult.sale.paymentMethod,
+          cashAmount: Number(txResult.sale.cashAmount ?? resolvedCashAmount),
+          upiAmount: Number(txResult.sale.upiAmount ?? resolvedUpiAmount),
           memberName: req.user!.name,
           memberUsername: req.user!.username,
-          saleTime: created.saleTime,
+          saleTime: txResult.sale.saleTime,
           itemsCount: validatedItems.length,
-          totalUnits: validatedItems.reduce((sum, i) => sum + i.quantity, 0),
+          totalUnits: txResult.totalUnits,
         });
       }
 

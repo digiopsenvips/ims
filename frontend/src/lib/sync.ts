@@ -1,13 +1,30 @@
 import { api } from './api';
-import { getPendingSales, getPendingSalesCount, removeSyncedSales, queueOfflineSale } from './db';
+import {
+  getPendingSales,
+  getPendingSalesCount,
+  getFailedSalesCount,
+  updateOfflineSaleStatus,
+  removeSyncedSales,
+  queueOfflineSale,
+  deleteOfflineSale,
+  retryFailedOfflineSales,
+} from './db';
 import { QueuedSale } from '../types';
 
-type SyncListener = (state: { isOnline: boolean; pendingCount: number; isSyncing: boolean }) => void;
+export interface SyncState {
+  isOnline: boolean;
+  pendingCount: number;
+  failedCount: number;
+  isSyncing: boolean;
+}
+
+type SyncListener = (state: SyncState) => void;
 
 class SyncManager {
   private isOnline: boolean = typeof navigator !== 'undefined' ? navigator.onLine : true;
   private isSyncing: boolean = false;
   private pendingCount: number = 0;
+  private failedCount: number = 0;
   private listeners: Set<SyncListener> = new Set();
   private intervalId: any = null;
 
@@ -24,12 +41,12 @@ class SyncManager {
         this.notify();
       });
 
-      // Periodic check every 12 seconds
+      // Periodic check every 15 seconds
       this.intervalId = setInterval(() => {
         if (this.isOnline && !this.isSyncing) {
           this.triggerSync();
         }
-      }, 12000);
+      }, 15000);
 
       // Initial count refresh
       this.refreshCount();
@@ -41,6 +58,7 @@ class SyncManager {
     listener({
       isOnline: this.isOnline,
       pendingCount: this.pendingCount,
+      failedCount: this.failedCount,
       isSyncing: this.isSyncing,
     });
     return () => this.listeners.delete(listener);
@@ -51,19 +69,21 @@ class SyncManager {
       listener({
         isOnline: this.isOnline,
         pendingCount: this.pendingCount,
+        failedCount: this.failedCount,
         isSyncing: this.isSyncing,
       });
     }
   }
 
-  public async refreshCount(): Promise<number> {
+  public async refreshCount(): Promise<{ pending: number; failed: number }> {
     try {
       this.pendingCount = await getPendingSalesCount();
+      this.failedCount = await getFailedSalesCount();
       this.notify();
-      return this.pendingCount;
+      return { pending: this.pendingCount, failed: this.failedCount };
     } catch (e) {
-      console.error('Failed to get pending sales count:', e);
-      return 0;
+      console.error('Failed to get pending/failed sales count:', e);
+      return { pending: 0, failed: 0 };
     }
   }
 
@@ -88,6 +108,9 @@ class SyncManager {
         if (res?.results?.[0]?.status === 'success' || res?.results?.[0]?.status === 'already_synced') {
           await removeSyncedSales([clientTxId]);
           syncedImmediately = true;
+          await this.refreshCount();
+        } else if (res?.results?.[0]?.status === 'failed') {
+          await updateOfflineSaleStatus(clientTxId, 'failed', res.results[0].error || 'Validation failed');
           await this.refreshCount();
         }
       } catch (err) {
@@ -170,6 +193,9 @@ class SyncManager {
             syncedSaleId = match.saleId;
             syncedReceiptNumber = match.receiptNumber;
             await this.refreshCount();
+          } else if (match && match.status === 'failed') {
+            await updateOfflineSaleStatus(orderId, 'failed', match.error || 'Validation failed');
+            await this.refreshCount();
           }
         }
       } catch (err) {
@@ -192,8 +218,7 @@ class SyncManager {
     try {
       const pending = await getPendingSales();
       if (pending.length === 0) {
-        this.pendingCount = 0;
-        this.notify();
+        await this.refreshCount();
         return;
       }
 
@@ -207,6 +232,8 @@ class SyncManager {
         for (const res of response.results) {
           if (res.status === 'success' || res.status === 'already_synced') {
             successfulIds.push(res.clientTxId);
+          } else if (res.status === 'failed') {
+            await updateOfflineSaleStatus(res.clientTxId, 'failed', res.error || 'Server rejected transaction');
           }
         }
 
@@ -224,10 +251,22 @@ class SyncManager {
     }
   }
 
-  public getStatus() {
+  public async retryAllFailed(): Promise<void> {
+    await retryFailedOfflineSales();
+    await this.refreshCount();
+    await this.triggerSync();
+  }
+
+  public async discardSale(clientTxId: string): Promise<void> {
+    await deleteOfflineSale(clientTxId);
+    await this.refreshCount();
+  }
+
+  public getStatus(): SyncState {
     return {
       isOnline: this.isOnline,
       pendingCount: this.pendingCount,
+      failedCount: this.failedCount,
       isSyncing: this.isSyncing,
     };
   }
