@@ -346,8 +346,8 @@ class WhatsAppService {
 
     return [
       `🧾 Enactus VIPS-TC Receipt`,
-      `Bill No: ${billRef}`,
-      `Stall / Event: ${payload.eventName || 'Enactus Campus Stall'}`,
+      `Receipt No: ${billRef}`,
+      `Event: ${payload.eventName || 'Enactus Campus Stall'}`,
       `Customer Name: ${customerDisplay}`,
       `Payment: ${paymentMethodDisplay}`,
       `Date/Time: ${datePart}, ${timePart}`,

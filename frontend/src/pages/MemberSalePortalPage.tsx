@@ -666,8 +666,8 @@ export const MemberSalePortalPage: React.FC = () => {
 
     return [
       `🧾 Enactus VIPS-TC Receipt`,
-      `Bill No: ${billRef}`,
-      `Stall / Event: ${currentEvent?.name || 'Enactus Campus Stall'}`,
+      `Receipt No: ${billRef}`,
+      `Event: ${currentEvent?.name || 'Enactus Campus Stall'}`,
       `Customer Name: ${customerDisplay}`,
       `Payment: ${paymentDisplay}`,
       `Date/Time: ${datePart}, ${bill.time}`,
