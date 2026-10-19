@@ -51,21 +51,21 @@ router.post(
     try {
       const result = await whatsappService.sendSaleReceipt({
         phone: String(phone),
-        customerName: 'Test Supporter',
-        receiptNumber: 9999,
-        eventName: 'Enactus Test Run',
-        eventLocation: 'VIPS-TC Campus, New Delhi',
+        customerName: '',
+        receiptNumber: 'BILL-260910-2588',
+        eventName: 'VIPS Recruitment Stall',
+        eventLocation: '',
         items: [
           {
-            productName: 'Sample Upcycled Product',
+            productName: 'Seeded Pen',
             quantity: 1,
-            unitPrice: 150,
-            lineTotal: 150,
+            unitPrice: 30,
+            lineTotal: 30,
           },
         ],
-        totalAmount: 150,
+        totalAmount: 30,
         paymentMethod: 'UPI',
-        sellerName: req.user?.name || 'Enactus Admin',
+        sellerName: req.user?.name || 'Enactus Team',
         saleTime: new Date(),
       });
 
