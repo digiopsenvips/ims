@@ -54,6 +54,7 @@ router.post(
         customerName: 'Test Supporter',
         receiptNumber: 9999,
         eventName: 'Enactus Test Run',
+        eventLocation: 'VIPS-TC Campus, New Delhi',
         items: [
           {
             productName: 'Sample Upcycled Product',
@@ -83,7 +84,7 @@ router.post(
 router.post(
   '/send-receipt',
   async (req, res): Promise<void> => {
-    const { phone, customerName, receiptNumber, eventName, items, totalAmount, paymentMethod, cashAmount, upiAmount, sellerName, saleTime } = req.body;
+    const { phone, customerName, receiptNumber, eventName, eventLocation, items, totalAmount, paymentMethod, cashAmount, upiAmount, sellerName, saleTime } = req.body;
     if (!phone) {
       res.status(400).json({ error: 'phone number is required' });
       return;
@@ -95,6 +96,7 @@ router.post(
         customerName,
         receiptNumber: receiptNumber || 'RECEIPT',
         eventName,
+        eventLocation,
         items: Array.isArray(items) ? items : [],
         totalAmount: Number(totalAmount || 0),
         paymentMethod: paymentMethod || 'UPI',

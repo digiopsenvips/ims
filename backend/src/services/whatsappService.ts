@@ -20,6 +20,7 @@ export interface SaleReceiptPayload {
   customerName?: string;
   receiptNumber: number | string;
   eventName?: string;
+  eventLocation?: string;
   items: Array<{
     productName: string;
     quantity: number;
@@ -328,6 +329,8 @@ class WhatsAppService {
       .map((item) => `${item.productName}\n${item.quantity} × ₹${item.unitPrice.toFixed(2)} = ₹${item.lineTotal.toFixed(2)}`)
       .join('\n\n');
 
+    const eventLine = payload.eventName ? `\nEvent / Stall: ${payload.eventName}` : '';
+    const placeLine = payload.eventLocation ? `\nPlace: ${payload.eventLocation}` : '';
     const customerLine =
       payload.customerName &&
       payload.customerName !== 'Walk-in Customer' &&
@@ -342,7 +345,7 @@ class WhatsAppService {
       `*PURCHASE RECEIPT*`,
       ``,
       `Receipt No.: #${payload.receiptNumber}`,
-      `Date: ${datePart} | ${timePart}${customerLine}`,
+      `Date: ${datePart} | ${timePart}${eventLine}${placeLine}${customerLine}`,
       ``,
       `*Your purchase*`,
       itemsFormatted || 'Products',

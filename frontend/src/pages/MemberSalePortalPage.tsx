@@ -651,6 +651,8 @@ export const MemberSalePortalPage: React.FC = () => {
       )
       .join('\n\n');
 
+    const eventLine = currentEvent?.name ? `\nEvent / Stall: ${currentEvent.name}` : '';
+    const placeLine = currentEvent?.location ? `\nPlace: ${currentEvent.location}` : '';
     const customerLine =
       bill.customerName &&
       bill.customerName !== 'Walk-in Customer' &&
@@ -665,7 +667,7 @@ export const MemberSalePortalPage: React.FC = () => {
       `*PURCHASE RECEIPT*`,
       ``,
       `Receipt No.: ${bill.billNo.startsWith('#') ? bill.billNo : '#' + bill.billNo}`,
-      `Date: ${datePart} | ${bill.time}${customerLine}`,
+      `Date: ${datePart} | ${bill.time}${eventLine}${placeLine}${customerLine}`,
       ``,
       `*Your purchase*`,
       itemsFormatted || 'Products',

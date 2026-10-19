@@ -751,6 +751,7 @@ router.post(
             customerName: newSale.customerName ? String(newSale.customerName).trim() : 'Valued Supporter',
             receiptNumber: newSale.receiptNumber,
             eventName: newSale.event.name,
+            eventLocation: newSale.event.location,
             items: validatedItems.map(item => ({
               productName: item.productName,
               quantity: item.quantity,
@@ -1072,6 +1073,7 @@ router.post(
           customerName: newSale.customerName ? String(newSale.customerName).trim() : 'Valued Supporter',
           receiptNumber: newSale.receiptNumber,
           eventName: newSale.event.name,
+          eventLocation: newSale.event.location,
           items: validatedItems.map(item => ({
             productName: item.productName,
             quantity: item.quantity,
@@ -1441,6 +1443,7 @@ router.post(
               customerName: txResult.sale.customerName ? String(txResult.sale.customerName).trim() : 'Valued Supporter',
               receiptNumber: txResult.sale.receiptNumber,
               eventName: event.name,
+              eventLocation: event.location,
               items: validatedItems.map(item => ({
                 productName: event.allocations.find(a => a.productId === item.productId)?.product.name || 'Combo Product',
                 quantity: item.quantity,
@@ -1680,6 +1683,7 @@ router.post(
             customerName: txResult.sale.customerName ? String(txResult.sale.customerName).trim() : 'Valued Supporter',
             receiptNumber: txResult.sale.receiptNumber,
             eventName: event.name,
+            eventLocation: event.location,
             items: validatedItems.map(item => ({
               productName: event.allocations.find(a => a.productId === item.productId)?.product.name || 'Product',
               quantity: item.quantity,
