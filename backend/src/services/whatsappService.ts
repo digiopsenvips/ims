@@ -306,11 +306,14 @@ class WhatsAppService {
 
   public formatReceiptText(payload: SaleReceiptPayload): string {
     const saleDate = payload.saleTime ? new Date(payload.saleTime) : new Date();
-    const formattedDate = saleDate.toLocaleString('en-IN', {
+    const datePart = saleDate.toLocaleDateString('en-IN', {
       timeZone: 'Asia/Kolkata',
       day: '2-digit',
       month: 'short',
       year: 'numeric',
+    });
+    const timePart = saleDate.toLocaleTimeString('en-IN', {
+      timeZone: 'Asia/Kolkata',
       hour: '2-digit',
       minute: '2-digit',
       hour12: true,
@@ -322,35 +325,40 @@ class WhatsAppService {
     }
 
     const itemsFormatted = payload.items
-      .map((item) => `▸ *${item.productName}*\n   ${item.quantity} unit(s) × ₹${item.unitPrice.toFixed(2)}  ➔  *₹${item.lineTotal.toFixed(2)}*`)
+      .map((item) => `${item.productName}\n${item.quantity} × ₹${item.unitPrice.toFixed(2)} = ₹${item.lineTotal.toFixed(2)}`)
       .join('\n\n');
 
+    const customerLine =
+      payload.customerName &&
+      payload.customerName !== 'Walk-in Customer' &&
+      payload.customerName !== 'Valued Supporter'
+        ? `\nCustomer: ${payload.customerName}`
+        : '';
+
     return [
-      `═════════════════════════`,
-      `       *ENACTUS VIPS-TC*`,
-      ` _Vivekananda Institute of Professional Studies_`,
-      `   *OFFICIAL SALES INVOICE & RECEIPT*`,
-      `═════════════════════════`,
-      `🧾 *Invoice Ref:* #${payload.receiptNumber}`,
-      `📅 *Issued On:* ${formattedDate}`,
-      `🎪 *Initiative / Stall:* ${payload.eventName || 'Enactus Campus Enterprise'}`,
-      `👤 *Billed To:* ${payload.customerName || 'Valued Supporter'}`,
-      `─────────────────────────`,
-      `📦 *PURCHASE DETAILS*`,
-      `─────────────────────────`,
-      itemsFormatted || '▸ *Products*',
-      `─────────────────────────`,
-      `💰 *Total Amount Paid:* *₹${payload.totalAmount.toFixed(2)}* (Net)`,
-      `💳 *Payment Mode:* ${paymentMethodDisplay}`,
-      payload.sellerName ? `👨‍💼 *Desk Associate:* ${payload.sellerName} (Enactus VIPS-TC)` : `👨‍💼 *Desk Associate:* Operations Team (Enactus VIPS-TC)`,
-      `─────────────────────────`,
-      `🌱 *YOUR SOCIAL IMPACT*`,
-      `Every rupee from your purchase directly powers community empowerment initiatives under *Project Tahsin* and *Project Upcycle*, fostering self-reliance and environmental sustainability.`,
-      `─────────────────────────`,
-      `📸 *Instagram:* instagram.com/enactusvips`,
-      `🌐 *Portal:* enactusvips.org`,
-      `═════════════════════════`,
-      `_This is a verified computer-generated digital receipt._`,
+      `*ENACTUS VIPS-TC*`,
+      `Vivekananda Institute of Professional Studies`,
+      ``,
+      `*PURCHASE RECEIPT*`,
+      ``,
+      `Receipt No.: #${payload.receiptNumber}`,
+      `Date: ${datePart} | ${timePart}${customerLine}`,
+      ``,
+      `*Your purchase*`,
+      itemsFormatted || 'Products',
+      ``,
+      `*Total Paid: ₹${payload.totalAmount.toFixed(2)}*`,
+      `Payment Method: ${paymentMethodDisplay}`,
+      `Payment Status: Paid`,
+      ``,
+      `Thank you for supporting Enactus VIPS-TC. Your purchase helps support our work towards community empowerment and environmental sustainability.`,
+      ``,
+      `*Small purchases. Meaningful impact.*`,
+      ``,
+      `Stay connected: instagram.com/vips.en`,
+      `Website: enactusvips.com`,
+      ``,
+      `This is a computer-generated receipt. Please retain it for your records.`,
     ].join('\n');
   }
 

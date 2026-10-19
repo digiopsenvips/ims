@@ -638,38 +638,50 @@ export const MemberSalePortalPage: React.FC = () => {
         ? `Cash + UPI (Cash: ₹${(bill.cashAmount ?? 0).toFixed(2)} | UPI: ₹${(bill.upiAmount ?? 0).toFixed(2)})`
         : bill.paymentMethod;
 
+    const now = new Date();
+    const datePart = now.toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+
     const itemsFormatted = bill.items
       .map(
-        i => `▸ *${i.isCombo ? '[Combo] ' : ''}${i.productName}*\n   ${i.quantity} unit(s) × ₹${i.priceAtEvent.toFixed(2)}  ➔  *₹${(i.priceAtEvent * i.quantity).toFixed(2)}*`
+        i => `${i.isCombo ? '[Combo] ' : ''}${i.productName}\n${i.quantity} × ₹${i.priceAtEvent.toFixed(2)} = ₹${(i.priceAtEvent * i.quantity).toFixed(2)}`
       )
       .join('\n\n');
 
+    const customerLine =
+      bill.customerName &&
+      bill.customerName !== 'Walk-in Customer' &&
+      bill.customerName !== 'Valued Supporter'
+        ? `\nCustomer: ${bill.customerName}`
+        : '';
+
     return [
-      `═════════════════════════`,
-      `       *ENACTUS VIPS-TC*`,
-      ` _Vivekananda Institute of Professional Studies_`,
-      `   *OFFICIAL SALES INVOICE & RECEIPT*`,
-      `═════════════════════════`,
-      `🧾 *Invoice Ref:* ${bill.billNo.startsWith('#') ? bill.billNo : '#' + bill.billNo}`,
-      `📅 *Issued On:* ${bill.time}`,
-      `🎪 *Initiative / Stall:* ${currentEvent?.name || 'Enactus Campus Enterprise'}`,
-      `👤 *Billed To:* ${bill.customerName || 'Valued Supporter'}`,
-      `─────────────────────────`,
-      `📦 *PURCHASE DETAILS*`,
-      `─────────────────────────`,
-      itemsFormatted || '▸ *Products*',
-      `─────────────────────────`,
-      `💰 *Total Amount Paid:* *₹${bill.totalAmount.toFixed(2)}* (Net)`,
-      `💳 *Payment Mode:* ${paymentDisplay}`,
-      user?.name ? `👨‍💼 *Desk Associate:* ${user.name} (Enactus VIPS-TC)` : `👨‍💼 *Desk Associate:* Operations Team (Enactus VIPS-TC)`,
-      `─────────────────────────`,
-      `🌱 *YOUR SOCIAL IMPACT*`,
-      `Every rupee from your purchase directly powers community empowerment initiatives under *Project Tahsin* and *Project Upcycle*, fostering self-reliance and environmental sustainability.`,
-      `─────────────────────────`,
-      `📸 *Instagram:* instagram.com/enactusvips`,
-      `🌐 *Portal:* enactusvips.org`,
-      `═════════════════════════`,
-      `_This is a verified computer-generated digital receipt._`,
+      `*ENACTUS VIPS-TC*`,
+      `Vivekananda Institute of Professional Studies`,
+      ``,
+      `*PURCHASE RECEIPT*`,
+      ``,
+      `Receipt No.: ${bill.billNo.startsWith('#') ? bill.billNo : '#' + bill.billNo}`,
+      `Date: ${datePart} | ${bill.time}${customerLine}`,
+      ``,
+      `*Your purchase*`,
+      itemsFormatted || 'Products',
+      ``,
+      `*Total Paid: ₹${bill.totalAmount.toFixed(2)}*`,
+      `Payment Method: ${paymentDisplay}`,
+      `Payment Status: Paid`,
+      ``,
+      `Thank you for supporting Enactus VIPS-TC. Your purchase helps support our work towards community empowerment and environmental sustainability.`,
+      ``,
+      `*Small purchases. Meaningful impact.*`,
+      ``,
+      `Stay connected: instagram.com/vips.en`,
+      `Website: enactusvips.com`,
+      ``,
+      `This is a computer-generated receipt. Please retain it for your records.`,
     ].join('\n');
   };
 
