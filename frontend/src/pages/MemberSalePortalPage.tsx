@@ -6,7 +6,6 @@ import { api } from '../lib/api';
 import { syncManager } from '../lib/sync';
 import { cacheEvents, getCachedEvents } from '../lib/db';
 import { AppEvent, EventAllocation, PaymentMethod, CartItem, Combo, ComboType } from '../types';
-import { WhatsAppIndicator } from '../components/WhatsAppIndicator';
 import {
   Receipt,
   CheckCircle2,
@@ -954,7 +953,6 @@ export const MemberSalePortalPage: React.FC = () => {
 
         {/* Play Game Quick Action & Active Event Selector */}
         <div className="flex items-center gap-2.5 w-full sm:w-auto flex-wrap sm:flex-nowrap">
-          <WhatsAppIndicator />
           <Link
             to={`/games/play${selectedEventId ? `?eventId=${selectedEventId}` : ''}`}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 shadow-2xs transition-colors shrink-0 cursor-pointer"
@@ -1759,12 +1757,12 @@ export const MemberSalePortalPage: React.FC = () => {
                           placeholder="Phone / WhatsApp (Optional)"
                           value={customerPhone}
                           onChange={e => setCustomerPhone(e.target.value)}
-                          className="w-full text-xs pl-7 pr-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-md focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-900"
+                          className="w-full text-xs pl-7 pr-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-md focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-900 font-mono"
                         />
                       </div>
-                      <div className="flex items-center justify-between text-[10px] text-slate-500 pt-0.5 px-0.5">
-                        <span>📲 Bill auto-sent via WhatsApp</span>
-                        <WhatsAppIndicator className="py-0.5 px-2 text-[10px]" />
+                      <div className="flex items-center gap-1.5 text-[11px] text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200 mt-1">
+                        <MessageCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>Digital bill auto-sent to customer on WhatsApp.</span>
                       </div>
                     </div>
                   )}
