@@ -662,7 +662,7 @@ export const MemberSalePortalPage: React.FC = () => {
 
     return [
       `*ENACTUS VIPS-TC*`,
-      `Vivekananda Institute of Professional Studies`,
+      `Vivekananda Institute of Professional Studies Technical Campus`,
       ``,
       `*PURCHASE RECEIPT*`,
       ``,
@@ -677,8 +677,6 @@ export const MemberSalePortalPage: React.FC = () => {
       `Payment Status: Paid`,
       ``,
       `Thank you for supporting Enactus VIPS-TC. Your purchase helps support our work towards community empowerment and environmental sustainability.`,
-      ``,
-      `*Small purchases. Meaningful impact.*`,
       ``,
       `Stay connected: instagram.com/vips.en`,
       `Website: enactusvips.com`,
