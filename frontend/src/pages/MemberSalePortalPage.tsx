@@ -6,6 +6,7 @@ import { api } from '../lib/api';
 import { syncManager } from '../lib/sync';
 import { cacheEvents, getCachedEvents } from '../lib/db';
 import { AppEvent, EventAllocation, PaymentMethod, CartItem, Combo, ComboType } from '../types';
+import { WhatsAppIndicator } from '../components/WhatsAppIndicator';
 import {
   Receipt,
   CheckCircle2,
@@ -30,6 +31,7 @@ import {
   Gift,
   Tag,
   Percent,
+  MessageCircle,
 } from 'lucide-react';
 
 export const MemberSalePortalPage: React.FC = () => {
@@ -629,31 +631,52 @@ export const MemberSalePortalPage: React.FC = () => {
     setErrorMessage(null);
   };
 
+  // Format standardized Enactus receipt text
+  const getReceiptText = (bill: typeof lastCompletedBill) => {
+    if (!bill) return '';
+    const paymentDisplay =
+      bill.paymentMethod === 'CASH_UPI'
+        ? `Cash + UPI (Cash: ₹${(bill.cashAmount ?? 0).toFixed(2)} | UPI: ₹${(bill.upiAmount ?? 0).toFixed(2)})`
+        : bill.paymentMethod;
+
+    return [
+      `🌟 *ENACTUS VIPS-TC | Sales Receipt* 🌟`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `🧾 *Bill / Receipt No:* ${bill.billNo}`,
+      `📅 *Date & Time:* ${bill.time}`,
+      `🎪 *Event / Stall:* ${currentEvent?.name || 'Enactus Campus Stall'}`,
+      `👤 *Customer:* ${bill.customerName}`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `🛍️ *Purchased Items:*`,
+      ...bill.items.map(
+        i => `• ${i.quantity}x *${i.isCombo ? '[Combo] ' : ''}${i.productName}* @ ₹${i.priceAtEvent} = ₹${(i.priceAtEvent * i.quantity).toFixed(2)}`
+      ),
+      `━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `💰 *Total Amount Paid:* ₹${bill.totalAmount.toFixed(2)}`,
+      `💳 *Payment Method:* ${paymentDisplay}`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `🌱 *Thank you for supporting Enactus VIPS-TC!*`,
+      `Your purchase directly fuels social enterprise projects and empowers communities.`,
+      `📸 Follow our journey: instagram.com/enactusvips`,
+      `🌐 Visit: enactusvips.org`,
+    ].join('\n');
+  };
+
+  // Generate direct WhatsApp link for instant click
+  const getWhatsAppDirectLink = (bill: typeof lastCompletedBill) => {
+    if (!bill || !bill.customerPhone) return null;
+    let clean = bill.customerPhone.replace(/\D/g, '');
+    if (clean.length === 10) clean = '91' + clean;
+    else if (clean.length === 11 && clean.startsWith('0')) clean = '91' + clean.slice(1);
+    const text = getReceiptText(bill);
+    return `https://wa.me/${clean}?text=${encodeURIComponent(text)}`;
+  };
+
   // Copy receipt text to clipboard for WhatsApp
   const handleCopyReceipt = () => {
     if (!lastCompletedBill) return;
-    const paymentDisplay =
-      lastCompletedBill.paymentMethod === 'CASH_UPI'
-        ? `Cash + UPI (Cash: ₹${(lastCompletedBill.cashAmount ?? 0).toFixed(2)} | UPI: ₹${(lastCompletedBill.upiAmount ?? 0).toFixed(2)})`
-        : lastCompletedBill.paymentMethod;
-
-    const lines = [
-      `🧾 *Enactus VIPS-TC Receipt*`,
-      `*Bill No:* ${lastCompletedBill.billNo}`,
-      `*Stall / Event:* ${currentEvent?.name || 'College Stall'}`,
-      `*Customer:* ${lastCompletedBill.customerName}`,
-      `*Payment:* ${paymentDisplay}`,
-      `*Date/Time:* ${lastCompletedBill.time}`,
-      `---------------------------------`,
-      ...lastCompletedBill.items.map(
-        i => `• ${i.quantity}x ${i.isCombo ? '[Combo] ' : ''}${i.productName} @ ₹${i.priceAtEvent} = ₹${(i.priceAtEvent * i.quantity).toFixed(2)}`
-      ),
-      `---------------------------------`,
-      `*Grand Total: ₹${lastCompletedBill.totalAmount.toFixed(2)}*`,
-      `\nThank you for supporting student social entrepreneurship! 💚`,
-    ].join('\n');
-
-    navigator.clipboard.writeText(lines);
+    const text = getReceiptText(lastCompletedBill);
+    navigator.clipboard.writeText(text);
     setCopiedReceipt(true);
     setTimeout(() => setCopiedReceipt(false), 3000);
   };
@@ -931,6 +954,7 @@ export const MemberSalePortalPage: React.FC = () => {
 
         {/* Play Game Quick Action & Active Event Selector */}
         <div className="flex items-center gap-2.5 w-full sm:w-auto flex-wrap sm:flex-nowrap">
+          <WhatsAppIndicator />
           <Link
             to={`/games/play${selectedEventId ? `?eventId=${selectedEventId}` : ''}`}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 shadow-2xs transition-colors shrink-0 cursor-pointer"
@@ -1016,6 +1040,12 @@ export const MemberSalePortalPage: React.FC = () => {
                 </strong>
                 {lastCompletedBill.customerName && lastCompletedBill.customerName !== 'Walk-in Customer' && (
                   <span> &bull; Buyer: {lastCompletedBill.customerName}</span>
+                )}
+                {lastCompletedBill.customerPhone && (
+                  <span className="inline-flex items-center gap-1 text-[11px] text-emerald-900 bg-emerald-200/60 px-1.5 py-0.5 rounded font-mono ml-1">
+                    <MessageCircle className="w-3 h-3 text-emerald-700" />
+                    <span>WhatsApp Sent: {lastCompletedBill.customerPhone}</span>
+                  </span>
                 )}
               </div>
             </div>
@@ -1732,6 +1762,10 @@ export const MemberSalePortalPage: React.FC = () => {
                           className="w-full text-xs pl-7 pr-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-md focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-900"
                         />
                       </div>
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 pt-0.5 px-0.5">
+                        <span>📲 Bill auto-sent via WhatsApp</span>
+                        <WhatsAppIndicator className="py-0.5 px-2 text-[10px]" />
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1996,6 +2030,18 @@ export const MemberSalePortalPage: React.FC = () => {
             </div>
 
             <div className="flex gap-2">
+              {lastCompletedBill.customerPhone && (
+                <a
+                  href={getWhatsAppDirectLink(lastCompletedBill) || '#'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-lg flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                  title="Open direct WhatsApp chat with customer"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>Open WhatsApp</span>
+                </a>
+              )}
               <button
                 type="button"
                 onClick={handleCopyReceipt}
@@ -2009,7 +2055,7 @@ export const MemberSalePortalPage: React.FC = () => {
                 ) : (
                   <>
                     <Copy className="w-3.5 h-3.5" />
-                    <span>Copy WhatsApp Receipt</span>
+                    <span>Copy Text</span>
                   </>
                 )}
               </button>

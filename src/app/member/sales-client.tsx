@@ -7,6 +7,7 @@ import { createMemberSale } from '@/actions/sales';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { listOfflineSales, queueOfflineSale, syncQueuedSales } from '@/lib/offline-sales';
+import { WhatsAppIndicator } from '@/components/WhatsAppIndicator';
 
 interface ActiveProduct {
   id: string;
@@ -168,7 +169,7 @@ export default function MemberSalesClient({ user, context, initialSales }: Props
       setCustomerName('');
       setCustomerPhone('');
       setQuantity(1);
-      setSuccess(`Sale ${createdSale.transactionCode} recorded successfully.`);
+      setSuccess(`Sale ${createdSale.transactionCode} recorded successfully. WhatsApp bill sent to ${customerPhone || 'customer'}.`);
       router.refresh();
     } catch (err) {
       try {
@@ -194,7 +195,8 @@ export default function MemberSalesClient({ user, context, initialSales }: Props
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Member Portal</p>
             <h1 className="mt-3 text-3xl font-semibold tracking-tight">Sales workspace</h1>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <WhatsAppIndicator />
             <span className={`rounded-full px-3 py-1 text-xs font-semibold ${isOffline ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
               {isOffline ? 'Offline mode' : 'Online'}
             </span>
@@ -227,7 +229,10 @@ export default function MemberSalesClient({ user, context, initialSales }: Props
                 <Input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Jane Doe" className="mt-1" required disabled={loading || !context.event} />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700">Customer phone</label>
+                <div className="flex items-center justify-between">
+                  <label className="block text-sm font-medium text-slate-700">Customer phone</label>
+                  <span className="text-[10px] text-emerald-700 font-bold">📲 Auto WhatsApp</span>
+                </div>
                 <Input value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="9988776655" className="mt-1" required disabled={loading || !context.event} />
               </div>
             </div>

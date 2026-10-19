@@ -7,6 +7,7 @@ import { requireRoles } from '../middleware/rbac';
 import { broadcast } from '../sockets';
 import { PaymentMethod, Role, Prisma, TransactionType, EventStatus } from '@prisma/client';
 import { computeEventStatus, reconcileSingleEvent } from '../services/eventLifecycle';
+import { whatsappService } from '../services/whatsappService';
 
 const router = Router();
 
@@ -743,6 +744,28 @@ router.post(
           receiptNumber: newSale.receiptNumber,
         });
 
+        // Automatically dispatch WhatsApp bill if customer phone is provided
+        if (newSale.customerPhone && newSale.customerPhone.trim()) {
+          whatsappService.sendSaleReceipt({
+            phone: newSale.customerPhone.trim(),
+            customerName: newSale.customerName ? String(newSale.customerName).trim() : 'Valued Supporter',
+            receiptNumber: newSale.receiptNumber,
+            eventName: newSale.event.name,
+            items: validatedItems.map(item => ({
+              productName: item.productName,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              lineTotal: item.lineTotal,
+            })),
+            totalAmount: Number(newSale.totalAmount),
+            paymentMethod: newSale.paymentMethod,
+            cashAmount: Number(newSale.cashAmount ?? resolvedCashAmount),
+            upiAmount: Number(newSale.upiAmount ?? resolvedUpiAmount),
+            sellerName: newSale.sellerNameAtSale || req.user?.name,
+            saleTime: newSale.saleTime,
+          }).catch(err => console.error('[WhatsApp] Auto-dispatch combo receipt error:', err));
+        }
+
         const formatted = {
           id: newSale.id,
           receiptNumber: newSale.receiptNumber,
@@ -1041,6 +1064,28 @@ router.post(
         eventId,
         saleId: newSale.id,
       });
+
+      // Automatically dispatch WhatsApp bill if customer phone is provided
+      if (newSale.customerPhone && newSale.customerPhone.trim()) {
+        whatsappService.sendSaleReceipt({
+          phone: newSale.customerPhone.trim(),
+          customerName: newSale.customerName ? String(newSale.customerName).trim() : 'Valued Supporter',
+          receiptNumber: newSale.receiptNumber,
+          eventName: newSale.event.name,
+          items: validatedItems.map(item => ({
+            productName: item.productName,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            lineTotal: item.lineTotal,
+          })),
+          totalAmount: Number(newSale.totalAmount),
+          paymentMethod: newSale.paymentMethod,
+          cashAmount: Number(newSale.cashAmount ?? resolvedCashAmount),
+          upiAmount: Number(newSale.upiAmount ?? resolvedUpiAmount),
+          sellerName: newSale.sellerNameAtSale || req.user!.name,
+          saleTime: newSale.saleTime,
+        }).catch(err => console.error('[WhatsApp] Auto-dispatch receipt error:', err));
+      }
 
       const formatted = {
         id: newSale.id,
@@ -1390,6 +1435,27 @@ router.post(
             receiptNumber: txResult.sale.receiptNumber,
           });
 
+          if (txResult.sale.customerPhone && txResult.sale.customerPhone.trim()) {
+            whatsappService.sendSaleReceipt({
+              phone: txResult.sale.customerPhone.trim(),
+              customerName: txResult.sale.customerName ? String(txResult.sale.customerName).trim() : 'Valued Supporter',
+              receiptNumber: txResult.sale.receiptNumber,
+              eventName: event.name,
+              items: validatedItems.map(item => ({
+                productName: event.allocations.find(a => a.productId === item.productId)?.product.name || 'Combo Product',
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                lineTotal: item.lineTotal,
+              })),
+              totalAmount: Number(txResult.sale.totalAmount),
+              paymentMethod: txResult.sale.paymentMethod,
+              cashAmount: resolvedCashAmount,
+              upiAmount: resolvedUpiAmount,
+              sellerName: req.user!.name,
+              saleTime: txResult.sale.saleTime,
+            }).catch(err => console.error('[WhatsApp] Auto-dispatch sync combo receipt error:', err));
+          }
+
           continue;
         }
 
@@ -1419,7 +1485,7 @@ router.post(
         // 3. Fetch event allocations
         const event = await prisma.event.findUnique({
           where: { id: eventId },
-          include: { allocations: true },
+          include: { allocations: { include: { product: true } } },
         });
 
         if (!event || event.isDeleted) {
@@ -1607,6 +1673,27 @@ router.post(
           itemsCount: validatedItems.length,
           totalUnits: txResult.totalUnits,
         });
+
+        if (txResult.sale.customerPhone && txResult.sale.customerPhone.trim()) {
+          whatsappService.sendSaleReceipt({
+            phone: txResult.sale.customerPhone.trim(),
+            customerName: txResult.sale.customerName ? String(txResult.sale.customerName).trim() : 'Valued Supporter',
+            receiptNumber: txResult.sale.receiptNumber,
+            eventName: event.name,
+            items: validatedItems.map(item => ({
+              productName: event.allocations.find(a => a.productId === item.productId)?.product.name || 'Product',
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              lineTotal: item.lineTotal,
+            })),
+            totalAmount: Number(txResult.sale.totalAmount),
+            paymentMethod: txResult.sale.paymentMethod,
+            cashAmount: Number(txResult.sale.cashAmount ?? resolvedCashAmount),
+            upiAmount: Number(txResult.sale.upiAmount ?? resolvedUpiAmount),
+            sellerName: req.user!.name,
+            saleTime: txResult.sale.saleTime,
+          }).catch(err => console.error('[WhatsApp] Auto-dispatch sync receipt error:', err));
+        }
       }
 
       if (syncedCount > 0) {

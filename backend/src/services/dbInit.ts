@@ -44,7 +44,16 @@ export async function initializeDatabaseSequences(): Promise<void> {
       );
     `);
 
-    console.log('✅ [Database] PostgreSQL sequences initialized and synchronized with table data.');
+    // 6. Ensure whatsapp_sessions table exists in Supabase for Render deployments
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS whatsapp_sessions (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    console.log('✅ [Database] PostgreSQL sequences and WhatsApp session tables initialized.');
   } catch (err) {
     console.error('❌ [Database] Sequence initialization failed:', err);
   }

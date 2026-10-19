@@ -326,6 +326,30 @@ export async function createMemberSale(data: z.input<typeof createMemberSaleSche
   revalidatePath('/member');
   revalidatePath('/dashboard');
 
+  if (parsed.customerPhone) {
+    try {
+      fetch('http://localhost:5000/api/whatsapp/send-receipt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: parsed.customerPhone,
+          customerName: parsed.customerName,
+          receiptNumber: sale.transactionCode,
+          eventName: event.name,
+          items: sale.saleItems.map((item) => ({
+            productName: item.product.name,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            lineTotal: item.lineTotal,
+          })),
+          totalAmount: sale.totalAmount,
+          paymentMethod: sale.paymentMethod,
+          sellerName: user.name,
+        }),
+      }).catch(() => {});
+    } catch {}
+  }
+
   return sale;
 }
 

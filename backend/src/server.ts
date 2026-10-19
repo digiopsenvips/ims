@@ -13,6 +13,8 @@ import salesRoutes from './routes/sales';
 import analyticsRoutes from './routes/analytics';
 import gameRoutes from './routes/games';
 import comboRoutes from './routes/combos';
+import whatsappRoutes from './routes/whatsapp';
+import { whatsappService } from './services/whatsappService';
 
 const app = express();
 const server = http.createServer(app);
@@ -61,6 +63,7 @@ app.use('/api/sales', salesRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/games', gameRoutes);
 app.use('/api/combos', comboRoutes);
+app.use('/api/whatsapp', whatsappRoutes);
 
 // Global Error Handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -97,6 +100,11 @@ server.listen(ENV.PORT, () => {
       console.error('[EventLifecycle] Periodic reconciliation error:', err)
     );
   }, 30000);
+
+  // Initialize WhatsApp Gateway
+  whatsappService.initialize().catch(err =>
+    console.error('[WhatsApp] Initialization error on startup:', err)
+  );
 });
 
 export { app, server };

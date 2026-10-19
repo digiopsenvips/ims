@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { SyncIndicator } from '../SyncIndicator';
+import { WhatsAppIndicator } from '../WhatsAppIndicator';
 import { Menu, ShoppingCart, ChevronRight, Store } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { api } from '../../lib/api';
@@ -125,6 +126,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
           </div>
         )}
 
+        <WhatsAppIndicator />
         <SyncIndicator />
 
         {!isMember && location.pathname !== '/sales-entry' && (
