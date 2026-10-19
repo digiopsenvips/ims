@@ -313,7 +313,7 @@ class WhatsAppService {
       month: 'short',
       year: 'numeric',
     });
-    const timePart = saleDate.toLocaleTimeString('en-IN', {
+    const timePart = saleDate.toLocaleTimeString('en-US', {
       timeZone: 'Asia/Kolkata',
       hour: '2-digit',
       minute: '2-digit',
@@ -356,9 +356,9 @@ class WhatsAppService {
       `---------------------------------`,
       `Grand Total: ₹${payload.totalAmount.toFixed(2)}`,
       ``,
-      `Thank you for supporting student social entrepreneurship! ♻️`,
       `Stay connected: instagram.com/vips.en`,
       `Website: enactusvips.com`,
+      `Thank you for supporting student social entrepreneurship! ♻️`,
     ].join('\n');
   }
 

@@ -676,9 +676,9 @@ export const MemberSalePortalPage: React.FC = () => {
       `---------------------------------`,
       `Grand Total: ₹${bill.totalAmount.toFixed(2)}`,
       ``,
-      `Thank you for supporting student social entrepreneurship! ♻️`,
       `Stay connected: instagram.com/vips.en`,
       `Website: enactusvips.com`,
+      `Thank you for supporting student social entrepreneurship! ♻️`,
     ].join('\n');
   };
 
@@ -918,7 +918,7 @@ export const MemberSalePortalPage: React.FC = () => {
         paymentMethod,
         cashAmount: paymentMethod === 'CASH_UPI' ? cashNum : paymentMethod === 'CASH' ? totalAmount : 0,
         upiAmount: paymentMethod === 'CASH_UPI' ? upiNum : paymentMethod === 'UPI' ? totalAmount : 0,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
         syncedImmediately: isSynced,
       });
 
