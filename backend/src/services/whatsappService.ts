@@ -322,28 +322,35 @@ class WhatsAppService {
     }
 
     const itemsFormatted = payload.items
-      .map((item) => `• ${item.quantity}x *${item.productName}* @ ₹${item.unitPrice.toFixed(2)} = ₹${item.lineTotal.toFixed(2)}`)
-      .join('\n');
+      .map((item) => `▸ *${item.productName}*\n   ${item.quantity} unit(s) × ₹${item.unitPrice.toFixed(2)}  ➔  *₹${item.lineTotal.toFixed(2)}*`)
+      .join('\n\n');
 
     return [
-      `🌟 *ENACTUS VIPS-TC | Sales Receipt* 🌟`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `🧾 *Bill / Receipt No:* #${payload.receiptNumber}`,
-      `📅 *Date & Time:* ${formattedDate}`,
-      `🎪 *Event / Stall:* ${payload.eventName || 'Enactus Campus Stall'}`,
-      `👤 *Customer:* ${payload.customerName || 'Valued Supporter'}`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `🛍️ *Purchased Items:*`,
-      itemsFormatted || '• Products',
-      `━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `💰 *Total Amount Paid:* ₹${payload.totalAmount.toFixed(2)}`,
-      `💳 *Payment Method:* ${paymentMethodDisplay}`,
-      payload.sellerName ? `👨‍💼 *Billed By:* ${payload.sellerName} (Enactus VIPS-TC)` : `👨‍💼 *Billed By:* Enactus VIPS-TC Team`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `🌱 *Thank you for supporting Enactus VIPS-TC!*`,
-      `Your purchase directly fuels social enterprise projects and empowers communities.`,
-      `📸 Follow our journey: instagram.com/enactusvips`,
-      `🌐 Visit: enactusvips.org`,
+      `═════════════════════════`,
+      `       *ENACTUS VIPS-TC*`,
+      ` _Vivekananda Institute of Professional Studies_`,
+      `   *OFFICIAL SALES INVOICE & RECEIPT*`,
+      `═════════════════════════`,
+      `🧾 *Invoice Ref:* #${payload.receiptNumber}`,
+      `📅 *Issued On:* ${formattedDate}`,
+      `🎪 *Initiative / Stall:* ${payload.eventName || 'Enactus Campus Enterprise'}`,
+      `👤 *Billed To:* ${payload.customerName || 'Valued Supporter'}`,
+      `─────────────────────────`,
+      `📦 *PURCHASE DETAILS*`,
+      `─────────────────────────`,
+      itemsFormatted || '▸ *Products*',
+      `─────────────────────────`,
+      `💰 *Total Amount Paid:* *₹${payload.totalAmount.toFixed(2)}* (Net)`,
+      `💳 *Payment Mode:* ${paymentMethodDisplay}`,
+      payload.sellerName ? `👨‍💼 *Desk Associate:* ${payload.sellerName} (Enactus VIPS-TC)` : `👨‍💼 *Desk Associate:* Operations Team (Enactus VIPS-TC)`,
+      `─────────────────────────`,
+      `🌱 *YOUR SOCIAL IMPACT*`,
+      `Every rupee from your purchase directly powers community empowerment initiatives under *Project Tahsin* and *Project Upcycle*, fostering self-reliance and environmental sustainability.`,
+      `─────────────────────────`,
+      `📸 *Instagram:* instagram.com/enactusvips`,
+      `🌐 *Portal:* enactusvips.org`,
+      `═════════════════════════`,
+      `_This is a verified computer-generated digital receipt._`,
     ].join('\n');
   }
 
