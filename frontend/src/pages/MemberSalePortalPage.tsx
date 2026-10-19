@@ -645,43 +645,40 @@ export const MemberSalePortalPage: React.FC = () => {
       year: 'numeric',
     });
 
-    const itemsFormatted = bill.items
-      .map(
-        i => `${i.isCombo ? '[Combo] ' : ''}${i.productName}\n${i.quantity} × ₹${i.priceAtEvent.toFixed(2)} = ₹${(i.priceAtEvent * i.quantity).toFixed(2)}`
-      )
-      .join('\n\n');
+    const billRef =
+      bill.billNo.startsWith('#') || bill.billNo.startsWith('BILL')
+        ? bill.billNo
+        : `#${bill.billNo}`;
 
-    const eventLine = currentEvent?.name ? `\nEvent / Stall: ${currentEvent.name}` : '';
-    const placeLine = currentEvent?.location ? `\nPlace: ${currentEvent.location}` : '';
-    const customerLine =
+    const customerDisplay =
       bill.customerName &&
       bill.customerName !== 'Walk-in Customer' &&
       bill.customerName !== 'Valued Supporter'
-        ? `\nCustomer: ${bill.customerName}`
+        ? bill.customerName
         : '';
 
+    const itemsFormatted = bill.items
+      .map(
+        i =>
+          `•  ${i.quantity}x ${i.isCombo ? '[Combo] ' : ''}${i.productName} @ ₹${i.priceAtEvent % 1 === 0 ? i.priceAtEvent : i.priceAtEvent.toFixed(2)} = ₹${(i.priceAtEvent * i.quantity).toFixed(2)}`
+      )
+      .join('\n');
+
     return [
-      `*ENACTUS VIPS-TC*`,
-      `Vivekananda Institute of Professional Studies Technical Campus`,
+      `🧾 Enactus VIPS-TC Receipt`,
+      `Bill No: ${billRef}`,
+      `Stall / Event: ${currentEvent?.name || 'Enactus Campus Stall'}`,
+      `Customer Name: ${customerDisplay}`,
+      `Payment: ${paymentDisplay}`,
+      `Date/Time: ${datePart}, ${bill.time}`,
+      `---------------------------------`,
+      itemsFormatted || '•  Products',
+      `---------------------------------`,
+      `Grand Total: ₹${bill.totalAmount.toFixed(2)}`,
       ``,
-      `*PURCHASE RECEIPT*`,
-      ``,
-      `Receipt No.: ${bill.billNo.startsWith('#') ? bill.billNo : '#' + bill.billNo}`,
-      `Date: ${datePart} | ${bill.time}${eventLine}${placeLine}${customerLine}`,
-      ``,
-      `*Your purchase*`,
-      itemsFormatted || 'Products',
-      ``,
-      `*Total Paid: ₹${bill.totalAmount.toFixed(2)}*`,
-      `Payment Method: ${paymentDisplay}`,
-      `Payment Status: Paid`,
-      ``,
-      `Thank you for supporting Enactus VIPS-TC. Your purchase helps support our work towards community empowerment and environmental sustainability.`,
-      ``,
+      `Thank you for supporting student social entrepreneurship! ♻️`,
       `Stay connected: instagram.com/vips.en`,
       `Website: enactusvips.com`,
-      ``,
-      `_This is a computer-generated receipt. Please retain it for your records._`,
     ].join('\n');
   };
 
