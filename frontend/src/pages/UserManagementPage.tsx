@@ -287,7 +287,7 @@ export const UserManagementPage: React.FC = () => {
   const hasActiveFilters = searchQuery.trim() !== '' || selectedRole !== 'ALL';
 
   return (
-    <div className="space-y-5 max-w-7xl mx-auto pb-12">
+    <div className="space-y-5 w-full max-w-[1600px] mx-auto pb-12">
       {/* Header */}
       <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-start sm:items-center gap-3">
@@ -412,14 +412,14 @@ export const UserManagementPage: React.FC = () => {
       {/* Users Table Container */}
       <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs min-w-[780px]">
+          <table className="w-full text-left text-xs min-w-[780px] border-collapse">
             <thead className="bg-slate-50/80 text-slate-500 border-b border-slate-200 font-semibold uppercase tracking-wider text-[10px]">
               <tr>
-                <th className="px-5 py-3.5">Name & Profile</th>
-                <th className="px-5 py-3.5">Username</th>
-                <th className="px-5 py-3.5">Role</th>
-                <th className="px-5 py-3.5">Active Head Permissions</th>
-                <th className="px-5 py-3.5 text-right">Actions</th>
+                <th scope="col" className="px-5 py-3.5 min-w-[200px]">Name & Profile</th>
+                <th scope="col" className="px-5 py-3.5 w-36 whitespace-nowrap">Username</th>
+                <th scope="col" className="px-5 py-3.5 w-32 whitespace-nowrap">Role</th>
+                <th scope="col" className="px-5 py-3.5 min-w-[180px]">Active Head Permissions</th>
+                <th scope="col" className="px-5 py-3.5 text-right w-28 whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -459,14 +459,14 @@ export const UserManagementPage: React.FC = () => {
                           {u.email ? u.email : 'No email registered'}
                         </div>
                       </td>
-                      <td className="px-5 py-3.5">
-                        <span className="font-mono font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100 text-xs">
+                      <td className="px-5 py-3.5 whitespace-nowrap">
+                        <span className="font-mono font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100 text-xs whitespace-nowrap">
                           @{u.username}
                         </span>
                       </td>
-                      <td className="px-5 py-3.5">
+                      <td className="px-5 py-3.5 whitespace-nowrap">
                         <span
-                          className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
+                          className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider whitespace-nowrap ${
                             u.role === 'DEVELOPER'
                               ? 'bg-purple-50 text-purple-800 border border-purple-200'
                               : u.role === 'ADMIN'
@@ -479,16 +479,16 @@ export const UserManagementPage: React.FC = () => {
                           {u.role}
                         </span>
                       </td>
-                      <td className="px-5 py-3.5 text-slate-600">
+                      <td className="px-5 py-3.5 text-slate-600 whitespace-nowrap">
                         {isHead ? (
                           <div className="flex items-center gap-2.5">
-                            <span className="text-xs font-semibold text-slate-800">
+                            <span className="text-xs font-semibold text-slate-800 whitespace-nowrap">
                               {activePermCount} of {ALL_PERMISSIONS.length} enabled
                             </span>
                             {isDeveloper && (
                               <button
                                 onClick={() => handleOpenPermsModal(u)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200/80 hover:bg-indigo-100 transition-colors cursor-pointer"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200/80 hover:bg-indigo-100 transition-colors cursor-pointer whitespace-nowrap"
                               >
                                 <Sliders className="w-3 h-3" />
                                 <span>Configure</span>
@@ -496,12 +496,12 @@ export const UserManagementPage: React.FC = () => {
                             )}
                           </div>
                         ) : u.role === 'DEVELOPER' || u.role === 'ADMIN' ? (
-                          <span className="text-slate-400 italic text-xs">Full privileges</span>
+                          <span className="text-slate-400 italic text-xs whitespace-nowrap">Full privileges</span>
                         ) : (
-                          <span className="text-slate-400 italic text-xs">Sales entry only</span>
+                          <span className="text-slate-400 italic text-xs whitespace-nowrap">Sales entry only</span>
                         )}
                       </td>
-                      <td className="px-5 py-3.5 text-right">
+                      <td className="px-5 py-3.5 text-right whitespace-nowrap">
                         {isDeveloper && (
                           <div className="inline-flex items-center gap-1.5">
                             <button

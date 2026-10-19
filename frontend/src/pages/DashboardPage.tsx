@@ -177,7 +177,7 @@ export const DashboardPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
+    <div className="space-y-6 w-full max-w-[1600px] mx-auto pb-12">
       {/* 1. Live Stall Operational Hero Banner */}
       {activeEvent ? (
         <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs relative overflow-hidden">
@@ -721,7 +721,7 @@ export const DashboardPage: React.FC = () => {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs whitespace-nowrap">
+            <table className="w-full text-left text-xs whitespace-nowrap min-w-[900px] border-collapse">
               <thead className="bg-slate-50/80 text-slate-500 border-b border-slate-100 font-bold uppercase tracking-wider text-[10px]">
                 <tr>
                   <th className="px-5 py-3.5 font-bold">Receipt ID</th>

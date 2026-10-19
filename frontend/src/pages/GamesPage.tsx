@@ -319,7 +319,7 @@ export const GamesPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-5 max-w-7xl mx-auto pb-12">
+    <div className="space-y-5 w-full max-w-[1600px] mx-auto pb-12">
       {/* 1. Header with Title & Primary Actions */}
       <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">

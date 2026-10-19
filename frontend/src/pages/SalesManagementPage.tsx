@@ -442,7 +442,7 @@ export const SalesManagementPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-5 max-w-7xl mx-auto">
+    <div className="space-y-5 w-full max-w-[1600px] mx-auto pb-12">
       {/* Header */}
       <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -626,22 +626,22 @@ export const SalesManagementPage: React.FC = () => {
         )}
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full text-left text-xs min-w-[1250px] border-collapse">
             <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold uppercase tracking-wider text-[10px]">
               <tr>
-                <th className="px-4 py-3">Receipt ID</th>
-                <th className="px-4 py-3">S.No.</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Project Name</th>
-                <th className="px-4 py-3">Product / Game</th>
-                <th className="px-4 py-3">Sales Member Name</th>
-                <th className="px-4 py-3 text-right">Items / Plays</th>
-                {canViewRevenue && <th className="px-4 py-3 text-right">Total Amount (₹)</th>}
-                <th className="px-4 py-3">Payment</th>
-                <th className="px-4 py-3">Time (Auto)</th>
-                <th className="px-4 py-3">Event Name</th>
-                <th className="px-4 py-3">Customer Info</th>
-                {isDeveloper && <th className="px-4 py-3 text-right">Actions</th>}
+                <th scope="col" className="px-4 py-3 w-24 whitespace-nowrap">Receipt ID</th>
+                <th scope="col" className="px-4 py-3 w-16 whitespace-nowrap">S.No.</th>
+                <th scope="col" className="px-4 py-3 w-28 whitespace-nowrap">Type</th>
+                <th scope="col" className="px-4 py-3 w-32 whitespace-nowrap">Project Name</th>
+                <th scope="col" className="px-4 py-3 min-w-[180px] max-w-[280px]">Product / Game</th>
+                <th scope="col" className="px-4 py-3 w-36 whitespace-nowrap">Sales Member Name</th>
+                <th scope="col" className="px-4 py-3 text-right w-24 whitespace-nowrap">Items / Plays</th>
+                {canViewRevenue && <th scope="col" className="px-4 py-3 text-right w-32 whitespace-nowrap">Total Amount (₹)</th>}
+                <th scope="col" className="px-4 py-3 w-32 whitespace-nowrap">Payment</th>
+                <th scope="col" className="px-4 py-3 w-32 whitespace-nowrap">Time (Auto)</th>
+                <th scope="col" className="px-4 py-3 w-36 whitespace-nowrap">Event Name</th>
+                <th scope="col" className="px-4 py-3 w-40 whitespace-nowrap">Customer Info</th>
+                {isDeveloper && <th scope="col" className="px-4 py-3 text-right w-20 whitespace-nowrap">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -672,13 +672,13 @@ export const SalesManagementPage: React.FC = () => {
 
                   return (
                     <tr key={sale.id} className="hover:bg-slate-50/50">
-                      <td className="px-4 py-3 font-mono font-bold text-slate-900">
+                      <td className="px-4 py-3 font-mono font-bold text-slate-900 whitespace-nowrap">
                         {displayReceipt !== '—' ? `#${displayReceipt}` : '—'}
                       </td>
-                      <td className="px-4 py-3 font-mono text-slate-500 font-medium">
+                      <td className="px-4 py-3 font-mono text-slate-500 font-medium whitespace-nowrap">
                         {displaySNo}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         {sale.transactionType === 'GAME' ? (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                             🎮 GAME
@@ -693,25 +693,25 @@ export const SalesManagementPage: React.FC = () => {
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-slate-700">
+                      <td className="px-4 py-3 text-slate-700 whitespace-nowrap">
                         <div className="flex flex-wrap gap-1">
                           {(sale.projectNames && sale.projectNames.length > 0
                             ? sale.projectNames
                             : [sale.projectName]
                           ).map((proj, pIdx) => (
-                            <span key={pIdx} className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 border border-slate-200">
+                            <span key={pIdx} className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 border border-slate-200 whitespace-nowrap">
                               {proj}
                             </span>
                           ))}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-slate-900">
+                      <td className="px-4 py-3 text-slate-900 min-w-[180px] max-w-[280px]">
                         {sale.transactionType === 'GAME' ? (
                           <div>
                             <div className="font-bold text-indigo-950 flex items-center gap-1.5 flex-wrap">
                               <span>🎮 {sale.game?.name || sale.productName || 'Stall Game'}</span>
                               {sale.gameSession && (
-                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
+                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase whitespace-nowrap ${
                                   sale.gameSession.result === 'WIN'
                                     ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                                     : 'bg-amber-100 text-amber-800 border border-amber-200'
@@ -744,7 +744,7 @@ export const SalesManagementPage: React.FC = () => {
                                 {sale.items.map((item, itIdx) => (
                                   <div key={itIdx} className="text-[11px] text-slate-600 flex items-center gap-1.5">
                                     <span className="font-medium text-slate-800">{item.productName}</span>
-                                    <span className="font-bold text-slate-600">× {item.quantity}</span>
+                                    <span className="font-bold text-slate-600 whitespace-nowrap">× {item.quantity}</span>
                                   </div>
                                 ))}
                               </div>
@@ -755,9 +755,9 @@ export const SalesManagementPage: React.FC = () => {
                             {sale.items.map((item, itIdx) => (
                               <div key={itIdx} className="text-xs flex items-center gap-1.5">
                                 <span className="font-semibold text-slate-900">{item.productName}</span>
-                                <span className="font-bold text-slate-700">× {item.quantity}</span>
+                                <span className="font-bold text-slate-700 whitespace-nowrap">× {item.quantity}</span>
                                 {canViewRevenue && item.unitPrice ? (
-                                  <span className="text-[10px] text-slate-400">(@ ₹{item.unitPrice})</span>
+                                  <span className="text-[10px] text-slate-400 whitespace-nowrap">(@ ₹{item.unitPrice})</span>
                                 ) : null}
                               </div>
                             ))}
@@ -766,30 +766,30 @@ export const SalesManagementPage: React.FC = () => {
                           <div>
                             <span className="font-semibold text-slate-900">{sale.productName}</span>
                             {sale.productId && (
-                              <span className="block text-[10px] text-slate-400 font-normal font-mono">
+                              <span className="block text-[10px] text-slate-400 font-normal font-mono whitespace-nowrap">
                                 {sale.productId}
                               </span>
                             )}
                           </div>
                         )}
                       </td>
-                      <td className="px-4 py-3 font-medium text-slate-800">
+                      <td className="px-4 py-3 font-medium text-slate-800 whitespace-nowrap">
                         {sale.memberName}
                         <span className="block text-[10px] text-slate-400 font-mono">
                           @{sale.memberUsername}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right font-black text-slate-900">
+                      <td className="px-4 py-3 text-right font-black text-slate-900 whitespace-nowrap">
                         {sale.totalUnits ?? sale.quantity}
                       </td>
                       {canViewRevenue && (
-                        <td className="px-4 py-3 text-right font-black text-slate-900">
+                        <td className="px-4 py-3 text-right font-black text-slate-900 whitespace-nowrap">
                           {sale.totalAmount !== null && sale.totalAmount !== undefined
                             ? `₹${sale.totalAmount.toFixed(2)}`
                             : '—'}
                         </td>
                       )}
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <span
                           className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
                             sale.paymentMethod === 'UPI'
@@ -817,10 +817,10 @@ export const SalesManagementPage: React.FC = () => {
                           minute: '2-digit',
                         })}
                       </td>
-                      <td className="px-4 py-3 text-slate-600 font-medium">
+                      <td className="px-4 py-3 text-slate-600 font-medium whitespace-nowrap">
                         {sale.eventName}
                       </td>
-                      <td className="px-4 py-3 text-slate-600 text-[11px]">
+                      <td className="px-4 py-3 text-slate-600 text-[11px] whitespace-nowrap">
                         {sale.customerName ? (
                           <div>
                             <div className="font-medium text-slate-800">{sale.customerName}</div>
@@ -831,7 +831,7 @@ export const SalesManagementPage: React.FC = () => {
                         )}
                       </td>
                       {isDeveloper && (
-                        <td className="px-4 py-3 text-right">
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1">
                             <button
                               type="button"

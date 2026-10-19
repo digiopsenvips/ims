@@ -243,7 +243,7 @@ export const GameSessionsPage: React.FC = () => {
   const toRecord = Math.min(currentPage * pageSize, totalRecords);
 
   return (
-    <div className="space-y-5 max-w-7xl mx-auto pb-12">
+    <div className="space-y-5 w-full max-w-[1600px] mx-auto pb-12">
       {/* Page Header */}
       <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-start sm:items-center gap-3">
@@ -481,20 +481,20 @@ export const GameSessionsPage: React.FC = () => {
       {/* Sessions Table Container */}
       <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs min-w-[1100px]">
+          <table className="w-full text-left text-xs min-w-[1100px] border-collapse">
             <thead className="bg-slate-50/80 text-slate-500 border-b border-slate-200 font-semibold uppercase tracking-wider text-[10px]">
               <tr>
-                <th className="px-4 py-3">Receipt ID</th>
-                <th className="px-4 py-3">Session Code</th>
-                <th className="px-4 py-3">Game Name</th>
-                <th className="px-4 py-3">Result</th>
-                <th className="px-4 py-3">Reward Issued</th>
-                <th className="px-4 py-3 text-right">Entry Fee</th>
-                <th className="px-4 py-3">Payment</th>
-                <th className="px-4 py-3">Cashier / Seller</th>
-                <th className="px-4 py-3">Stall / Event</th>
-                <th className="px-4 py-3">Player Info</th>
-                <th className="px-4 py-3">Date & Time</th>
+                <th scope="col" className="px-4 py-3 w-24 whitespace-nowrap">Receipt ID</th>
+                <th scope="col" className="px-4 py-3 w-28 whitespace-nowrap">Session Code</th>
+                <th scope="col" className="px-4 py-3 min-w-[140px] whitespace-nowrap">Game Name</th>
+                <th scope="col" className="px-4 py-3 w-24 whitespace-nowrap">Result</th>
+                <th scope="col" className="px-4 py-3 min-w-[160px]">Reward Issued</th>
+                <th scope="col" className="px-4 py-3 text-right w-24 whitespace-nowrap">Entry Fee</th>
+                <th scope="col" className="px-4 py-3 w-28 whitespace-nowrap">Payment</th>
+                <th scope="col" className="px-4 py-3 w-32 whitespace-nowrap">Cashier / Seller</th>
+                <th scope="col" className="px-4 py-3 w-36 whitespace-nowrap">Stall / Event</th>
+                <th scope="col" className="px-4 py-3 w-36 whitespace-nowrap">Player Info</th>
+                <th scope="col" className="px-4 py-3 w-40 whitespace-nowrap">Date & Time</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -552,38 +552,38 @@ export const GameSessionsPage: React.FC = () => {
               ) : (
                 sessions.map(s => (
                   <tr key={s.id} className="hover:bg-slate-50/70 transition-colors">
-                    <td className="px-4 py-3 font-bold text-slate-900">
+                    <td className="px-4 py-3 font-bold text-slate-900 whitespace-nowrap">
                       #{s.receiptNumber}
                     </td>
-                    <td className="px-4 py-3">
-                      <span className="font-mono font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100 text-[11px]">
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className="font-mono font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100 text-[11px] whitespace-nowrap">
                         {s.sessionCode}
                       </span>
                     </td>
-                    <td className="px-4 py-3 font-semibold text-slate-800">
+                    <td className="px-4 py-3 font-semibold text-slate-800 whitespace-nowrap">
                       {s.gameName}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 whitespace-nowrap">
                       {s.result === 'WIN' ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-emerald-50 text-emerald-800 border border-emerald-200 whitespace-nowrap">
                           <Trophy className="w-3 h-3 text-emerald-600" />
                           <span>WIN</span>
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-slate-100 text-slate-700 border border-slate-200">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-slate-100 text-slate-700 border border-slate-200 whitespace-nowrap">
                           <XCircle className="w-3 h-3 text-slate-500" />
                           <span>LOSS</span>
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 font-medium text-slate-900">
+                    <td className="px-4 py-3 font-medium text-slate-900 min-w-[160px]">
                       {s.rewardDescription || '—'}
                     </td>
-                    <td className="px-4 py-3 text-right font-black text-slate-900">
+                    <td className="px-4 py-3 text-right font-black text-slate-900 whitespace-nowrap">
                       ₹{s.entryFee}
                     </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded bg-slate-100 text-slate-700 border border-slate-200">
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded bg-slate-100 text-slate-700 border border-slate-200 whitespace-nowrap">
                         {s.paymentMethod === 'CASH_UPI' ? (
                           <>
                             <Banknote className="w-3 h-3" />
@@ -602,18 +602,18 @@ export const GameSessionsPage: React.FC = () => {
                         )}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-slate-700">
+                    <td className="px-4 py-3 text-slate-700 whitespace-nowrap">
                       {s.sellerName}
                     </td>
-                    <td className="px-4 py-3 text-slate-700">
+                    <td className="px-4 py-3 text-slate-700 whitespace-nowrap">
                       {s.eventName}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 whitespace-nowrap">
                       {s.customerName ? (
                         <div>
                           <div className="font-semibold text-slate-900">{s.customerName}</div>
                           {canViewPII && s.customerPhone && (
-                            <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+                            <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1 mt-0.5 whitespace-nowrap">
                               <Phone className="w-2.5 h-2.5" />
                               <span>{s.customerPhone}</span>
                             </div>

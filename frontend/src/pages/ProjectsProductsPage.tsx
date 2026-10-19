@@ -277,7 +277,7 @@ export const ProjectsProductsPage: React.FC = () => {
   }, [products, selectedProjectId, statusFilter, searchQuery]);
 
   return (
-    <div className="space-y-5 max-w-7xl mx-auto pb-12">
+    <div className="space-y-5 w-full max-w-[1600px] mx-auto pb-12">
       {/* Header */}
       <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-start sm:items-center gap-3">
@@ -520,16 +520,16 @@ export const ProjectsProductsPage: React.FC = () => {
       {/* Products Table Container */}
       <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs min-w-[880px]">
-            <thead className="bg-slate-50/80 text-slate-500 border-b border-slate-200 font-semibold uppercase tracking-wider text-[10px]">
+          <table className="w-full text-left text-xs min-w-[960px] border-collapse">
+            <thead className="bg-slate-50/90 text-slate-500 border-b border-slate-200 font-semibold uppercase tracking-wider text-[10px]">
               <tr>
-                <th className="px-4 py-3">Auto Product ID</th>
-                <th className="px-4 py-3">Product Name</th>
-                <th className="px-4 py-3">Project</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3 text-right">Base Price (₹)</th>
-                <th className="px-4 py-3 text-right">Stock On Hand</th>
-                <th className="px-4 py-3 text-center">Actions</th>
+                <th scope="col" className="px-4 py-3.5 whitespace-nowrap w-[130px]">Auto Product ID</th>
+                <th scope="col" className="px-4 py-3.5 min-w-[200px]">Product Name</th>
+                <th scope="col" className="px-4 py-3.5 whitespace-nowrap w-[140px]">Project</th>
+                <th scope="col" className="px-4 py-3.5 whitespace-nowrap w-[110px]">Status</th>
+                <th scope="col" className="px-4 py-3.5 text-right whitespace-nowrap w-[120px]">Base Price (₹)</th>
+                <th scope="col" className="px-4 py-3.5 text-right whitespace-nowrap w-[130px]">Stock On Hand</th>
+                <th scope="col" className="px-4 py-3.5 text-center whitespace-nowrap w-[110px]">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -577,45 +577,45 @@ export const ProjectsProductsPage: React.FC = () => {
                       prod.isArchived ? 'bg-slate-50/40 opacity-80' : ''
                     }`}
                   >
-                    <td className="px-4 py-3.5">
-                      <span className="font-mono font-bold text-slate-900 bg-slate-100/80 px-2 py-0.5 rounded border border-slate-200/60 text-xs">
+                    <td className="px-4 py-3.5 whitespace-nowrap align-middle">
+                      <span className="font-mono font-bold text-slate-900 bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200/80 text-xs inline-block tracking-tight whitespace-nowrap shadow-2xs">
                         {prod.id}
                       </span>
                     </td>
-                    <td className="px-4 py-3.5 font-semibold text-slate-900 min-w-[180px]">
+                    <td className="px-4 py-3.5 font-semibold text-slate-900 min-w-[200px] align-middle">
                       <div className="flex items-center gap-2">
-                        <span>{prod.name}</span>
+                        <span className="line-clamp-2 leading-snug">{prod.name}</span>
                         {prod.isArchived && (
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.2 text-[9px] font-bold uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-200 rounded">
+                          <span className="inline-flex items-center px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-200 rounded whitespace-nowrap shrink-0">
                             Retired
                           </span>
                         )}
                       </div>
                     </td>
-                    <td className="px-4 py-3.5 text-slate-600">
-                      <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 border border-slate-200">
+                    <td className="px-4 py-3.5 text-slate-600 whitespace-nowrap align-middle">
+                      <span className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200/80 inline-block whitespace-nowrap">
                         {prod.project?.name || '—'}
                       </span>
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-4 py-3.5 whitespace-nowrap align-middle">
                       {prod.isArchived ? (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-200">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-200 whitespace-nowrap">
                           <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
                           Retired
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 whitespace-nowrap">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                           Active
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3.5 text-right font-medium text-slate-900">
+                    <td className="px-4 py-3.5 text-right font-medium text-slate-900 whitespace-nowrap font-mono align-middle">
                       {prod.basePrice !== null && prod.basePrice !== undefined
                         ? `₹${Number(prod.basePrice).toFixed(2)}`
                         : '—'}
                     </td>
-                    <td className="px-4 py-3.5 text-right font-bold text-slate-900">
+                    <td className="px-4 py-3.5 text-right font-bold text-slate-900 whitespace-nowrap font-mono align-middle">
                       <span
                         className={
                           (prod.inventory?.quantityOnHand ?? 0) <= 5
@@ -626,7 +626,7 @@ export const ProjectsProductsPage: React.FC = () => {
                         {prod.inventory ? prod.inventory.quantityOnHand : 0}
                       </span>
                     </td>
-                    <td className="px-4 py-3.5 text-center">
+                    <td className="px-4 py-3.5 text-center whitespace-nowrap align-middle">
                       <div className="flex items-center justify-center gap-1">
                         <button
                           onClick={() => handleOpenEditProduct(prod)}

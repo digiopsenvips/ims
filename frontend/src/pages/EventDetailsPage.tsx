@@ -1018,17 +1018,17 @@ export const EventDetailsPage: React.FC = () => {
           {/* Clean Modern Products Table */}
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="w-full text-left text-xs min-w-[750px] border-collapse">
                 <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-100">
                   <tr>
-                    <th className="px-4 py-3">Product SKU</th>
-                    <th className="px-4 py-3">Product Name</th>
-                    <th className="px-4 py-3">Project</th>
-                    <th className="px-4 py-3 text-right">Event Price (₹)</th>
-                    <th className="px-4 py-3 text-right">Allocated</th>
-                    <th className="px-4 py-3 text-right">Sold</th>
-                    <th className="px-4 py-3 text-right">Remaining</th>
-                    <th className="px-4 py-3 text-center">Status</th>
+                    <th scope="col" className="px-4 py-3 w-28 whitespace-nowrap">Product SKU</th>
+                    <th scope="col" className="px-4 py-3 min-w-[180px]">Product Name</th>
+                    <th scope="col" className="px-4 py-3 w-32 whitespace-nowrap">Project</th>
+                    <th scope="col" className="px-4 py-3 text-right w-28 whitespace-nowrap">Event Price (₹)</th>
+                    <th scope="col" className="px-4 py-3 text-right w-20 whitespace-nowrap">Allocated</th>
+                    <th scope="col" className="px-4 py-3 text-right w-20 whitespace-nowrap">Sold</th>
+                    <th scope="col" className="px-4 py-3 text-right w-20 whitespace-nowrap">Remaining</th>
+                    <th scope="col" className="px-4 py-3 text-center w-24 whitespace-nowrap">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -1045,38 +1045,38 @@ export const EventDetailsPage: React.FC = () => {
 
                       return (
                         <tr key={alloc.id} className="hover:bg-slate-50/70 transition-colors">
-                          <td className="px-4 py-3 font-mono font-semibold text-slate-600">
+                          <td className="px-4 py-3 font-mono font-semibold text-slate-600 whitespace-nowrap">
                             {alloc.productId}
                           </td>
-                          <td className="px-4 py-3 font-bold text-slate-900">
+                          <td className="px-4 py-3 font-bold text-slate-900 min-w-[180px]">
                             {alloc.productName}
                           </td>
-                          <td className="px-4 py-3 text-slate-600 font-medium">
+                          <td className="px-4 py-3 text-slate-600 font-medium whitespace-nowrap">
                             {alloc.projectName}
                           </td>
-                          <td className="px-4 py-3 text-right font-black text-slate-900">
+                          <td className="px-4 py-3 text-right font-black text-slate-900 whitespace-nowrap">
                             ₹{Number(alloc.priceAtEvent).toFixed(2)}
                           </td>
-                          <td className="px-4 py-3 text-right text-slate-600 font-semibold">
+                          <td className="px-4 py-3 text-right text-slate-600 font-semibold whitespace-nowrap">
                             {alloc.allocatedQty}
                           </td>
-                          <td className="px-4 py-3 text-right text-emerald-700 font-bold">
+                          <td className="px-4 py-3 text-right text-emerald-700 font-bold whitespace-nowrap">
                             {alloc.soldQty}
                           </td>
-                          <td className="px-4 py-3 text-right font-black text-slate-900 text-sm">
+                          <td className="px-4 py-3 text-right font-black text-slate-900 text-sm whitespace-nowrap">
                             {alloc.remainingQty}
                           </td>
-                          <td className="px-4 py-3 text-center">
+                          <td className="px-4 py-3 text-center whitespace-nowrap">
                             {isDepleted ? (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-red-100 text-red-800">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-red-100 text-red-800 whitespace-nowrap">
                                 Depleted
                               </span>
                             ) : isLow ? (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-amber-100 text-amber-800">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-amber-100 text-amber-800 whitespace-nowrap">
                                 Low Stock
                               </span>
                             ) : (
-                              <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-emerald-100 text-emerald-800">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 whitespace-nowrap">
                                 In Stock
                               </span>
                             )}
@@ -1149,16 +1149,16 @@ export const EventDetailsPage: React.FC = () => {
           {/* Transactions Table */}
           <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="w-full text-left text-xs min-w-[850px] border-collapse">
                 <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-100">
                   <tr>
-                    <th className="px-4 py-3">Receipt #</th>
-                    <th className="px-4 py-3">Type</th>
-                    <th className="px-4 py-3">Details / Items</th>
-                    <th className="px-4 py-3">Payment</th>
-                    <th className="px-4 py-3 text-right">Amount (₹)</th>
-                    <th className="px-4 py-3">Cashier</th>
-                    <th className="px-4 py-3">Date / Time (IST)</th>
+                    <th scope="col" className="px-4 py-3 w-24 whitespace-nowrap">Receipt #</th>
+                    <th scope="col" className="px-4 py-3 w-28 whitespace-nowrap">Type</th>
+                    <th scope="col" className="px-4 py-3 min-w-[180px]">Details / Items</th>
+                    <th scope="col" className="px-4 py-3 w-28 whitespace-nowrap">Payment</th>
+                    <th scope="col" className="px-4 py-3 text-right w-28 whitespace-nowrap">Amount (₹)</th>
+                    <th scope="col" className="px-4 py-3 w-36 whitespace-nowrap">Cashier</th>
+                    <th scope="col" className="px-4 py-3 w-40 whitespace-nowrap">Date / Time (IST)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -1174,12 +1174,12 @@ export const EventDetailsPage: React.FC = () => {
 
                       return (
                         <tr key={sale.id} className="hover:bg-slate-50/70 transition-colors">
-                          <td className="px-4 py-3 font-mono font-black text-slate-900">
+                          <td className="px-4 py-3 font-mono font-black text-slate-900 whitespace-nowrap">
                             #{sale.receiptNumber}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 whitespace-nowrap">
                             <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase ${
+                              className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase whitespace-nowrap ${
                                 isGame
                                   ? 'bg-purple-100 text-purple-800 border border-purple-200'
                                   : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
@@ -1188,7 +1188,7 @@ export const EventDetailsPage: React.FC = () => {
                               {isGame ? '🎮 GAME' : 'SALE'}
                             </span>
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 min-w-[180px]">
                             <div className="font-semibold text-slate-900">
                               {sale.gameName || sale.description || 'Stall Transaction'}
                             </div>
@@ -1198,13 +1198,13 @@ export const EventDetailsPage: React.FC = () => {
                               </div>
                             )}
                           </td>
-                          <td className="px-4 py-3 font-semibold text-slate-700">
+                          <td className="px-4 py-3 font-semibold text-slate-700 whitespace-nowrap">
                             {sale.paymentMethod}
                           </td>
-                          <td className="px-4 py-3 text-right font-black text-slate-900 text-sm">
+                          <td className="px-4 py-3 text-right font-black text-slate-900 text-sm whitespace-nowrap">
                             ₹{Number(sale.totalAmount).toFixed(2)}
                           </td>
-                          <td className="px-4 py-3 text-slate-600 font-medium">
+                          <td className="px-4 py-3 text-slate-600 font-medium whitespace-nowrap">
                             {sale.memberName || '—'}
                           </td>
                           <td className="px-4 py-3 text-slate-500 font-medium whitespace-nowrap">

@@ -503,7 +503,7 @@ export const EventsPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-5 max-w-7xl mx-auto">
+    <div className="space-y-5 w-full max-w-[1600px] mx-auto pb-12">
       {/* Header */}
       <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -785,40 +785,40 @@ export const EventsPage: React.FC = () => {
                     </div>
 
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs bg-white border border-slate-200 rounded-lg">
+                      <table className="w-full text-left text-xs bg-white border border-slate-200 rounded-lg min-w-[650px] border-collapse">
                         <thead className="bg-slate-100 text-slate-500 font-bold uppercase text-[10px]">
                           <tr>
-                            <th className="px-3 py-2">ID</th>
-                            <th className="px-3 py-2">Product</th>
-                            <th className="px-3 py-2">Project</th>
-                            <th className="px-3 py-2 text-right">Event Price (₹)</th>
-                            <th className="px-3 py-2 text-right">Allocated</th>
-                            <th className="px-3 py-2 text-right">Sold</th>
-                            <th className="px-3 py-2 text-right">Remaining</th>
+                            <th scope="col" className="px-3 py-2 w-24 whitespace-nowrap">ID</th>
+                            <th scope="col" className="px-3 py-2 min-w-[160px]">Product</th>
+                            <th scope="col" className="px-3 py-2 w-32 whitespace-nowrap">Project</th>
+                            <th scope="col" className="px-3 py-2 text-right w-28 whitespace-nowrap">Event Price (₹)</th>
+                            <th scope="col" className="px-3 py-2 text-right w-20 whitespace-nowrap">Allocated</th>
+                            <th scope="col" className="px-3 py-2 text-right w-20 whitespace-nowrap">Sold</th>
+                            <th scope="col" className="px-3 py-2 text-right w-20 whitespace-nowrap">Remaining</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {event.allocations.map(alloc => (
                             <tr key={alloc.id} className="hover:bg-slate-50">
-                              <td className="px-3 py-2 font-mono font-medium text-slate-700">
+                              <td className="px-3 py-2 font-mono font-medium text-slate-700 whitespace-nowrap">
                                 {alloc.productId}
                               </td>
-                              <td className="px-3 py-2 font-semibold text-slate-900">
+                              <td className="px-3 py-2 font-semibold text-slate-900 min-w-[160px]">
                                 {alloc.productName}
                               </td>
-                              <td className="px-3 py-2 text-slate-600">
+                              <td className="px-3 py-2 text-slate-600 whitespace-nowrap">
                                 {alloc.projectName}
                               </td>
-                              <td className="px-3 py-2 text-right font-bold text-slate-900">
+                              <td className="px-3 py-2 text-right font-bold text-slate-900 whitespace-nowrap">
                                 ₹{Number(alloc.priceAtEvent).toFixed(2)}
                               </td>
-                              <td className="px-3 py-2 text-right text-slate-700 font-medium">
+                              <td className="px-3 py-2 text-right text-slate-700 font-medium whitespace-nowrap">
                                 {alloc.allocatedQty}
                               </td>
-                              <td className="px-3 py-2 text-right text-emerald-700 font-bold">
+                              <td className="px-3 py-2 text-right text-emerald-700 font-bold whitespace-nowrap">
                                 {alloc.soldQty}
                               </td>
-                              <td className="px-3 py-2 text-right font-black text-slate-900">
+                              <td className="px-3 py-2 text-right font-black text-slate-900 whitespace-nowrap">
                                 {alloc.remainingQty}
                               </td>
                             </tr>
@@ -956,27 +956,27 @@ export const EventsPage: React.FC = () => {
                 </div>
 
                 <div className="overflow-x-auto border border-slate-200 rounded-md">
-                  <table className="w-full text-left text-xs">
+                  <table className="w-full text-left text-xs min-w-[720px] border-collapse">
                     <thead className="bg-slate-50 text-slate-600 font-semibold uppercase text-[10px]">
                       <tr>
-                        <th className="px-3 py-2.5">Product</th>
-                        <th className="px-3 py-2.5">Project</th>
-                        <th className="px-3 py-2.5 text-right">Available Stock</th>
-                        <th className="px-3 py-2.5 text-right min-w-[150px]">Quantity Allocated</th>
-                        {editingEventId && <th className="px-3 py-2.5 text-right">Sold</th>}
-                        {editingEventId && <th className="px-3 py-2.5 text-right">Remaining</th>}
-                        <th className="px-3 py-2.5 w-36 text-right">Event Price (₹)</th>
+                        <th scope="col" className="px-3 py-2.5 min-w-[180px]">Product</th>
+                        <th scope="col" className="px-3 py-2.5 w-32 whitespace-nowrap">Project</th>
+                        <th scope="col" className="px-3 py-2.5 text-right w-28 whitespace-nowrap">Available Stock</th>
+                        <th scope="col" className="px-3 py-2.5 text-right w-44 whitespace-nowrap">Quantity Allocated</th>
+                        {editingEventId && <th scope="col" className="px-3 py-2.5 text-right w-20 whitespace-nowrap">Sold</th>}
+                        {editingEventId && <th scope="col" className="px-3 py-2.5 text-right w-20 whitespace-nowrap">Remaining</th>}
+                        <th scope="col" className="px-3 py-2.5 w-36 text-right whitespace-nowrap">Event Price (₹)</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {allocationsGrid.map(row => (
                         <tr key={row.productId} className="hover:bg-slate-50/70">
-                          <td className="px-3 py-2 font-medium text-slate-900">
+                          <td className="px-3 py-2 font-medium text-slate-900 min-w-[180px]">
                             <div>{row.productName}</div>
-                            <span className="font-mono text-[10px] text-slate-400">{row.productId}</span>
+                            <span className="font-mono text-[10px] text-slate-400 whitespace-nowrap">{row.productId}</span>
                           </td>
-                          <td className="px-3 py-2 text-slate-600">{row.projectName}</td>
-                          <td className="px-3 py-2 text-right font-medium text-slate-700">
+                          <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{row.projectName}</td>
+                          <td className="px-3 py-2 text-right font-medium text-slate-700 whitespace-nowrap">
                             {row.maxAllocatable}
                           </td>
                           <td className="px-3 py-1.5 text-right">

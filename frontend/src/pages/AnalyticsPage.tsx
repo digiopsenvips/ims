@@ -137,7 +137,7 @@ export const AnalyticsPage: React.FC = () => {
   }, [analytics?.timeTrend]);
 
   return (
-    <div className="space-y-5 max-w-7xl mx-auto pb-12">
+    <div className="space-y-5 w-full max-w-[1600px] mx-auto pb-12">
       {/* Page Header */}
       <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-start sm:items-center gap-3">
@@ -627,50 +627,50 @@ export const AnalyticsPage: React.FC = () => {
                   </div>
                 ) : (
                   <div className="overflow-x-auto border border-slate-200/80 rounded-xl">
-                    <table className="w-full text-left text-xs min-w-[700px]">
+                    <table className="w-full text-left text-xs min-w-[700px] border-collapse">
                       <thead className="bg-slate-50/80 text-slate-500 border-b border-slate-200 font-semibold uppercase tracking-wider text-[10px]">
                         <tr>
-                          <th className="px-4 py-2.5">Game Name</th>
-                          <th className="px-4 py-2.5">Project</th>
-                          <th className="px-4 py-2.5 text-right">Plays</th>
-                          <th className="px-4 py-2.5 text-right">Wins</th>
-                          <th className="px-4 py-2.5 text-right">Losses</th>
-                          <th className="px-4 py-2.5 text-right">Win Rate</th>
-                          <th className="px-4 py-2.5 text-right">Rewards Distributed</th>
+                          <th scope="col" className="px-4 py-2.5 min-w-[140px] whitespace-nowrap">Game Name</th>
+                          <th scope="col" className="px-4 py-2.5 w-28 whitespace-nowrap">Project</th>
+                          <th scope="col" className="px-4 py-2.5 text-right w-20 whitespace-nowrap">Plays</th>
+                          <th scope="col" className="px-4 py-2.5 text-right w-20 whitespace-nowrap">Wins</th>
+                          <th scope="col" className="px-4 py-2.5 text-right w-20 whitespace-nowrap">Losses</th>
+                          <th scope="col" className="px-4 py-2.5 text-right w-24 whitespace-nowrap">Win Rate</th>
+                          <th scope="col" className="px-4 py-2.5 text-right w-36 whitespace-nowrap">Rewards Distributed</th>
                           {canViewRevenue && (
-                            <th className="px-4 py-2.5 text-right">Total Revenue (₹)</th>
+                            <th scope="col" className="px-4 py-2.5 text-right w-32 whitespace-nowrap">Total Revenue (₹)</th>
                           )}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {analytics.gameAnalytics.gameBreakdown.map(g => (
                           <tr key={g.gameId} className="hover:bg-slate-50/70 transition-colors">
-                            <td className="px-4 py-2.5 font-bold text-slate-900 flex items-center gap-1.5">
+                            <td className="px-4 py-2.5 font-bold text-slate-900 flex items-center gap-1.5 whitespace-nowrap">
                               <Gamepad2 className="w-3.5 h-3.5 text-purple-600" />
                               <span>{g.gameName}</span>
                             </td>
-                            <td className="px-4 py-2.5 text-slate-600 font-medium">
-                              <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 border border-slate-200">
+                            <td className="px-4 py-2.5 text-slate-600 font-medium whitespace-nowrap">
+                              <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 border border-slate-200 whitespace-nowrap">
                                 {g.projectName}
                               </span>
                             </td>
-                            <td className="px-4 py-2.5 text-right font-black text-slate-900">
+                            <td className="px-4 py-2.5 text-right font-black text-slate-900 whitespace-nowrap">
                               {g.plays}
                             </td>
-                            <td className="px-4 py-2.5 text-right font-bold text-emerald-700">
+                            <td className="px-4 py-2.5 text-right font-bold text-emerald-700 whitespace-nowrap">
                               {g.wins}
                             </td>
-                            <td className="px-4 py-2.5 text-right font-bold text-amber-700">
+                            <td className="px-4 py-2.5 text-right font-bold text-amber-700 whitespace-nowrap">
                               {g.losses}
                             </td>
-                            <td className="px-4 py-2.5 text-right font-semibold text-slate-800">
+                            <td className="px-4 py-2.5 text-right font-semibold text-slate-800 whitespace-nowrap">
                               {g.winRate}%
                             </td>
-                            <td className="px-4 py-2.5 text-right font-bold text-slate-900">
+                            <td className="px-4 py-2.5 text-right font-bold text-slate-900 whitespace-nowrap">
                               {g.rewardsIssued}
                             </td>
                             {canViewRevenue && (
-                              <td className="px-4 py-2.5 text-right font-black text-emerald-700">
+                              <td className="px-4 py-2.5 text-right font-black text-emerald-700 whitespace-nowrap">
                                 {g.revenue !== undefined
                                   ? `₹${g.revenue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
                                   : '—'}

@@ -222,7 +222,7 @@ export const InventoryPage: React.FC = () => {
   const hasActiveFilters = searchQuery.trim() !== '' || selectedProject !== 'ALL' || stockLevelFilter !== 'ALL';
 
   return (
-    <div className="space-y-5 max-w-7xl mx-auto pb-12">
+    <div className="space-y-5 w-full max-w-[1600px] mx-auto pb-12">
       {/* Header */}
       <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-start sm:items-center gap-3">
@@ -437,19 +437,19 @@ export const InventoryPage: React.FC = () => {
       {/* Inventory Table Container */}
       <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs min-w-[950px]">
-            <thead className="bg-slate-50/80 text-slate-500 border-b border-slate-200 font-semibold uppercase tracking-wider text-[10px]">
+          <table className="w-full text-left text-xs min-w-[1150px] border-collapse">
+            <thead className="bg-slate-50/90 text-slate-500 border-b border-slate-200 font-semibold uppercase tracking-wider text-[10px]">
               <tr>
-                <th className="px-4 py-3">Auto ID</th>
-                <th className="px-4 py-3">Product Name</th>
-                <th className="px-4 py-3">Project</th>
-                <th className="px-4 py-3 text-right">Warehouse Stock</th>
-                <th className="px-4 py-3 text-right">Active Stall Stock</th>
-                <th className="px-4 py-3 text-right">Total Available</th>
-                <th className="px-4 py-3 text-right">Ref Price (₹)</th>
-                <th className="px-4 py-3">Batch Notes</th>
-                <th className="px-4 py-3">Last Updated</th>
-                {canEditInventory && <th className="px-4 py-3 text-center">Adjust</th>}
+                <th scope="col" className="px-4 py-3.5 whitespace-nowrap w-[110px]">Auto ID</th>
+                <th scope="col" className="px-4 py-3.5 min-w-[200px] max-w-[280px]">Product Name</th>
+                <th scope="col" className="px-4 py-3.5 whitespace-nowrap w-[130px]">Project</th>
+                <th scope="col" className="px-4 py-3.5 text-right whitespace-nowrap w-[140px]">Warehouse Stock</th>
+                <th scope="col" className="px-4 py-3.5 text-right whitespace-nowrap w-[140px]">Active Stall Stock</th>
+                <th scope="col" className="px-4 py-3.5 text-right whitespace-nowrap w-[140px]">Total Available</th>
+                <th scope="col" className="px-4 py-3.5 text-right whitespace-nowrap w-[110px]">Ref Price (₹)</th>
+                <th scope="col" className="px-4 py-3.5 min-w-[140px] max-w-[220px]">Batch Notes</th>
+                <th scope="col" className="px-4 py-3.5 whitespace-nowrap w-[130px]">Last Updated</th>
+                {canEditInventory && <th scope="col" className="px-4 py-3.5 text-center whitespace-nowrap w-[70px]">Adjust</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -500,90 +500,99 @@ export const InventoryPage: React.FC = () => {
                         isRecent ? 'bg-amber-50/70' : ''
                       }`}
                     >
-                      <td className="px-4 py-3.5">
-                        <span className="font-mono font-bold text-slate-900 bg-slate-100/80 px-2 py-0.5 rounded border border-slate-200/60 text-xs">
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <span className="font-mono font-bold text-slate-900 bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200/80 text-xs inline-block tracking-tight whitespace-nowrap shadow-2xs">
                           {item.productId}
                         </span>
                       </td>
-                      <td className="px-4 py-3.5 font-semibold text-slate-900 min-w-[170px]">
-                        {item.productName}
+                      <td className="px-4 py-3.5 font-semibold text-slate-900 min-w-[200px] max-w-[280px]">
+                        <div className="line-clamp-2 leading-snug" title={item.productName}>
+                          {item.productName}
+                        </div>
                       </td>
-                      <td className="px-4 py-3.5 text-slate-600">
-                        <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 border border-slate-200">
+                      <td className="px-4 py-3.5 text-slate-600 whitespace-nowrap">
+                        <span className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200/80 inline-block whitespace-nowrap">
                           {item.projectName}
                         </span>
                       </td>
-                      <td className="px-4 py-3.5 text-right font-medium">
+                      <td className="px-4 py-3.5 text-right whitespace-nowrap font-mono font-medium">
                         {item.quantityOnHand === 0 ? (
-                          <span className="text-slate-400 font-mono">0</span>
+                          <span className="text-slate-400 font-semibold text-xs">0</span>
                         ) : (
-                          <span className="font-semibold text-slate-800 font-mono">
+                          <span className="font-bold text-slate-800 text-xs">
                             {item.quantityOnHand}
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3.5 text-right font-medium">
+                      <td className="px-4 py-3.5 text-right whitespace-nowrap font-mono font-medium">
                         {item.activeAllocatedQty > 0 ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 font-mono">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 whitespace-nowrap font-mono">
                             {item.activeAllocatedQty}
                           </span>
                         ) : (
-                          <span className="text-slate-400 font-mono">0</span>
+                          <span className="text-slate-400 font-semibold text-xs">0</span>
                         )}
                       </td>
-                      <td className="px-4 py-3.5 text-right font-medium">
+                      <td className="px-4 py-3.5 text-right whitespace-nowrap font-mono font-medium">
                         {item.totalAvailable === 0 ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold text-red-700 bg-red-50 border border-red-200 font-mono">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold text-red-700 bg-red-50 border border-red-200 whitespace-nowrap font-mono">
                             0 Out
                           </span>
                         ) : item.quantityOnHand === 0 && item.activeAllocatedQty > 0 ? (
                           <span
-                            className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 font-mono"
+                            className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 whitespace-nowrap font-mono"
                             title={`${item.activeAllocatedQty} units currently active at event stalls`}
                           >
                             {item.totalAvailable} Deployed
                           </span>
                         ) : item.totalAvailable <= 5 ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 font-mono">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 whitespace-nowrap font-mono">
                             {item.totalAvailable} Low
                           </span>
                         ) : (
-                          <span className="font-black text-sm text-slate-900 font-mono">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold text-slate-800 bg-slate-100 border border-slate-200 whitespace-nowrap font-mono">
                             {item.totalAvailable}
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3.5 text-right font-medium text-slate-900">
+                      <td className="px-4 py-3.5 text-right whitespace-nowrap font-mono font-medium text-slate-900">
                         {item.basePrice !== null && item.basePrice !== undefined
                           ? `₹${Number(item.basePrice).toFixed(2)}`
                           : '—'}
                       </td>
-                      <td className="px-4 py-3.5 text-slate-500 max-w-xs truncate" title={item.notes || ''}>
-                        {item.notes || '—'}
+                      <td className="px-4 py-3.5 text-slate-500 min-w-[140px] max-w-[220px]" title={item.notes || ''}>
+                        <div className="truncate text-xs">
+                          {item.notes || '—'}
+                        </div>
                       </td>
-                      <td className="px-4 py-3.5 text-slate-500 text-[11px] whitespace-nowrap">
-                        {new Date(item.lastUpdated).toLocaleDateString([], {
-                          month: 'short',
-                          day: 'numeric',
-                        })}{' '}
-                        {new Date(item.lastUpdated).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
+                      <td className="px-4 py-3.5 text-slate-500 text-xs whitespace-nowrap">
+                        <div className="font-medium text-slate-700 leading-tight">
+                          {new Date(item.lastUpdated).toLocaleDateString([], {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          {new Date(item.lastUpdated).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </div>
                       </td>
                       {canEditInventory && (
-                        <td className="px-4 py-3.5 text-center">
+                        <td className="px-4 py-3.5 text-center whitespace-nowrap">
                           <button
                             onClick={() => {
                               setAdjustItem(item);
                               setAdjustQtyInput(item.quantityOnHand.toString());
                               setAdjustNotesInput(item.notes || '');
                             }}
-                            className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                            className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center"
                             title="Adjust stock count"
                             aria-label={`Adjust stock for ${item.productName}`}
                           >
-                            <Edit2 className="w-3.5 h-3.5" />
+                            <Edit2 className="w-4 h-4" />
                           </button>
                         </td>
                       )}
