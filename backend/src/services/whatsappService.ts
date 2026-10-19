@@ -361,7 +361,7 @@ class WhatsAppService {
       `Stay connected: instagram.com/vips.en`,
       `Website: enactusvips.com`,
       ``,
-      `This is a computer-generated receipt. Please retain it for your records.`,
+      `_This is a computer-generated receipt. Please retain it for your records._`,
     ].join('\n');
   }
 
