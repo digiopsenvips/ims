@@ -17,17 +17,33 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
   const { user, isMember } = useAuth();
   const location = useLocation();
   const { socket } = useSocket();
+  const [activeEvents, setActiveEvents] = useState<AppEvent[]>([]);
   const [activeEvent, setActiveEvent] = useState<AppEvent | null>(null);
   const [showStallModal, setShowStallModal] = useState<boolean>(false);
+  const [modalTargetEventId, setModalTargetEventId] = useState<string | undefined>(undefined);
 
   const fetchActiveEvent = async () => {
     try {
       const res = await api.get<any>('/events');
       const eventList: AppEvent[] = Array.isArray(res) ? res : (res?.events || []);
       const now = Date.now();
-      const active = eventList.find(e => e.status === 'ACTIVE' && now < new Date(e.endDatetime).getTime()) ||
-        eventList.find(e => e.status === 'ACTIVE');
-      setActiveEvent(active || null);
+      const liveEvents = eventList.filter(
+        e => e.status === 'ACTIVE' && now < new Date(e.endDatetime).getTime()
+      );
+      const activeFallback = liveEvents.length > 0 ? liveEvents : eventList.filter(e => e.status === 'ACTIVE');
+      setActiveEvents(activeFallback);
+
+      const searchParams = new URLSearchParams(location.search);
+      const urlEventId = searchParams.get('eventId');
+      const storageKey = user?.id ? `enactus_ims_pos_event_${user.id}` : 'enactus_ims_pos_event_guest';
+      let savedEventId: string | null = null;
+      try {
+        savedEventId = localStorage.getItem(storageKey);
+      } catch {}
+
+      const preferredId = urlEventId || savedEventId;
+      const matched = preferredId ? activeFallback.find(e => e.id === preferredId) : null;
+      setActiveEvent(matched || activeFallback[0] || null);
     } catch {
       // Ignore background fetch error
     }
@@ -37,7 +53,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
     fetchActiveEvent();
     const interval = setInterval(fetchActiveEvent, 20000);
     return () => clearInterval(interval);
-  }, []);
+  }, [location.search, user?.id]);
 
   useEffect(() => {
     if (!socket) return;
@@ -99,7 +115,10 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
           <div className="flex items-center gap-2 px-2.5 sm:px-3 py-1 bg-emerald-50 border border-emerald-200 rounded-full text-xs text-emerald-900 shadow-2xs">
             <button
               type="button"
-              onClick={() => setShowStallModal(true)}
+              onClick={() => {
+                setModalTargetEventId(activeEvent.id);
+                setShowStallModal(true);
+              }}
               className="flex items-center gap-1.5 hover:opacity-85 transition-opacity cursor-pointer text-left focus:outline-none"
               title="Open Live Stall Management"
             >
@@ -113,10 +132,18 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
               <span className="font-bold text-slate-800 text-xs max-w-[110px] sm:max-w-[160px] truncate" title={activeEvent.name}>
                 {activeEvent.name}
               </span>
+              {activeEvents.length > 1 && (
+                <span className="px-1.5 py-0.5 bg-emerald-200/80 text-emerald-900 text-[9px] font-black rounded uppercase tracking-wider shrink-0" title={`${activeEvents.length} stalls running simultaneously`}>
+                  {activeEvents.length} Live
+                </span>
+              )}
             </button>
             <button
               type="button"
-              onClick={() => setShowStallModal(true)}
+              onClick={() => {
+                setModalTargetEventId(activeEvent.id);
+                setShowStallModal(true);
+              }}
               className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] uppercase rounded tracking-wider transition-colors shrink-0 cursor-pointer shadow-2xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
               title="Manage live stall operations, stock, and games"
               aria-label="Manage live stall"
@@ -131,7 +158,10 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
             <span className="text-[11px] font-medium text-slate-600">No Live Stall</span>
             <button
               type="button"
-              onClick={() => setShowStallModal(true)}
+              onClick={() => {
+                setModalTargetEventId(undefined);
+                setShowStallModal(true);
+              }}
               className="text-emerald-700 font-bold hover:underline text-[11px] ml-0.5 cursor-pointer focus:outline-none"
             >
               Open Stall
@@ -144,7 +174,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
 
         {!isMember && location.pathname !== '/sales-entry' && (
           <Link
-            to="/sales-entry"
+            to={activeEvent ? `/sales-entry?eventId=${activeEvent.id}` : '/sales-entry'}
             className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
           >
             <ShoppingCart className="w-3.5 h-3.5" />
@@ -157,6 +187,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
         isOpen={showStallModal}
         onClose={() => setShowStallModal(false)}
         activeEvent={activeEvent}
+        initialEventId={modalTargetEventId}
         onEventUpdated={fetchActiveEvent}
       />
     </header>

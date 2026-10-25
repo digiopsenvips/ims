@@ -28,10 +28,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
   const { user, logout, isDeveloper, isAdmin, isHead, isMember, hasPermission } = useAuth();
   const location = useLocation();
 
+  const storageKey = user?.id ? `enactus_ims_pos_event_${user.id}` : 'enactus_ims_pos_event_guest';
+  let savedEventId: string | null = null;
+  try {
+    savedEventId = localStorage.getItem(storageKey);
+  } catch {}
+
   const isItemActive = (to: string) => {
     const currentPath = location.pathname;
     if (to === '/dashboard') return currentPath === '/dashboard';
-    if (to === '/sales-entry') return currentPath === '/sales-entry';
+    if (to.startsWith('/sales-entry')) return currentPath === '/sales-entry';
     if (to === '/sales') return currentPath === '/sales';
     if (to === '/events') return currentPath === '/events' || currentPath.startsWith('/events/');
     if (to === '/combos') return currentPath === '/combos';
@@ -64,7 +70,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
         },
         {
           label: 'New Sale',
-          to: '/sales-entry',
+          to: savedEventId ? `/sales-entry?eventId=${savedEventId}` : '/sales-entry',
           icon: ShoppingCart,
           badge: 'POS',
           show: true,

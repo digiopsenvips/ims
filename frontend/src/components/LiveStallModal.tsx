@@ -27,6 +27,7 @@ interface LiveStallModalProps {
   onClose: () => void;
   activeEvent: AppEvent | null;
   onEventUpdated?: () => void;
+  initialEventId?: string;
 }
 
 function formatISTDateTime(iso?: string | null): string {
@@ -48,6 +49,7 @@ export const LiveStallModal: React.FC<LiveStallModalProps> = ({
   onClose,
   activeEvent,
   onEventUpdated,
+  initialEventId,
 }) => {
   const navigate = useNavigate();
   const { user, isDeveloper, isAdmin, isHead, hasPermission } = useAuth();
@@ -105,14 +107,18 @@ export const LiveStallModal: React.FC<LiveStallModalProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [isOpen, activeEvent?.id, selectedEventId]);
+  }, [isOpen, activeEvent?.id, initialEventId, selectedEventId]);
 
   useEffect(() => {
     if (isOpen) {
-      setSelectedEventId(activeEvent?.id || '');
+      const initial = initialEventId || activeEvent?.id || '';
+      setSelectedEventId(prev => prev || initial);
       loadStallData();
+    } else {
+      setSelectedEventId('');
+      setStallDetails(null);
     }
-  }, [isOpen, activeEvent?.id]);
+  }, [isOpen]);
 
   // Handle switching selected stall in dropdown
   const handleSelectEvent = async (eventId: string) => {

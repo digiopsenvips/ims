@@ -1109,6 +1109,11 @@ router.post(
         return;
       }
 
+      if (game.eventId && game.eventId !== eventId) {
+        res.status(400).json({ error: `Game "${game.name}" is restricted to a specific event/stall and cannot be played at this stall.` });
+        return;
+      }
+
       const event = await prisma.event.findUnique({
         where: { id: eventId },
       });

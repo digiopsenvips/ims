@@ -695,7 +695,7 @@ export const EventsPage: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-2">
                     {isActive ? (
                       <Link
-                        to="/sales-entry"
+                        to={`/sales-entry?eventId=${event.id}`}
                         className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors cursor-pointer"
                         title="Open POS Terminal for live sales at this stall"
                       >

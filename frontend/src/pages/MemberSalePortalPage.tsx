@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { api } from '../lib/api';
@@ -36,9 +36,59 @@ import {
 export const MemberSalePortalPage: React.FC = () => {
   const { user } = useAuth();
   const { socket } = useSocket();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Storage key uniquely scoped to authenticated user so multiple member logins on the same device don't conflict
+  const storageKey = user?.id ? `enactus_ims_pos_event_${user.id}` : 'enactus_ims_pos_event_guest';
 
   const [events, setEvents] = useState<AppEvent[]>([]);
-  const [selectedEventId, setSelectedEventId] = useState<string>('');
+  // Initialize from URL search param if present, then user-scoped localStorage fallback
+  const [selectedEventId, setSelectedEventId] = useState<string>(() => {
+    const urlEvent = searchParams.get('eventId');
+    if (urlEvent) return urlEvent;
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) return saved;
+    } catch {
+      // Storage unavailable
+    }
+    return '';
+  });
+
+  // Authoritative ref to prevent stale closures in async callbacks and socket events
+  const selectedEventIdRef = useRef<string>(selectedEventId);
+  useEffect(() => {
+    selectedEventIdRef.current = selectedEventId;
+  }, [selectedEventId]);
+
+  // Synchronize URL search params whenever event selection is updated
+  const handleSelectEvent = useCallback((eventId: string) => {
+    setSelectedEventId(eventId);
+    selectedEventIdRef.current = eventId;
+    try {
+      if (eventId) {
+        localStorage.setItem(storageKey, eventId);
+      }
+    } catch {
+      // Storage unavailable
+    }
+
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (eventId) {
+        next.set('eventId', eventId);
+      } else {
+        next.delete('eventId');
+      }
+      return next;
+    }, { replace: true });
+
+    setCart([]);
+    setSelectedProject('ALL');
+    setSearchQuery('');
+    setErrorMessage(null);
+  }, [setSearchParams, storageKey]);
+
   const [combos, setCombos] = useState<Combo[]>([]);
   const [portalTab, setPortalTab] = useState<'PRODUCTS' | 'COMBOS'>('PRODUCTS');
   const [pickingCombo, setPickingCombo] = useState<Combo | null>(null);
@@ -119,28 +169,71 @@ export const MemberSalePortalPage: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [searchQuery]);
 
+  // Resolve target event ID without ever clobbering an already valid event selection
+  const resolveAuthoritativeEventId = useCallback((eventList: AppEvent[]): string => {
+    if (!eventList || eventList.length === 0) return '';
+
+    // 1. Explicit URL query parameter has top priority
+    const urlEvent = searchParams.get('eventId');
+    if (urlEvent && eventList.some(e => e.id === urlEvent)) {
+      return urlEvent;
+    }
+
+    // 2. Currently selected event in state/ref — preserve if valid!
+    const currentSelected = selectedEventIdRef.current;
+    if (currentSelected && eventList.some(e => e.id === currentSelected)) {
+      return currentSelected;
+    }
+
+    // 3. User-scoped persisted event in localStorage
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved && eventList.some(e => e.id === saved)) {
+        return saved;
+      }
+    } catch {
+      // Storage unavailable
+    }
+
+    // 4. Default to first active non-expired event only if no selection exists
+    const now = Date.now();
+    const active =
+      eventList.find(
+        (e: AppEvent) => e.status === 'ACTIVE' && now < new Date(e.endDatetime).getTime()
+      ) ||
+      eventList.find(
+        (e: AppEvent) => e.status !== 'ENDED' && now < new Date(e.endDatetime).getTime()
+      ) ||
+      eventList[0];
+
+    return active?.id || '';
+  }, [searchParams, storageKey]);
+
   // Load events (from network or offline cache)
-  const fetchEvents = async () => {
+  const fetchEvents = useCallback(async () => {
     try {
       const data = await api.get('/events');
       if (data && Array.isArray(data.events)) {
         setEvents(data.events);
         await cacheEvents(data.events);
 
-        // Auto-select active non-expired event if available
-        if (!selectedEventId && data.events.length > 0) {
-          const now = Date.now();
-          const active =
-            data.events.find(
-              (e: AppEvent) =>
-                e.status === 'ACTIVE' && now < new Date(e.endDatetime).getTime()
-            ) ||
-            data.events.find(
-              (e: AppEvent) =>
-                e.status !== 'ENDED' && now < new Date(e.endDatetime).getTime()
-            ) ||
-            data.events[0];
-          setSelectedEventId(active.id);
+        const targetId = resolveAuthoritativeEventId(data.events);
+        if (targetId) {
+          if (selectedEventIdRef.current !== targetId) {
+            setSelectedEventId(targetId);
+            selectedEventIdRef.current = targetId;
+          }
+          try {
+            localStorage.setItem(storageKey, targetId);
+          } catch {}
+
+          if (searchParams.get('eventId') !== targetId) {
+            setSearchParams(prev => {
+              const next = new URLSearchParams(prev);
+              next.set('eventId', targetId);
+              return next;
+            }, { replace: true });
+          }
         }
       }
     } catch (err) {
@@ -148,19 +241,22 @@ export const MemberSalePortalPage: React.FC = () => {
       const cached = await getCachedEvents();
       if (cached && cached.length > 0) {
         setEvents(cached);
-        if (!selectedEventId) {
-          setSelectedEventId(cached[0].id);
+        const targetId = resolveAuthoritativeEventId(cached);
+        if (targetId && selectedEventIdRef.current !== targetId) {
+          setSelectedEventId(targetId);
+          selectedEventIdRef.current = targetId;
         }
       }
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [resolveAuthoritativeEventId, searchParams, setSearchParams, storageKey]);
 
-  const fetchCombos = async () => {
+  const fetchCombos = useCallback(async () => {
+    const activeId = selectedEventIdRef.current || selectedEventId;
     try {
-      const url = selectedEventId
-        ? `/combos?eventId=${selectedEventId}&status=ACTIVE`
+      const url = activeId
+        ? `/combos?eventId=${activeId}&status=ACTIVE`
         : '/combos?status=ACTIVE';
       const data = await api.get(url);
       if (data && Array.isArray(data.combos)) {
@@ -169,33 +265,51 @@ export const MemberSalePortalPage: React.FC = () => {
     } catch (err) {
       console.warn('Failed to load combos:', err);
     }
-  };
+  }, [selectedEventId]);
+
+  // Handle external URL parameter changes (e.g. browser back/forward or navigation links)
+  useEffect(() => {
+    const urlEvent = searchParams.get('eventId');
+    if (urlEvent && urlEvent !== selectedEventIdRef.current && events.some(e => e.id === urlEvent)) {
+      setSelectedEventId(urlEvent);
+      selectedEventIdRef.current = urlEvent;
+      try {
+        localStorage.setItem(storageKey, urlEvent);
+      } catch {}
+    }
+  }, [searchParams, events, storageKey]);
 
   useEffect(() => {
     fetchEvents();
-  }, []);
+  }, [fetchEvents]);
 
   useEffect(() => {
     fetchCombos();
-  }, [selectedEventId]);
+  }, [fetchCombos]);
+
+  // Keep latest function references for socket event handlers to prevent stale closures
+  const fetchEventsRef = useRef(fetchEvents);
+  fetchEventsRef.current = fetchEvents;
+  const fetchCombosRef = useRef(fetchCombos);
+  fetchCombosRef.current = fetchCombos;
 
   // Listen for real-time inventory and event updates
   useEffect(() => {
     if (!socket) return;
 
     const handleInventoryUpdate = () => {
-      fetchEvents();
-      fetchCombos();
+      fetchEventsRef.current();
+      fetchCombosRef.current();
     };
 
     const handleEventUpdate = () => {
-      fetchEvents();
-      fetchCombos();
+      fetchEventsRef.current();
+      fetchCombosRef.current();
     };
 
     const handleComboUpdate = () => {
-      fetchCombos();
-      fetchEvents();
+      fetchCombosRef.current();
+      fetchEventsRef.current();
     };
 
     socket.on('inventory:updated', handleInventoryUpdate);
@@ -991,11 +1105,7 @@ export const MemberSalePortalPage: React.FC = () => {
               <select
                 value={selectedEventId}
                 onChange={e => {
-                  setSelectedEventId(e.target.value);
-                  setCart([]);
-                  setSelectedProject('ALL');
-                  setSearchQuery('');
-                  setErrorMessage(null);
+                  handleSelectEvent(e.target.value);
                 }}
                 className="w-full text-xs font-semibold bg-slate-50 hover:bg-slate-100/80 border border-slate-300 rounded-lg py-2 pl-3 pr-8 text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900 appearance-none cursor-pointer"
               >
@@ -1155,9 +1265,7 @@ export const MemberSalePortalPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    setSelectedEventId(eligibleActiveEvent.id);
-                    setCart([]);
-                    setErrorMessage(null);
+                    handleSelectEvent(eligibleActiveEvent.id);
                   }}
                   className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg shrink-0 cursor-pointer text-xs transition-colors shadow-2xs self-start sm:self-auto"
                 >

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
@@ -35,10 +35,40 @@ export const GamePlayPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
+  const storageKey = user?.id ? `enactus_ims_pos_event_${user.id}` : 'enactus_ims_pos_event_guest';
+
   const [games, setGames] = useState<Game[]>([]);
   const [events, setEvents] = useState<AppEvent[]>([]);
   const [selectedGameId, setSelectedGameId] = useState<string>(searchParams.get('gameId') || '');
-  const [selectedEventId, setSelectedEventId] = useState<string>(searchParams.get('eventId') || '');
+  const [selectedEventId, setSelectedEventId] = useState<string>(() => {
+    const urlEvent = searchParams.get('eventId');
+    if (urlEvent) return urlEvent;
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) return saved;
+    } catch {}
+    return '';
+  });
+
+  const selectedEventIdRef = useRef<string>(selectedEventId);
+  useEffect(() => {
+    selectedEventIdRef.current = selectedEventId;
+  }, [selectedEventId]);
+
+  const handleSelectEvent = useCallback((eventId: string) => {
+    setSelectedEventId(eventId);
+    selectedEventIdRef.current = eventId;
+    try {
+      if (eventId) localStorage.setItem(storageKey, eventId);
+    } catch {}
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (eventId) next.set('eventId', eventId);
+      else next.delete('eventId');
+      return next;
+    }, { replace: true });
+    setRecordedResult(null);
+  }, [setSearchParams, storageKey]);
 
   // Payment State
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('UPI');
@@ -85,12 +115,24 @@ export const GamePlayPage: React.FC = () => {
           return !isPast && !isUp;
         });
 
-        // Never silently default to an ended or closed event
-        if (!selectedEventId) {
+        // Preserve existing selection if valid
+        const currentTarget = searchParams.get('eventId') || selectedEventIdRef.current || (() => {
+          try { return localStorage.getItem(storageKey); } catch { return null; }
+        })();
+
+        if (currentTarget && eventsRes.events.some((e: AppEvent) => e.id === currentTarget)) {
+          if (selectedEventIdRef.current !== currentTarget) {
+            setSelectedEventId(currentTarget);
+            selectedEventIdRef.current = currentTarget;
+          }
+        } else if (!selectedEventIdRef.current) {
           if (activeEv) {
             setSelectedEventId(activeEv.id);
+            selectedEventIdRef.current = activeEv.id;
+            try { localStorage.setItem(storageKey, activeEv.id); } catch {}
           } else if (eventsRes.events.length > 0) {
             setSelectedEventId(eventsRes.events[0].id);
+            selectedEventIdRef.current = eventsRes.events[0].id;
           }
         }
       }
@@ -343,7 +385,7 @@ export const GamePlayPage: React.FC = () => {
 
         <div className="flex items-center gap-2 self-start sm:self-center shrink-0">
           <Link
-            to="/sales-entry"
+            to={selectedEventId ? `/sales-entry?eventId=${selectedEventId}` : '/sales-entry'}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/60 transition-colors cursor-pointer"
             title="Return to POS Sales Entry"
           >
@@ -479,8 +521,7 @@ export const GamePlayPage: React.FC = () => {
                     <select
                       value={selectedEventId}
                       onChange={e => {
-                        setSelectedEventId(e.target.value);
-                        setRecordedResult(null);
+                        handleSelectEvent(e.target.value);
                       }}
                       className="w-full text-xs font-semibold bg-slate-50 focus:bg-white border border-slate-300 rounded-lg p-2.5 pr-8 text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900 cursor-pointer appearance-none min-h-[38px] transition-colors"
                     >

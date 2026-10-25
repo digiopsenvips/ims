@@ -17,24 +17,39 @@ const createMemberSaleSchema = z.object({
   paymentMethod: z.enum(['CASH', 'UPI']),
 });
 
-export async function getActiveSalesContext() {
+export async function getActiveSalesContext(targetEventId?: string) {
   await requireRole(['DEVELOPER', 'ADMIN', 'HEAD', 'MEMBER']);
 
-  const activeEvent = await prisma.event.findFirst({
-    where: { status: 'ACTIVE' },
-    include: {
-      products: {
+  const activeEvent = targetEventId
+    ? await prisma.event.findFirst({
+        where: { id: targetEventId, status: 'ACTIVE' },
         include: {
-          product: {
+          products: {
             include: {
-              project: true,
+              product: {
+                include: {
+                  project: true,
+                },
+              },
             },
           },
         },
-      },
-    },
-    orderBy: { startDate: 'asc' },
-  });
+      })
+    : await prisma.event.findFirst({
+        where: { status: 'ACTIVE' },
+        include: {
+          products: {
+            include: {
+              product: {
+                include: {
+                  project: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: { startDate: 'asc' },
+      });
 
   if (!activeEvent) {
     return {
