@@ -14,14 +14,19 @@ import {
   ArrowUpDown,
   Phone,
   User as UserIcon,
-  Pencil,
-  Trash2,
   X,
   AlertTriangle,
   Check,
   ChevronLeft,
   ChevronRight,
   Loader2,
+  Eye,
+  ShieldCheck,
+  Copy,
+  CheckCircle2,
+  Lock,
+  Clock,
+  Info,
 } from 'lucide-react';
 
 function getPageNumbers(current: number, total: number): (number | string)[] {
@@ -65,19 +70,11 @@ export const SalesManagementPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isFetching, setIsFetching] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  // Developer Management States
-  const [editingSale, setEditingSale] = useState<Sale | null>(null);
-  const [editQty, setEditQty] = useState<number>(1);
-  const [editPrice, setEditPrice] = useState<number>(0);
-  const [editPaymentMethod, setEditPaymentMethod] = useState<PaymentMethod>('CASH');
-  const [editCashAmount, setEditCashAmount] = useState<string>('');
-  const [editUpiAmount, setEditUpiAmount] = useState<string>('');
-  const [editCustomerName, setEditCustomerName] = useState<string>('');
-  const [editCustomerPhone, setEditCustomerPhone] = useState<string>('');
-  const [editSaleTime, setEditSaleTime] = useState<string>('');
-  const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+
+  // Modal & Details State
+  const [selectedSaleForDetails, setSelectedSaleForDetails] = useState<Sale | null>(null);
+  const [copiedReceiptText, setCopiedReceiptText] = useState<boolean>(false);
 
   const canViewRevenue = isDeveloper || isAdmin || hasPermission('view_revenue');
   const canViewPII = isDeveloper || isAdmin || hasPermission('view_customer_pii');
@@ -283,85 +280,63 @@ export const SalesManagementPage: React.FC = () => {
     updateUrlState({ page: 1, payment });
   };
 
-  // Developer Edit Handlers
-  const handleOpenEdit = (sale: Sale) => {
-    setEditingSale(sale);
-    setEditQty(sale.quantity);
-    setEditPrice(sale.unitPrice || 0);
-    setEditPaymentMethod(sale.paymentMethod);
-    setEditCashAmount(sale.cashAmount != null ? sale.cashAmount.toString() : '');
-    setEditUpiAmount(sale.upiAmount != null ? sale.upiAmount.toString() : '');
-    setEditCustomerName(sale.customerName || '');
-    setEditCustomerPhone(sale.customerPhone || '');
-    setEditSaleTime(sale.saleTime ? new Date(sale.saleTime).toISOString().slice(0, 16) : '');
-  };
-
-  const handleSaveEdit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingSale) return;
-
-    const lineTotal = editQty * editPrice;
-    let cashVal: number | undefined;
-    let upiVal: number | undefined;
-
-    if (editPaymentMethod === 'CASH_UPI') {
-      cashVal = parseFloat(editCashAmount) || 0;
-      upiVal = parseFloat(editUpiAmount) || 0;
-      if (Math.abs(lineTotal - (cashVal + upiVal)) > 0.01) {
-        alert(`Split amounts (Cash ₹${cashVal} + UPI ₹${upiVal}) must equal total amount ₹${lineTotal.toFixed(2)}.`);
-        return;
+  // Receipt Text Formatter for WhatsApp / Copy
+  const getReceiptSummaryText = (sale: Sale) => {
+    const receiptLabel = sale.receiptNumber ? `#${sale.receiptNumber}` : `ID-${sale.id}`;
+    const lines = [
+      `🧾 *Enactus VIPS-TC Sales Receipt*`,
+      `Receipt No: ${receiptLabel}`,
+      `Date: ${new Date(sale.saleTime).toLocaleString('en-IN')}`,
+      `Event: ${sale.eventName}`,
+      `Seller: ${sale.memberName} (@${sale.memberUsername})`,
+      `--------------------------------`,
+    ];
+    if (sale.transactionType === 'GAME') {
+      lines.push(`Type: Game Session`);
+      lines.push(`Game: ${sale.game?.name || sale.productName || 'Stall Game'}`);
+      if (sale.gameSession) {
+        lines.push(`Result: ${sale.gameSession.result === 'WIN' ? '🏆 WIN' : 'LOSE'}`);
+        if (sale.gameSession.rewardProductName) {
+          lines.push(`Reward: ${sale.gameSession.rewardProductName} × ${sale.gameSession.rewardQuantity}`);
+        }
       }
-    } else if (editPaymentMethod === 'CASH') {
-      cashVal = lineTotal;
-      upiVal = 0;
-    } else if (editPaymentMethod === 'UPI') {
-      cashVal = 0;
-      upiVal = lineTotal;
-    }
-
-    setIsSavingEdit(true);
-    try {
-      const res = await api.put(`/sales/${editingSale.id}`, {
-        quantity: editQty,
-        unitPrice: editPrice,
-        paymentMethod: editPaymentMethod,
-        cashAmount: cashVal,
-        upiAmount: upiVal,
-        customerName: editCustomerName.trim() || null,
-        customerPhone: editCustomerPhone.trim() || null,
-        saleTime: editSaleTime ? new Date(editSaleTime).toISOString() : undefined,
+    } else if (sale.transactionType === 'COMBO' || sale.comboId) {
+      lines.push(`Type: Combo Offer`);
+      lines.push(`Combo: ${sale.comboName || sale.productName}`);
+      if (sale.items && sale.items.length > 0) {
+        sale.items.forEach(it => {
+          lines.push(`  • ${it.productName} × ${it.quantity}`);
+        });
+      }
+    } else if (sale.items && sale.items.length > 0) {
+      sale.items.forEach(it => {
+        lines.push(`• ${it.productName} × ${it.quantity} @ ₹${it.unitPrice || 0} = ₹${(it.quantity * (it.unitPrice || 0)).toFixed(2)}`);
       });
-      if (res?.sale) {
-        setSales(prev => prev.map(s => (s.id === editingSale.id ? { ...s, ...res.sale } : s)));
-      }
-      await fetchSalesData();
-      const receiptLabel = editingSale.receiptNumber ? `#${editingSale.receiptNumber}` : 'record';
-      setEditingSale(null);
-      setActionMessage(`Sale (${receiptLabel}) updated successfully!`);
-      setTimeout(() => setActionMessage(null), 3500);
-    } catch (err: any) {
-      alert(err.message || 'Failed to update sale record');
-    } finally {
-      setIsSavingEdit(false);
+    } else {
+      lines.push(`• ${sale.productName} × ${sale.quantity}`);
     }
+    lines.push(`--------------------------------`);
+    lines.push(`Payment: ${sale.paymentMethod}`);
+    if (sale.paymentMethod === 'CASH_UPI') {
+      lines.push(`  Cash: ₹${sale.cashAmount ?? 0} | UPI: ₹${sale.upiAmount ?? 0}`);
+    }
+    if (sale.totalAmount != null) {
+      lines.push(`Total Amount: ₹${Number(sale.totalAmount).toFixed(2)}`);
+    }
+    if (sale.customerName) {
+      lines.push(`Customer: ${sale.customerName} (${sale.customerPhone || 'No Phone'})`);
+    }
+    lines.push(`Status: Ledger Preserved & Audited`);
+    return lines.join('\n');
   };
 
-  const handleDeleteSale = async (sale: Sale) => {
-    const receiptLabel = sale.receiptNumber ? `#${sale.receiptNumber}` : 'record';
-    if (!window.confirm(`Are you sure you want to delete Sale (${receiptLabel})? This will permanently remove this transaction.`)) {
-      return;
-    }
-    try {
-      await api.delete(`/sales/${sale.id}`);
-      setActionMessage(`Sale (${receiptLabel}) deleted successfully!`);
-      await fetchSalesData();
-      setTimeout(() => setActionMessage(null), 3500);
-    } catch (err: any) {
-      alert(err.message || 'Failed to delete sale record');
-    }
+  const handleCopyReceipt = () => {
+    if (!selectedSaleForDetails) return;
+    const text = getReceiptSummaryText(selectedSaleForDetails);
+    navigator.clipboard.writeText(text);
+    setCopiedReceiptText(true);
+    setTimeout(() => setCopiedReceiptText(false), 2500);
   };
-
-
 
   // Export CSV Handler (fetches ALL matching records with canonical Receipt No.)
   const handleExportCSV = async () => {
@@ -442,29 +417,27 @@ export const SalesManagementPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-5 w-full max-w-[1600px] mx-auto pb-12">
+    <div className="space-y-4 sm:space-y-5 w-full max-w-[1600px] mx-auto pb-12 min-w-0">
       {/* Header */}
-      <div className="bg-white border border-slate-200/80 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <ReceiptText className="w-5 h-5 text-emerald-600" />
-            <h1 className="text-xl font-bold text-slate-900 tracking-tight">
+            <ReceiptText className="w-5 h-5 text-emerald-600 shrink-0" />
+            <h1 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">
               Sales History
             </h1>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Official chronological transactions ledger with multi-payment tracking and CSV export.
+            Official chronological transactions ledger with multi-payment tracking and audit-preserved records.
           </p>
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto">
-
-
           {canExport && (
             <button
               onClick={handleExportCSV}
               disabled={totalRecords === 0}
-              className="px-3.5 py-2 text-xs font-semibold rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+              className="px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs font-semibold rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
             >
               <Download className="w-3.5 h-3.5" />
               <span>Export CSV</span>
@@ -474,14 +447,14 @@ export const SalesManagementPage: React.FC = () => {
       </div>
 
       {actionMessage && (
-        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-lg flex items-center gap-2 shadow-sm animate-fade-in">
+        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold rounded-xl flex items-center gap-2 shadow-xs animate-fade-in">
           <Check className="w-4 h-4 text-emerald-600 shrink-0" />
           <span>{actionMessage}</span>
         </div>
       )}
 
       {errorMessage && (
-        <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold rounded-lg flex items-center justify-between shadow-sm">
+        <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold rounded-xl flex items-center justify-between shadow-xs">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
             <span>{errorMessage}</span>
@@ -497,23 +470,23 @@ export const SalesManagementPage: React.FC = () => {
       )}
 
       {/* Tabs: All-Time Sales vs Per-Event Sales */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-3">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+        <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
           <button
             onClick={() => handleTabChange('all-time')}
-            className={`px-4 py-2 text-xs font-bold rounded-md transition-all cursor-pointer ${
+            className={`px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
               activeTab === 'all-time'
-                ? 'bg-slate-900 text-white shadow-sm'
+                ? 'bg-slate-900 text-white shadow-xs'
                 : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            All-Time Sales (Combined)
+            All-Time Sales
           </button>
           <button
             onClick={() => handleTabChange('per-event')}
-            className={`px-4 py-2 text-xs font-bold rounded-md transition-all cursor-pointer ${
+            className={`px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
               activeTab === 'per-event'
-                ? 'bg-slate-900 text-white shadow-sm'
+                ? 'bg-slate-900 text-white shadow-xs'
                 : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
             }`}
           >
@@ -523,12 +496,12 @@ export const SalesManagementPage: React.FC = () => {
 
         {/* Per-Event Selector Dropdown */}
         {activeTab === 'per-event' && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-slate-500">Event:</span>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <span className="text-xs font-semibold text-slate-500 shrink-0">Event:</span>
             <select
               value={selectedEventId}
               onChange={e => handleEventChange(e.target.value)}
-              className="text-xs font-semibold bg-white border border-slate-300 rounded-md p-1.5 text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900 cursor-pointer"
+              className="w-full sm:w-auto text-xs font-semibold bg-white border border-slate-300 rounded-lg p-1.5 text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900 cursor-pointer truncate"
             >
               {events.map(ev => (
                 <option key={ev.id} value={ev.id}>
@@ -541,74 +514,80 @@ export const SalesManagementPage: React.FC = () => {
       </div>
 
       {/* Filter and Metric Bar */}
-      <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
-        {/* Search */}
-        <div className="w-full md:w-80 relative">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search product, S.No., member..."
-            value={searchQuery}
-            onChange={handleSearchInputChange}
-            className="w-full pl-9 pr-8 py-2 text-xs border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-slate-900"
-          />
-          {isFetching && (
-            <Loader2 className="w-3.5 h-3.5 absolute right-3 top-3 text-slate-400 animate-spin" />
-          )}
-        </div>
+      <div className="bg-white p-3.5 sm:p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
+        {/* Row 1: Search and Filters */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          {/* Search input */}
+          <div className="w-full lg:max-w-xs relative">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search product, receipt #, member..."
+              value={searchQuery}
+              onChange={handleSearchInputChange}
+              className="w-full pl-9 pr-8 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-900"
+            />
+            {isFetching && (
+              <Loader2 className="w-3.5 h-3.5 absolute right-3 top-3 text-slate-400 animate-spin" />
+            )}
+          </div>
 
-        {/* Payment Filter */}
-        <div className="flex items-center gap-2 w-full md:w-auto">
-          <span className="text-xs font-semibold text-slate-500">Payment:</span>
-          <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5 text-xs">
-            {(['ALL', 'UPI', 'CASH', 'CASH_UPI'] as const).map(p => (
-              <button
-                key={p}
-                onClick={() => handlePaymentChange(p)}
-                className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all cursor-pointer ${
-                  paymentFilter === p ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
-                }`}
-              >
-                {p === 'CASH_UPI' ? 'CASH + UPI' : p}
-              </button>
-            ))}
+          {/* Filter Pills */}
+          <div className="flex flex-wrap items-center gap-2.5 sm:gap-4">
+            {/* Payment Filter */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-slate-500 shrink-0">Payment:</span>
+              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs">
+                {(['ALL', 'UPI', 'CASH', 'CASH_UPI'] as const).map(p => (
+                  <button
+                    key={p}
+                    onClick={() => handlePaymentChange(p)}
+                    className={`px-2 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer whitespace-nowrap ${
+                      paymentFilter === p ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    {p === 'CASH_UPI' ? 'CASH+UPI' : p}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Transaction Type Filter */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-slate-500 shrink-0">Type:</span>
+              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs">
+                {(['ALL', 'SALES', 'COMBOS', 'GAMES'] as const).map(t => (
+                  <button
+                    key={t}
+                    onClick={() => updateUrlState({ page: 1, txType: t })}
+                    className={`px-2 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer whitespace-nowrap ${
+                      transactionFilter === t ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Transaction Type Filter */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-slate-500">Transaction:</span>
-          <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5 text-xs">
-            {(['ALL', 'SALES', 'COMBOS', 'GAMES'] as const).map(t => (
-              <button
-                key={t}
-                onClick={() => updateUrlState({ page: 1, txType: t })}
-                className={`px-2.5 py-1 rounded text-[11px] font-bold transition-all cursor-pointer ${
-                  transactionFilter === t ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'
-                }`}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Mini stats summary */}
-        <div className="flex items-center gap-4 text-xs">
-          <div>
-            <span className="text-slate-500">Showing:</span>{' '}
-            <span className="font-bold text-slate-900">
-              {fromRecord}–{toRecord} of {totalRecords} sales
-            </span>
-          </div>
-          <div>
-            <span className="text-slate-500">Units:</span>{' '}
-            <span className="font-bold text-slate-900">{summary.totalUnits}</span>
+        {/* Row 2: Metrics Chips */}
+        <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="text-slate-600">
+              <span className="text-slate-400">Showing:</span>{' '}
+              <span className="font-bold text-slate-900">{fromRecord}–{toRecord}</span> of <span className="font-bold text-slate-900">{totalRecords}</span> records
+            </div>
+            <div className="text-slate-600">
+              <span className="text-slate-400">Units:</span>{' '}
+              <span className="font-bold text-slate-900">{summary.totalUnits}</span>
+            </div>
           </div>
           {canViewRevenue && summary.totalRevenue !== null && (
-            <div>
-              <span className="text-slate-500">Total:</span>{' '}
-              <span className="font-black text-emerald-700">
+            <div className="px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg">
+              <span className="text-slate-600 text-[11px] font-medium mr-1.5">Total Revenue:</span>
+              <span className="font-black text-emerald-800 text-xs sm:text-sm">
                 ₹{summary.totalRevenue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </span>
             </div>
@@ -616,39 +595,42 @@ export const SalesManagementPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Sales Table */}
-      <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden relative">
-        {/* Subtle loading overlay on page change without blanking table */}
+      {/* Main Ledger Content Container */}
+      <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden relative min-w-0">
+        {/* Subtle loading indicator on page change */}
         {isFetching && (
-          <div className="absolute top-0 left-0 right-0 h-0.5 bg-slate-900/10 overflow-hidden">
-            <div className="w-full h-full bg-slate-800 animate-pulse" />
+          <div className="absolute top-0 left-0 right-0 h-0.5 bg-slate-900/10 overflow-hidden z-30">
+            <div className="w-full h-full bg-emerald-600 animate-pulse" />
           </div>
         )}
 
-        <div className="overflow-x-auto">
+        {/* 1. DESKTOP VIEW: Full Structured Table (hidden on mobile/tablet) */}
+        <div className="hidden lg:block overflow-x-auto min-w-0 max-w-full">
           <table className="w-full text-left text-xs min-w-[1250px] border-collapse">
             <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold uppercase tracking-wider text-[10px]">
               <tr>
-                <th scope="col" className="px-4 py-3 w-24 whitespace-nowrap">Receipt ID</th>
+                <th scope="col" className="sticky left-0 bg-slate-50 z-20 px-4 py-3 w-28 whitespace-nowrap shadow-[1px_0_0_0_#e2e8f0]">
+                  Receipt ID
+                </th>
                 <th scope="col" className="px-4 py-3 w-16 whitespace-nowrap">S.No.</th>
-                <th scope="col" className="px-4 py-3 w-28 whitespace-nowrap">Type</th>
-                <th scope="col" className="px-4 py-3 w-32 whitespace-nowrap">Project Name</th>
+                <th scope="col" className="px-4 py-3 w-24 whitespace-nowrap">Type</th>
+                <th scope="col" className="px-4 py-3 w-28 whitespace-nowrap">Project</th>
                 <th scope="col" className="px-4 py-3 min-w-[180px] max-w-[280px]">Product / Game</th>
-                <th scope="col" className="px-4 py-3 w-36 whitespace-nowrap">Sales Member Name</th>
-                <th scope="col" className="px-4 py-3 text-right w-24 whitespace-nowrap">Items / Plays</th>
-                {canViewRevenue && <th scope="col" className="px-4 py-3 text-right w-32 whitespace-nowrap">Total Amount (₹)</th>}
-                <th scope="col" className="px-4 py-3 w-32 whitespace-nowrap">Payment</th>
-                <th scope="col" className="px-4 py-3 w-32 whitespace-nowrap">Time (Auto)</th>
-                <th scope="col" className="px-4 py-3 w-36 whitespace-nowrap">Event Name</th>
-                <th scope="col" className="px-4 py-3 w-40 whitespace-nowrap">Customer Info</th>
-                {isDeveloper && <th scope="col" className="px-4 py-3 text-right w-20 whitespace-nowrap">Actions</th>}
+                <th scope="col" className="px-4 py-3 w-36 whitespace-nowrap">Sales Member</th>
+                <th scope="col" className="px-4 py-3 text-right w-20 whitespace-nowrap">Units / Plays</th>
+                {canViewRevenue && <th scope="col" className="px-4 py-3 text-right w-28 whitespace-nowrap">Total (₹)</th>}
+                <th scope="col" className="px-4 py-3 w-28 whitespace-nowrap">Payment</th>
+                <th scope="col" className="px-4 py-3 w-28 whitespace-nowrap">Time</th>
+                <th scope="col" className="px-4 py-3 w-32 whitespace-nowrap">Event</th>
+                <th scope="col" className="px-4 py-3 w-36 whitespace-nowrap">Customer Info</th>
+                <th scope="col" className="px-4 py-3 text-center w-24 whitespace-nowrap">Details</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
                 <tr>
                   <td
-                    colSpan={canViewRevenue ? (isDeveloper ? 13 : 12) : (isDeveloper ? 12 : 11)}
+                    colSpan={canViewRevenue ? 13 : 12}
                     className="px-4 py-12 text-center text-slate-400 text-xs"
                   >
                     <Loader2 className="w-5 h-5 mx-auto mb-2 animate-spin text-slate-400" />
@@ -658,7 +640,7 @@ export const SalesManagementPage: React.FC = () => {
               ) : sales.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={canViewRevenue ? (isDeveloper ? 13 : 12) : (isDeveloper ? 12 : 11)}
+                    colSpan={canViewRevenue ? 13 : 12}
                     className="px-4 py-8 text-center text-slate-400 text-xs"
                   >
                     No matching sales records found.
@@ -666,14 +648,20 @@ export const SalesManagementPage: React.FC = () => {
                 </tr>
               ) : (
                 sales.map((sale, index) => {
-                  // Canonical Receipt Number: #1, #2, #3...
                   const displayReceipt = sale.receiptNumber ?? '—';
                   const displaySNo = sale.serialNumber ?? Math.max(1, totalRecords - ((currentPage - 1) * pageSize) - index);
 
                   return (
-                    <tr key={sale.id} className="hover:bg-slate-50/50">
-                      <td className="px-4 py-3 font-mono font-bold text-slate-900 whitespace-nowrap">
-                        {displayReceipt !== '—' ? `#${displayReceipt}` : '—'}
+                    <tr key={sale.id} className="hover:bg-slate-50/50 transition-colors">
+                      {/* Sticky Receipt ID */}
+                      <td className="sticky left-0 bg-white z-10 px-4 py-3 font-mono font-bold text-slate-900 whitespace-nowrap shadow-[1px_0_0_0_#e2e8f0]">
+                        {displayReceipt !== '—' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-slate-100 text-slate-900 border border-slate-200">
+                            #{displayReceipt}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 font-normal">#{sale.id}</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 font-mono text-slate-500 font-medium whitespace-nowrap">
                         {displaySNo}
@@ -830,30 +818,18 @@ export const SalesManagementPage: React.FC = () => {
                           <span className="text-slate-400 italic">None</span>
                         )}
                       </td>
-                      {isDeveloper && (
-                        <td className="px-4 py-3 text-right whitespace-nowrap">
-                          <div className="flex items-center justify-end gap-1">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEdit(sale)}
-                              disabled
-                              title="Historical records are preserved; corrections require reconciliation."
-                              className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors cursor-pointer"
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteSale(sale)}
-                              disabled
-                              title="Historical sales cannot be deleted."
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </td>
-                      )}
+                      {/* Active View Details Action */}
+                      <td className="px-4 py-3 text-center whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedSaleForDetails(sale)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-colors cursor-pointer"
+                          title="View receipt and transaction details"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Details</span>
+                        </button>
+                      </td>
                     </tr>
                   );
                 })
@@ -862,19 +838,168 @@ export const SalesManagementPage: React.FC = () => {
           </table>
         </div>
 
-        {/* Clean Pagination Footer */}
-        <div className="bg-white px-4 py-3 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-          <div className="flex flex-wrap items-center gap-3 text-slate-600">
+        {/* 2. MOBILE & TABLET VIEW: Responsive Card List (< 1024px) */}
+        <div className="block lg:hidden divide-y divide-slate-100">
+          {isLoading ? (
+            <div className="p-8 text-center text-slate-400 text-xs">
+              <Loader2 className="w-5 h-5 mx-auto mb-2 animate-spin text-slate-400" />
+              Loading sales records...
+            </div>
+          ) : sales.length === 0 ? (
+            <div className="p-8 text-center text-slate-400 text-xs">
+              No matching sales records found.
+            </div>
+          ) : (
+            sales.map((sale, index) => {
+              const displayReceipt = sale.receiptNumber ?? '—';
+              const displaySNo = sale.serialNumber ?? Math.max(1, totalRecords - ((currentPage - 1) * pageSize) - index);
+
+              return (
+                <div key={sale.id} className="p-3.5 sm:p-4 hover:bg-slate-50/50 transition-colors space-y-2.5">
+                  {/* Card Top: Receipt #, S.No, Type, Time */}
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-xs bg-slate-900 text-white px-2 py-0.5 rounded shadow-2xs">
+                        {displayReceipt !== '—' ? `#${displayReceipt}` : `#${sale.id}`}
+                      </span>
+                      <span className="text-[11px] text-slate-500 font-mono font-medium">
+                        S.No. {displaySNo}
+                      </span>
+                      {sale.transactionType === 'GAME' ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                          🎮 GAME
+                        </span>
+                      ) : sale.transactionType === 'COMBO' || sale.comboId ? (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                          🎁 COMBO
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                          SALE
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="text-[11px] text-slate-500 flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-slate-400" />
+                      <span>
+                        {new Date(sale.saleTime).toLocaleDateString([], { month: 'short', day: 'numeric' })}{' '}
+                        {new Date(sale.saleTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Card Middle: Products & Quantities */}
+                  <div className="text-xs">
+                    {sale.transactionType === 'GAME' ? (
+                      <div>
+                        <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
+                          <span>🎮 {sale.game?.name || sale.productName || 'Stall Game'}</span>
+                          {sale.gameSession && (
+                            <span className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase ${
+                              sale.gameSession.result === 'WIN'
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                : 'bg-amber-100 text-amber-800 border border-amber-200'
+                            }`}>
+                              {sale.gameSession.result === 'WIN' ? '🏆 WIN' : 'LOSE'}
+                            </span>
+                          )}
+                        </div>
+                        {sale.gameSession?.rewardProduct && (
+                          <div className="text-[11px] text-slate-600 mt-0.5">
+                            Reward: <span className="font-semibold text-slate-800">{sale.gameSession.rewardProduct.name}</span> × {sale.gameSession.rewardQuantity}
+                          </div>
+                        )}
+                      </div>
+                    ) : (sale.transactionType === 'COMBO' || sale.comboId) ? (
+                      <div>
+                        <div className="font-bold text-slate-900">
+                          🎁 {sale.comboName || sale.productName || 'Combo Offer'}
+                        </div>
+                        {sale.items && sale.items.length > 0 && (
+                          <div className="text-[11px] text-slate-600 mt-1 space-y-0.5 border-l-2 border-emerald-200 pl-2">
+                            {sale.items.map((it, itIdx) => (
+                              <div key={itIdx} className="flex items-center justify-between">
+                                <span>{it.productName}</span>
+                                <span className="font-bold text-slate-700">× {it.quantity}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : sale.items && sale.items.length > 0 ? (
+                      <div className="space-y-1">
+                        {sale.items.map((it, itIdx) => (
+                          <div key={itIdx} className="flex items-center justify-between text-xs">
+                            <span className="font-semibold text-slate-900 truncate mr-2">{it.productName}</span>
+                            <span className="font-bold text-slate-700 shrink-0">× {it.quantity}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-slate-900 truncate mr-2">{sale.productName}</span>
+                        <span className="font-bold text-slate-700 shrink-0">× {sale.quantity}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Card Meta: Stall & Seller */}
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 pt-1 border-t border-slate-50">
+                    <span>Stall: <strong className="text-slate-700 font-medium">{sale.eventName}</strong></span>
+                    <span>Seller: <strong className="text-slate-700 font-medium">{sale.memberName}</strong></span>
+                    {sale.customerName && (
+                      <span>Customer: <strong className="text-slate-700 font-medium">{sale.customerName}</strong></span>
+                    )}
+                  </div>
+
+                  {/* Card Bottom: Payment & View Details button */}
+                  <div className="flex items-center justify-between gap-2 pt-1.5">
+                    <div className="flex items-center gap-2">
+                      {canViewRevenue && sale.totalAmount != null && (
+                        <span className="font-black text-slate-900 text-sm">
+                          ₹{Number(sale.totalAmount).toFixed(2)}
+                        </span>
+                      )}
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        sale.paymentMethod === 'UPI'
+                          ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                          : sale.paymentMethod === 'CASH_UPI'
+                          ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                          : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      }`}>
+                        {sale.paymentMethod === 'CASH_UPI' ? 'CASH + UPI' : sale.paymentMethod}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSaleForDetails(sale)}
+                      className="inline-flex items-center gap-1 px-3 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Details</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Clean Responsive Pagination Footer */}
+        <div className="bg-white px-3.5 py-3 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex flex-wrap items-center justify-between sm:justify-start gap-3 text-slate-600">
             <span>
               Showing{' '}
               <span className="font-bold text-slate-900">{fromRecord}</span>
               –
               <span className="font-bold text-slate-900">{toRecord}</span>{' '}
-              of <span className="font-bold text-slate-900">{totalRecords}</span> sales
+              of <span className="font-bold text-slate-900">{totalRecords}</span>
             </span>
 
             <div className="flex items-center gap-1.5 border-l border-slate-200 pl-3">
-              <span className="text-slate-500 font-medium">Rows per page:</span>
+              <span className="text-slate-500 font-medium">Rows:</span>
               <select
                 value={pageSize}
                 onChange={e => handlePageSizeChange(Number(e.target.value))}
@@ -888,47 +1013,54 @@ export const SalesManagementPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-1 self-center sm:self-auto">
+          <div className="flex items-center justify-between sm:justify-end gap-1.5 self-stretch sm:self-auto">
             {/* Previous button */}
             <button
               type="button"
               onClick={() => handlePageChange(currentPage - 1)}
               disabled={!hasPreviousPage || isFetching}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-slate-300 bg-white font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-300 bg-white font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer shadow-2xs text-xs"
             >
               <ChevronLeft className="w-3.5 h-3.5" />
-              <span>Previous</span>
+              <span>Prev</span>
             </button>
 
-            {/* Page number buttons */}
-            {getPageNumbers(currentPage, totalPages).map((p, idx) =>
-              p === '...' ? (
-                <span key={`ellipsis-${idx}`} className="px-2 py-1 text-slate-400">
-                  …
-                </span>
-              ) : (
-                <button
-                  key={`page-${p}`}
-                  type="button"
-                  onClick={() => handlePageChange(Number(p))}
-                  disabled={isFetching}
-                  className={`min-w-[32px] px-2 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
-                    currentPage === p
-                      ? 'bg-slate-900 text-white shadow-sm'
-                      : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  {p}
-                </button>
-              )
-            )}
+            {/* Mobile Page Indicator (clean and non-overflowing on 320px-640px) */}
+            <span className="sm:hidden text-xs font-bold text-slate-700 px-2">
+              {currentPage} / {totalPages}
+            </span>
+
+            {/* Desktop Page number buttons */}
+            <div className="hidden sm:flex items-center gap-1">
+              {getPageNumbers(currentPage, totalPages).map((p, idx) =>
+                p === '...' ? (
+                  <span key={`ellipsis-${idx}`} className="px-2 py-1 text-slate-400">
+                    …
+                  </span>
+                ) : (
+                  <button
+                    key={`page-${p}`}
+                    type="button"
+                    onClick={() => handlePageChange(Number(p))}
+                    disabled={isFetching}
+                    className={`min-w-[32px] px-2 py-1 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                      currentPage === p
+                        ? 'bg-slate-900 text-white shadow-2xs'
+                        : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                )
+              )}
+            </div>
 
             {/* Next button */}
             <button
               type="button"
               onClick={() => handlePageChange(currentPage + 1)}
               disabled={!hasNextPage || isFetching}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md border border-slate-300 bg-white font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-300 bg-white font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer shadow-2xs text-xs"
             >
               <span>Next</span>
               <ChevronRight className="w-3.5 h-3.5" />
@@ -937,209 +1069,268 @@ export const SalesManagementPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Edit Sale Modal (DEVELOPER ONLY) */}
-      {editingSale && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">
-                  Edit Sale Record (DB ID: #{editingSale.id})
-                </h3>
-                <p className="text-[11px] text-slate-500">
-                  {editingSale.productName} ({editingSale.productId}) • {editingSale.eventName}
-                </p>
+      {/* Comprehensive Transaction Details & Audit Modal */}
+      {selectedSaleForDetails && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50/50">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-50 text-emerald-700 rounded-xl border border-emerald-200">
+                  <ReceiptText className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-slate-900">
+                      Receipt {selectedSaleForDetails.receiptNumber ? `#${selectedSaleForDetails.receiptNumber}` : `#${selectedSaleForDetails.id}`}
+                    </h3>
+                    <span className="font-mono text-xs px-2 py-0.5 rounded bg-slate-200 text-slate-700 font-bold">
+                      S.No. {selectedSaleForDetails.serialNumber ?? '—'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    {new Date(selectedSaleForDetails.saleTime).toLocaleString('en-IN', {
+                      dateStyle: 'medium',
+                      timeStyle: 'short',
+                    })}
+                  </p>
+                </div>
               </div>
               <button
                 type="button"
-                onClick={() => setEditingSale(null)}
-                className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
+                onClick={() => setSelectedSaleForDetails(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveEdit} className="p-5 space-y-4 text-xs">
+            {/* Modal Body - Scrollable */}
+            <div className="p-5 space-y-4 overflow-y-auto flex-1 text-xs">
+              {/* Data Preservation / Audit Protection Notice */}
+              <div className="p-3.5 bg-amber-50 border border-amber-200/80 rounded-xl flex items-start gap-3 text-amber-900">
+                <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="font-bold text-xs text-amber-950 flex items-center gap-1.5">
+                    <span>Protected Financial Ledger Record</span>
+                    <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-amber-200/80 text-amber-900 uppercase">Immutable</span>
+                  </div>
+                  <p className="text-[11px] text-amber-800 leading-relaxed">
+                    This transaction is preserved in the official ledger for audit compliance, sales reconciliation, and stock integrity. Historical transactions cannot be deleted directly. To adjust figures or correct errors, record an auditable offset in the Event Reconciliation log.
+                  </p>
+                </div>
+              </div>
+
+              {/* Transaction Overview Cards */}
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-600 font-semibold mb-1">
-                    Quantity Purchased
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    required
-                    value={editQty}
-                    onChange={e => setEditQty(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-                  />
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Event / Stall</span>
+                  <span className="font-bold text-slate-900 text-xs block truncate" title={selectedSaleForDetails.eventName}>
+                    {selectedSaleForDetails.eventName}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    ID: {selectedSaleForDetails.eventId}
+                  </span>
                 </div>
-                <div>
-                  <label className="block text-slate-600 font-semibold mb-1">
-                    Unit Price (₹)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    required
-                    value={editPrice}
-                    onChange={e => setEditPrice(Math.max(0, parseFloat(e.target.value) || 0))}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-                  />
+
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Cashier / Member</span>
+                  <span className="font-bold text-slate-900 text-xs block truncate">
+                    {selectedSaleForDetails.memberName}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    @{selectedSaleForDetails.memberUsername}
+                  </span>
                 </div>
               </div>
 
-              {/* Calculated Total */}
-              <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-md flex items-center justify-between font-semibold">
-                <span className="text-slate-600">Calculated Total:</span>
-                <span className="text-sm font-black text-emerald-700">
-                  ₹{(editQty * editPrice).toFixed(2)}
-                </span>
+              {/* Items Breakdown */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <div className="bg-slate-50 px-3.5 py-2 border-b border-slate-200 flex items-center justify-between font-bold text-slate-700 text-[11px]">
+                  <span>Purchased Items & Details</span>
+                  <span>Total: {selectedSaleForDetails.totalUnits ?? selectedSaleForDetails.quantity} units</span>
+                </div>
+                <div className="divide-y divide-slate-100 p-3 space-y-2">
+                  {selectedSaleForDetails.transactionType === 'GAME' ? (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between font-bold text-slate-900">
+                        <span>🎮 {selectedSaleForDetails.game?.name || selectedSaleForDetails.productName || 'Stall Game'}</span>
+                        {canViewRevenue && <span>₹{selectedSaleForDetails.totalAmount}</span>}
+                      </div>
+                      {selectedSaleForDetails.gameSession && (
+                        <div className="p-2.5 bg-indigo-50/50 rounded-lg border border-indigo-100 space-y-1 text-[11px]">
+                          <div className="flex justify-between">
+                            <span className="text-slate-600">Session Code:</span>
+                            <span className="font-mono font-bold text-indigo-900">{selectedSaleForDetails.gameSession.sessionCode}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-600">Result:</span>
+                            <span className={`font-bold ${selectedSaleForDetails.gameSession.result === 'WIN' ? 'text-emerald-700' : 'text-slate-600'}`}>
+                              {selectedSaleForDetails.gameSession.result === 'WIN' ? '🏆 Winner' : 'Participation'}
+                            </span>
+                          </div>
+                          {selectedSaleForDetails.gameSession.rewardProductName && (
+                            <div className="flex justify-between">
+                              <span className="text-slate-600">Reward Product:</span>
+                              <span className="font-bold text-slate-800">
+                                {selectedSaleForDetails.gameSession.rewardProductName} × {selectedSaleForDetails.gameSession.rewardQuantity}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (selectedSaleForDetails.transactionType === 'COMBO' || selectedSaleForDetails.comboId) ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between font-bold text-slate-900">
+                        <span>🎁 {selectedSaleForDetails.comboName || selectedSaleForDetails.productName}</span>
+                        {canViewRevenue && <span>₹{selectedSaleForDetails.totalAmount}</span>}
+                      </div>
+                      {selectedSaleForDetails.items && selectedSaleForDetails.items.length > 0 && (
+                        <div className="p-2.5 bg-emerald-50/40 rounded-lg border border-emerald-100 space-y-1 text-[11px]">
+                          <span className="font-bold text-emerald-950 block">Combo Contents:</span>
+                          {selectedSaleForDetails.items.map((it, idx) => (
+                            <div key={idx} className="flex justify-between text-slate-700">
+                              <span>{it.productName}</span>
+                              <span className="font-bold">× {it.quantity}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : selectedSaleForDetails.items && selectedSaleForDetails.items.length > 0 ? (
+                    selectedSaleForDetails.items.map((it, idx) => (
+                      <div key={idx} className="flex items-center justify-between text-xs py-1">
+                        <div>
+                          <span className="font-bold text-slate-900">{it.productName}</span>
+                          {it.unitPrice && (
+                            <span className="text-slate-400 text-[10px] block">
+                              ₹{it.unitPrice} each
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          <span className="font-bold text-slate-700">× {it.quantity}</span>
+                          {canViewRevenue && it.lineTotal != null && (
+                            <span className="block font-bold text-slate-900">₹{it.lineTotal.toFixed(2)}</span>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="flex items-center justify-between text-xs py-1">
+                      <div>
+                        <span className="font-bold text-slate-900">{selectedSaleForDetails.productName}</span>
+                        {selectedSaleForDetails.unitPrice && (
+                          <span className="text-slate-400 text-[10px] block">₹{selectedSaleForDetails.unitPrice} each</span>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <span className="font-bold text-slate-700">× {selectedSaleForDetails.quantity}</span>
+                        {canViewRevenue && selectedSaleForDetails.totalAmount != null && (
+                          <span className="block font-bold text-slate-900">₹{Number(selectedSaleForDetails.totalAmount).toFixed(2)}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div>
-                <label className="block text-slate-600 font-semibold mb-1">
-                  Payment Method
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditPaymentMethod('CASH')}
-                    className={`py-2 px-3 rounded-md font-bold text-center border transition-all cursor-pointer ${
-                      editPaymentMethod === 'CASH'
-                        ? 'border-emerald-600 bg-emerald-50 text-emerald-800 ring-1 ring-emerald-600'
-                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    💵 CASH
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditPaymentMethod('UPI')}
-                    className={`py-2 px-3 rounded-md font-bold text-center border transition-all cursor-pointer ${
-                      editPaymentMethod === 'UPI'
-                        ? 'border-blue-600 bg-blue-50 text-blue-800 ring-1 ring-blue-600'
-                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    📱 UPI
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditPaymentMethod('CASH_UPI')}
-                    className={`py-2 px-3 rounded-md font-bold text-center border transition-all cursor-pointer ${
-                      editPaymentMethod === 'CASH_UPI'
-                        ? 'border-purple-600 bg-purple-50 text-purple-800 ring-1 ring-purple-600'
-                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    💵+📱 SPLIT
-                  </button>
+              {/* Payment & Financial Settlement */}
+              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/70 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-600 font-semibold">Payment Mode:</span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    selectedSaleForDetails.paymentMethod === 'UPI'
+                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                      : selectedSaleForDetails.paymentMethod === 'CASH_UPI'
+                      ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                      : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  }`}>
+                    {selectedSaleForDetails.paymentMethod === 'CASH_UPI' ? 'CASH + UPI' : selectedSaleForDetails.paymentMethod}
+                  </span>
                 </div>
 
-                {editPaymentMethod === 'CASH_UPI' && (
-                  <div className="mt-2.5 p-3 bg-purple-50/50 border border-purple-200 rounded-md space-y-2">
-                    <div className="text-xs font-bold text-purple-900">
-                      Split Amounts (Total: ₹{(editQty * editPrice).toFixed(2)})
+                {selectedSaleForDetails.paymentMethod === 'CASH_UPI' && (
+                  <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200/60 text-[11px]">
+                    <div>
+                      <span className="text-slate-400">Cash Received:</span>
+                      <span className="block font-bold text-slate-800">
+                        ₹{selectedSaleForDetails.cashAmount != null ? Number(selectedSaleForDetails.cashAmount).toFixed(2) : '0.00'}
+                      </span>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-600 mb-0.5">
-                          Cash Portion (₹)
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={editCashAmount}
-                          onChange={e => setEditCashAmount(e.target.value)}
-                          placeholder="0.00"
-                          className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-purple-600"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-600 mb-0.5">
-                          UPI Portion (₹)
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={editUpiAmount}
-                          onChange={e => setEditUpiAmount(e.target.value)}
-                          placeholder="0.00"
-                          className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-purple-600"
-                        />
-                      </div>
+                    <div>
+                      <span className="text-slate-400">UPI Received:</span>
+                      <span className="block font-bold text-slate-800">
+                        ₹{selectedSaleForDetails.upiAmount != null ? Number(selectedSaleForDetails.upiAmount).toFixed(2) : '0.00'}
+                      </span>
                     </div>
+                  </div>
+                )}
+
+                {canViewRevenue && selectedSaleForDetails.totalAmount != null && (
+                  <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between">
+                    <span className="font-bold text-slate-800">Total Settled:</span>
+                    <span className="text-base font-black text-emerald-700">
+                      ₹{Number(selectedSaleForDetails.totalAmount).toFixed(2)}
+                    </span>
                   </div>
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-600 font-semibold mb-1">
-                    Customer Name
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Rahul Sharma"
-                    value={editCustomerName}
-                    onChange={e => setEditCustomerName(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-                  />
+              {/* Customer Information (if available) */}
+              {(selectedSaleForDetails.customerName || selectedSaleForDetails.customerPhone) && (
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/70 space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">Customer Information</span>
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-900">{selectedSaleForDetails.customerName || 'Walk-in'}</span>
+                    <span className="text-slate-600 font-mono text-[11px]">{selectedSaleForDetails.customerPhone || '—'}</span>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-slate-600 font-semibold mb-1">
-                    Customer Phone
-                  </label>
-                  <input
-                    type="tel"
-                    placeholder="e.g. 9876543210"
-                    value={editCustomerPhone}
-                    onChange={e => setEditCustomerPhone(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md font-mono text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-                  />
-                </div>
-              </div>
+              )}
 
-              <div>
-                <label className="block text-slate-600 font-semibold mb-1">
-                  Sale Timestamp
-                </label>
-                <input
-                  type="datetime-local"
-                  value={editSaleTime}
-                  onChange={e => setEditSaleTime(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-                />
+              {/* Audit Metadata */}
+              <div className="text-[10px] text-slate-400 font-mono flex items-center justify-between px-1">
+                <span>DB ID: #{selectedSaleForDetails.id}</span>
+                {selectedSaleForDetails.clientTxId && (
+                  <span className="truncate max-w-[200px]" title={selectedSaleForDetails.clientTxId}>
+                    Tx: {selectedSaleForDetails.clientTxId}
+                  </span>
+                )}
               </div>
+            </div>
 
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setEditingSale(null)}
-                  disabled={isSavingEdit}
-                  className="px-4 py-2 border border-slate-300 text-slate-700 font-semibold rounded-md hover:bg-slate-50 transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingEdit}
-                  className="px-4 py-2 bg-slate-900 text-white font-bold rounded-md hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  {isSavingEdit ? 'Saving...' : 'Save Changes'}
-                </button>
-              </div>
-            </form>
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between px-5 py-3.5 border-t border-slate-100 bg-slate-50/50">
+              <button
+                type="button"
+                onClick={handleCopyReceipt}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer shadow-2xs"
+              >
+                {copiedReceiptText ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span className="text-emerald-700 font-bold">Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Copy Receipt</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedSaleForDetails(null)}
+                className="px-4 py-1.5 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer shadow-2xs"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
-
-      {/* Clear All Sales Confirmation Modal */}
-
     </div>
   );
 };

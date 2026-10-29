@@ -14,7 +14,7 @@ export const AppLayout: React.FC = () => {
       {/* Main Content Area (shifted right on desktop by 64 = 16rem = 256px) */}
       <div className="flex-1 lg:pl-64 flex flex-col min-w-0 min-h-screen">
         <Navbar onToggleSidebar={() => setSidebarOpen(prev => !prev)} />
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
+        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto min-w-0 max-w-full">
           <Outlet />
         </main>
       </div>
