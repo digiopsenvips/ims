@@ -102,18 +102,60 @@ router.put(
   }
 );
 
+// PATCH /api/products/:id/archive: Toggle archive/restore status (Developer/Admin)
+router.patch(
+  ['/:id/archive', '/:id/retire', '/:id'],
+  authenticateToken,
+  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const { id } = req.params;
+    const isArchived = typeof req.body.isArchived === 'boolean' ? req.body.isArchived : true;
+
+    try {
+      const existing = await prisma.product.findUnique({ where: { id } });
+      if (!existing) {
+        res.status(404).json({ error: 'Product not found' });
+        return;
+      }
+
+      const updated = await stockTransaction(tx =>
+        tx.product.update({
+          where: { id },
+          data: { isArchived },
+          include: { project: true, inventory: true },
+        })
+      );
+
+      broadcast('inventory:updated', {
+        action: isArchived ? 'retired' : 'restored',
+        productId: id,
+      });
+
+      res.json({
+        product: updated,
+        message: `Product '${updated.name}' ${isArchived ? 'safely archived/retired' : 'restored to active products'}.`,
+      });
+    } catch (error) {
+      console.error('Archive product error:', error);
+      res.status(500).json({ error: 'Failed to update product archive status' });
+    }
+  }
+);
+
 // DELETE /api/products/:id: Delete or soft-retire (Developer/Admin)
 router.delete(
   '/:id',
   authenticateToken,
   requireRoles(Role.DEVELOPER, Role.ADMIN),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-      try {
-        await stockTransaction(tx => tx.product.update({ where: { id: req.params.id }, data: { isArchived: true } }));
-        broadcast('inventory:updated', { action: 'retired' });
-        res.json({ retired: true, message: 'Retired for future use. Existing records and history are preserved.' });
-      } catch { res.status(400).json({ error: 'Unable to retire record. No history was deleted.' }); }
+    try {
+      await stockTransaction(tx => tx.product.update({ where: { id: req.params.id }, data: { isArchived: true } }));
+      broadcast('inventory:updated', { action: 'retired', productId: req.params.id });
+      res.json({ retired: true, message: 'Retired for future use. Existing records and history are preserved.' });
+    } catch {
+      res.status(400).json({ error: 'Unable to retire record. No history was deleted.' });
     }
+  }
 );
 
 export default router;

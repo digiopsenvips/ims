@@ -16,7 +16,18 @@ router.get(
   requirePermission('view_inventory'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
+      const statusParam = req.query.status as string | undefined;
+      const whereProduct: any = { isDeleted: false };
+      if (statusParam === 'ACTIVE') {
+        whereProduct.isArchived = false;
+      } else if (statusParam === 'ARCHIVED' || statusParam === 'RETIRED') {
+        whereProduct.isArchived = true;
+      }
+
       const inventory = await prisma.inventory.findMany({
+        where: {
+          product: whereProduct,
+        },
         include: {
           product: {
             include: {
@@ -86,6 +97,8 @@ router.get(
           projectId: item.product.projectId,
           projectName: item.product.project.name,
           basePrice: item.product.basePrice,
+          isArchived: Boolean(item.product.isArchived),
+          isDeleted: Boolean(item.product.isDeleted),
           warehouseStock,
           quantityOnHand: warehouseStock,
           activeAllocatedQty: activeStallStock,

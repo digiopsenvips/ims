@@ -55,6 +55,9 @@ export interface InventoryItem {
   projectId: string;
   projectName: string;
   basePrice?: number | null;
+  isArchived?: boolean;
+  isDeleted?: boolean;
+  warehouseStock?: number;
   quantityOnHand: number;
   activeAllocatedQty: number;
   totalAvailable: number;

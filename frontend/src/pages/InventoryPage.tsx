@@ -36,6 +36,7 @@ export const InventoryPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProject, setSelectedProject] = useState<string>('ALL');
   const [stockLevelFilter, setStockLevelFilter] = useState<'ALL' | 'IN_STOCK' | 'LOW_STOCK' | 'DEPLOYED' | 'OUT_OF_STOCK'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ACTIVE' | 'ARCHIVED' | 'ALL'>('ACTIVE');
   const [recentlyUpdatedId, setRecentlyUpdatedId] = useState<string | null>(null);
 
   // Bulk Intake Modal
@@ -177,6 +178,22 @@ export const InventoryPage: React.FC = () => {
     }
   };
 
+  const handleRestoreProduct = async (item: InventoryItem) => {
+    if (!window.confirm(`Are you sure you want to restore '${item.productName}' (${item.productId}) back to active products?`)) {
+      return;
+    }
+    try {
+      await api.patch(`/products/${item.productId}/archive`, { isArchived: false });
+      setStatusMessage({
+        type: 'success',
+        text: `Product '${item.productName}' (${item.productId}) restored to active inventory.`,
+      });
+      fetchInventory();
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err.message || 'Failed to restore product' });
+    }
+  };
+
   // Unique projects derived from inventory
   const uniqueProjects = useMemo(() => {
     const map = new Map<string, string>();
@@ -188,8 +205,15 @@ export const InventoryPage: React.FC = () => {
     return Array.from(map.values()).sort();
   }, [inventory]);
 
+  const activeCount = useMemo(() => inventory.filter(i => !i.isArchived).length, [inventory]);
+  const archivedCount = useMemo(() => inventory.filter(i => !!i.isArchived).length, [inventory]);
+
   const filteredInventory = useMemo(() => {
     return inventory.filter(i => {
+      // Status lifecycle filter
+      if (statusFilter === 'ACTIVE' && i.isArchived) return false;
+      if (statusFilter === 'ARCHIVED' && !i.isArchived) return false;
+
       // Search filter
       if (searchQuery.trim()) {
         const query = searchQuery.trim().toLowerCase();
@@ -214,13 +238,23 @@ export const InventoryPage: React.FC = () => {
 
       return true;
     });
-  }, [inventory, searchQuery, selectedProject, stockLevelFilter]);
+  }, [inventory, statusFilter, searchQuery, selectedProject, stockLevelFilter]);
 
-  const totalMainStock = useMemo(() => inventory.reduce((sum, i) => sum + i.quantityOnHand, 0), [inventory]);
-  const totalAllocated = useMemo(() => inventory.reduce((sum, i) => sum + i.activeAllocatedQty, 0), [inventory]);
+  const totalMainStock = useMemo(() => {
+    return inventory
+      .filter(i => statusFilter === 'ALL' || (statusFilter === 'ARCHIVED' ? !!i.isArchived : !i.isArchived))
+      .reduce((sum, i) => sum + i.quantityOnHand, 0);
+  }, [inventory, statusFilter]);
+
+  const totalAllocated = useMemo(() => {
+    return inventory
+      .filter(i => statusFilter === 'ALL' || (statusFilter === 'ARCHIVED' ? !!i.isArchived : !i.isArchived))
+      .reduce((sum, i) => sum + i.activeAllocatedQty, 0);
+  }, [inventory, statusFilter]);
+
   const totalOrgStock = useMemo(() => totalMainStock + totalAllocated, [totalMainStock, totalAllocated]);
 
-  const hasActiveFilters = searchQuery.trim() !== '' || selectedProject !== 'ALL' || stockLevelFilter !== 'ALL';
+  const hasActiveFilters = searchQuery.trim() !== '' || selectedProject !== 'ALL' || stockLevelFilter !== 'ALL' || statusFilter !== 'ACTIVE';
 
   return (
     <div className="space-y-5 w-full max-w-[1600px] mx-auto pb-12">
@@ -352,6 +386,66 @@ export const InventoryPage: React.FC = () => {
         </div>
       )}
 
+      {/* Tabs: Active Inventory vs Archived / Retired */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+          <button
+            type="button"
+            onClick={() => setStatusFilter('ACTIVE')}
+            className={`px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              statusFilter === 'ACTIVE'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <span>Active Inventory</span>
+            <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+              statusFilter === 'ACTIVE' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'
+            }`}>
+              {activeCount}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter('ARCHIVED')}
+            className={`px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              statusFilter === 'ARCHIVED'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <span>Archived / Retired</span>
+            <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+              statusFilter === 'ARCHIVED' ? 'bg-amber-700 text-white' : 'bg-slate-100 text-slate-600'
+            }`}>
+              {archivedCount}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter('ALL')}
+            className={`px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs font-bold rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${
+              statusFilter === 'ALL'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <span>All Items</span>
+            <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+              statusFilter === 'ALL' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'
+            }`}>
+              {inventory.length}
+            </span>
+          </button>
+        </div>
+
+        {statusFilter === 'ARCHIVED' && (
+          <div className="text-[11px] font-medium text-amber-800 bg-amber-50 px-3 py-1 rounded-lg border border-amber-200/80">
+            Retired products preserved for historical accounting records.
+          </div>
+        )}
+      </div>
+
       {/* Search and Filters */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-3">
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
@@ -450,7 +544,7 @@ export const InventoryPage: React.FC = () => {
                 <th scope="col" className="px-4 py-3.5 text-right whitespace-nowrap w-[110px]">Ref Price (₹)</th>
                 <th scope="col" className="px-4 py-3.5 min-w-[140px] max-w-[220px]">Batch Notes</th>
                 <th scope="col" className="px-4 py-3.5 whitespace-nowrap w-[130px]">Last Updated</th>
-                {canEditInventory && <th scope="col" className="px-4 py-3.5 text-center whitespace-nowrap w-[70px]">Adjust</th>}
+                {canEditInventory && <th scope="col" className="px-4 py-3.5 text-center whitespace-nowrap w-[90px]">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -507,9 +601,21 @@ export const InventoryPage: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-4 py-3.5 font-semibold text-slate-900 min-w-[200px] max-w-[280px]">
-                        <div className="line-clamp-2 leading-snug" title={item.productName}>
-                          {item.productName}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <div className="line-clamp-2 leading-snug" title={item.productName}>
+                            {item.productName}
+                          </div>
+                          {item.isArchived && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 whitespace-nowrap">
+                              ARCHIVED
+                            </span>
+                          )}
                         </div>
+                        {item.isArchived && (item.quantityOnHand > 0 || item.activeAllocatedQty > 0) && (
+                          <div className="text-[10px] text-amber-700 font-semibold mt-0.5">
+                            ⚠️ Has {item.quantityOnHand + item.activeAllocatedQty} unresolved units
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3.5 text-slate-600 whitespace-nowrap">
                         <span className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200/80 inline-block whitespace-nowrap">
@@ -583,18 +689,34 @@ export const InventoryPage: React.FC = () => {
                       </td>
                       {canEditInventory && (
                         <td className="px-4 py-3.5 text-center whitespace-nowrap">
-                          <button
-                            onClick={() => {
-                              setAdjustItem(item);
-                              setAdjustQtyInput(item.quantityOnHand.toString());
-                              setAdjustNotesInput(item.notes || '');
-                            }}
-                            className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center"
-                            title="Adjust stock count"
-                            aria-label={`Adjust stock for ${item.productName}`}
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center justify-center gap-1">
+                            {item.isArchived ? (
+                              (isDeveloper || isAdmin) && (
+                                <button
+                                  onClick={() => handleRestoreProduct(item)}
+                                  className="p-1.5 text-amber-600 hover:text-amber-800 hover:bg-amber-50 border border-amber-200 rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center gap-1 text-[11px] font-semibold"
+                                  title="Restore product to active inventory"
+                                  aria-label={`Restore product ${item.productName}`}
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                  <span>Restore</span>
+                                </button>
+                              )
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  setAdjustItem(item);
+                                  setAdjustQtyInput(item.quantityOnHand.toString());
+                                  setAdjustNotesInput(item.notes || '');
+                                }}
+                                className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center"
+                                title="Adjust stock count"
+                                aria-label={`Adjust stock for ${item.productName}`}
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       )}
                     </tr>
@@ -643,7 +765,7 @@ export const InventoryPage: React.FC = () => {
                         className="w-full text-xs p-2 border border-slate-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-emerald-600/20 focus:border-emerald-600"
                       >
                         <option value="">Select product...</option>
-                        {products.map(p => (
+                        {products.filter(p => !p.isArchived).map(p => (
                           <option key={p.id} value={p.id}>
                             [{p.id}] {p.name} ({p.project?.name})
                           </option>
