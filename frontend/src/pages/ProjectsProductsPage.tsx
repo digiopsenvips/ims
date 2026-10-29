@@ -11,8 +11,6 @@ import {
   Sparkles,
   X,
   Pencil,
-  Gift,
-  ArrowRight,
   Archive,
   ArchiveRestore,
   Search,
@@ -295,14 +293,6 @@ export const ProjectsProductsPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto">
-          <Link
-            to="/combos?action=create"
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer shadow-xs"
-          >
-            <Gift className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Create Combo Offer</span>
-          </Link>
-
           <button
             onClick={() => setShowProjectModal(true)}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer shadow-xs"
@@ -323,44 +313,6 @@ export const ProjectsProductsPage: React.FC = () => {
             <Plus className="w-4 h-4" />
             <span>Add Product</span>
           </button>
-        </div>
-      </div>
-
-      {/* Combos Promotional Notice Banner */}
-      <div className="p-3.5 sm:p-4 bg-emerald-50/50 border border-emerald-200/70 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
-        <div className="flex items-start sm:items-center gap-3">
-          <div className="p-2 bg-emerald-100/70 text-emerald-700 rounded-xl shrink-0 border border-emerald-200/60">
-            <Gift className="w-4 h-4 sm:w-5 sm:h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-xs sm:text-sm font-bold text-slate-900">
-                Looking to create a Combo Deal or Multi-Buy Offer?
-              </h3>
-              <span className="px-1.5 py-0.5 text-[9px] font-extrabold uppercase rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
-                NEW
-              </span>
-            </div>
-            <p className="text-[11px] text-slate-600 mt-0.5">
-              Combos are dynamic promotional bundles that automatically deduct individual component products from your live stall inventory when sold.
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
-          <Link
-            to="/combos?action=create"
-            className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white transition-colors shadow-xs"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Create Combo Offer</span>
-          </Link>
-          <Link
-            to="/combos"
-            className="inline-flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs"
-          >
-            <span>View All Combos</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </Link>
         </div>
       </div>
 
