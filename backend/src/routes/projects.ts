@@ -172,7 +172,39 @@ router.delete(
   '/:id',
   authenticateToken,
   requireRoles(Role.DEVELOPER, Role.ADMIN),
-  preserveRecords
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const { id } = req.params;
+
+    try {
+      const project = await prisma.project.findUnique({
+        where: { id },
+        include: {
+          products: { select: { id: true } },
+        },
+      });
+
+      if (!project) {
+        res.status(404).json({ error: 'Project not found' });
+        return;
+      }
+
+      const productIds = project.products.map(p => p.id);
+
+      await prisma.$transaction([
+        prisma.saleItem.deleteMany({ where: { productId: { in: productIds } } }),
+        prisma.sale.deleteMany({ where: { productId: { in: productIds } } }),
+        prisma.eventAllocation.deleteMany({ where: { productId: { in: productIds } } }),
+        prisma.inventory.deleteMany({ where: { productId: { in: productIds } } }),
+        prisma.product.deleteMany({ where: { projectId: id } }),
+        prisma.project.delete({ where: { id } }),
+      ]);
+
+      res.json({ message: `Project '${project.name}' and all its products were deleted successfully.` });
+    } catch (error) {
+      console.error('Delete project error:', error);
+      res.status(500).json({ error: 'Failed to delete project' });
+    }
+  }
 );
 
 // PUT /api/projects/:id: Edit project name (DEVELOPER or ADMIN)

@@ -464,13 +464,13 @@ export const ProjectsProductsPage: React.FC = () => {
                   <span>Rename</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
                     const proj = projects.find(p => p.id === selectedProjectId);
-                    if (proj) setStatusMessage({ type: 'error', text: 'Projects and their history are preserved. Retirement requires review.' });
+                    if (proj) setProjectToDelete(proj);
                   }}
                   className="px-2.5 py-1.5 text-xs font-semibold rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                  disabled
-                  title="Projects and their history are preserved."
+                  title="Delete project"
                 >
                   <Trash2 className="w-3 h-3" />
                   <span>Delete</span>

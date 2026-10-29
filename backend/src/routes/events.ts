@@ -834,7 +834,92 @@ router.delete(
   '/:id',
   authenticateToken,
   requireRoles(Role.DEVELOPER, Role.ADMIN),
-  preserveRecords
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const { id } = req.params;
+
+    try {
+      const event = await prisma.event.findUnique({
+        where: { id },
+        include: {
+          allocations: true,
+          sales: { select: { id: true } },
+        },
+      });
+
+      if (!event) {
+        res.status(404).json({ error: 'Event not found' });
+        return;
+      }
+
+      // If event is not ENDED, return any unsold allocated stock back to main inventory
+      if (event.status !== EventStatus.ENDED) {
+        const salesCount = await prisma.saleItem.groupBy({
+          by: ['productId'],
+          where: { sale: { eventId: id } },
+          _sum: { quantity: true },
+        });
+
+        const salesByProduct: Record<string, number> = {};
+        for (const s of salesCount) {
+          salesByProduct[s.productId] = s._sum.quantity || 0;
+        }
+
+        for (const alloc of event.allocations) {
+          const sold = salesByProduct[alloc.productId] || 0;
+          const unsold = Math.max(0, alloc.allocatedQty - sold);
+          if (unsold > 0) {
+            await prisma.inventory.update({
+              where: { productId: alloc.productId },
+              data: {
+                quantityOnHand: { increment: unsold },
+                lastUpdated: new Date(),
+              },
+            });
+          }
+        }
+      }
+
+      // In a transaction, cleanly delete all event dependencies and the event
+      await prisma.$transaction(async tx => {
+        // 1. Unbind any game associated with this event
+        await tx.game.updateMany({
+          where: { eventId: id },
+          data: { eventId: null },
+        });
+
+        // 2. Delete game sessions associated with this event
+        await tx.gameSession.deleteMany({
+          where: { eventId: id },
+        });
+
+        // 3. Delete sales items and sales associated with this event
+        await tx.saleItem.deleteMany({
+          where: { sale: { eventId: id } },
+        });
+        await tx.sale.deleteMany({
+          where: { eventId: id },
+        });
+
+        // 4. Delete event allocations
+        await tx.eventAllocation.deleteMany({
+          where: { eventId: id },
+        });
+
+        // 5. Delete the event record
+        await tx.event.delete({
+          where: { id },
+        });
+      });
+
+      broadcast('event:updated', { eventId: id, action: 'deleted' });
+      broadcast('inventory:updated', { action: 'event_deleted', eventId: id });
+
+      res.json({ message: `Event '${event.name}' deleted successfully` });
+    } catch (error: any) {
+      console.error('Delete event error:', error);
+      res.status(500).json({ error: error?.message || 'Failed to delete event' });
+    }
+  }
 );
 
 export default router;
