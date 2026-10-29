@@ -94,8 +94,8 @@ export const CombosPage: React.FC = () => {
     { productId: '', quantity: 1, isFree: false },
   ]);
 
-  // Ensure option to create combos is accessible to all users
-  const canManage = isDeveloper || isAdmin || isHead || Boolean(user);
+  // RBAC Policy: Only DEVELOPER and ADMIN can create, edit, pause, resume or delete combos
+  const canManage = isDeveloper || isAdmin;
   const canViewRevenue = isDeveloper || isAdmin || Boolean(user?.permissions?.['view_revenue']);
 
   // Fetch all initial data
@@ -136,6 +136,7 @@ export const CombosPage: React.FC = () => {
 
   // Handle URL direct action trigger (e.g. /combos?action=create or /combos?action=create&eventId=...)
   useEffect(() => {
+    if (!canManage) return;
     if (searchParams.get('action') === 'create' && products.length > 0) {
       const targetEvent = searchParams.get('eventId') || '';
       setEditingCombo(null);
@@ -151,7 +152,7 @@ export const CombosPage: React.FC = () => {
       setFormItems([{ productId: products[0]?.id || '', quantity: 3, isFree: false }]);
       setShowCreateModal(true);
     }
-  }, [searchParams, products]);
+  }, [canManage, searchParams, products]);
 
   // Real-time socket listeners
   useEffect(() => {
@@ -233,6 +234,7 @@ export const CombosPage: React.FC = () => {
 
   // Open Create Modal
   const handleOpenCreateModal = () => {
+    if (!canManage) return;
     setEditingCombo(null);
     setFormName('');
     setFormDescription('');
@@ -250,6 +252,7 @@ export const CombosPage: React.FC = () => {
 
   // Open Edit Modal
   const handleOpenEditModal = (combo: Combo) => {
+    if (!canManage) return;
     setEditingCombo(combo);
     setFormName(combo.name);
     setFormDescription(combo.description || '');
@@ -293,6 +296,7 @@ export const CombosPage: React.FC = () => {
   // Submit Create / Edit Combo
   const handleSubmitCombo = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canManage) return;
     if (!formName.trim()) {
       setErrorMessage('Combo offer name is required');
       return;
@@ -355,12 +359,14 @@ export const CombosPage: React.FC = () => {
 
   // Toggle Combo Active/Inactive Status
   const handleToggleStatus = async (combo: Combo) => {
+    if (!canManage) return;
     try {
-      await api.patch(`/combos/${combo.id}/toggle-status`, {});
+      const nextStatus = combo.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+      await api.patch(`/combos/${combo.id}/status`, { status: nextStatus });
       setCombos(prev =>
         prev.map(c =>
           c.id === combo.id
-            ? { ...c, status: c.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' }
+            ? { ...c, status: nextStatus }
             : c
         )
       );
@@ -371,7 +377,7 @@ export const CombosPage: React.FC = () => {
 
   // Archive Combo (Safe Soft-Delete)
   const handleConfirmArchive = async () => {
-    if (!archiveTarget) return;
+    if (!canManage || !archiveTarget) return;
     try {
       await api.delete(`/combos/${archiveTarget.id}`);
       setCombos(prev => prev.filter(c => c.id !== archiveTarget.id));
@@ -781,7 +787,7 @@ export const CombosPage: React.FC = () => {
       )}
 
       {/* CREATE / EDIT COMBO MODAL */}
-      {showCreateModal && (
+      {canManage && showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-2xl w-full border border-slate-200 shadow-2xl overflow-hidden my-8 animate-in fade-in zoom-in-95">
             {/* Modal Header */}
@@ -1062,7 +1068,7 @@ export const CombosPage: React.FC = () => {
       )}
 
       {/* ARCHIVE CONFIRMATION MODAL */}
-      {archiveTarget && (
+      {canManage && archiveTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 border border-slate-200 shadow-xl space-y-4">
             <div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-xl flex items-center justify-center border border-rose-100">

@@ -108,6 +108,7 @@ export const EventDetailsPage: React.FC = () => {
   const [isOpeningStall, setIsOpeningStall] = useState(false);
 
   const canManage = isDeveloper || isAdmin || isHead || hasPermission('edit_events');
+  const canManageCombos = isDeveloper || isAdmin;
 
   const fetchEventData = async () => {
     if (!eventId) return;
@@ -450,13 +451,15 @@ export const EventDetailsPage: React.FC = () => {
 
           {/* Quick Stall Actions */}
           <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <Link
-              to={`/combos?action=create&eventId=${event.id}`}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-semibold shadow-2xs transition-colors"
-            >
-              <Gift className="w-4 h-4 text-emerald-600" />
-              <span>+ Create Combo</span>
-            </Link>
+            {canManageCombos && (
+              <Link
+                to={`/combos?action=create&eventId=${event.id}`}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-semibold shadow-2xs transition-colors"
+              >
+                <Gift className="w-4 h-4 text-emerald-600" />
+                <span>+ Create Combo</span>
+              </Link>
+            )}
 
             <Link
               to={`/sales-entry?eventId=${event.id}`}
@@ -774,15 +777,17 @@ export const EventDetailsPage: React.FC = () => {
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Link
-                to={`/combos?action=create&eventId=${event.id}`}
-                className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>+ Create Combo Offer</span>
-              </Link>
-            </div>
+            {canManageCombos && (
+              <div className="flex items-center gap-2">
+                <Link
+                  to={`/combos?action=create&eventId=${event.id}`}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>+ Create Combo Offer</span>
+                </Link>
+              </div>
+            )}
           </div>
 
           {eventCombos.length === 0 ? (
@@ -794,13 +799,15 @@ export const EventDetailsPage: React.FC = () => {
               <p className="text-xs text-slate-500 max-w-md mx-auto mb-5">
                 Create bundle promotions (e.g. 3 scrunchies for ₹150 or Buy 2 Get 1 Free) that automatically deduct products from this event's allocated inventory.
               </p>
-              <Link
-                to={`/combos?action=create&eventId=${event.id}`}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl text-xs transition-colors shadow-xs"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Create First Combo Offer</span>
-              </Link>
+              {canManageCombos && (
+                <Link
+                  to={`/combos?action=create&eventId=${event.id}`}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl text-xs transition-colors shadow-xs"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Create First Combo Offer</span>
+                </Link>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

@@ -307,7 +307,7 @@ router.get(
 router.post(
   '/',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN, Role.HEAD, Role.MEMBER),
+  requireRoles(Role.DEVELOPER, Role.ADMIN),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const {
@@ -427,7 +427,7 @@ router.post(
 router.put(
   '/:id',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN, Role.HEAD, Role.MEMBER),
+  requireRoles(Role.DEVELOPER, Role.ADMIN),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -550,17 +550,28 @@ router.put(
   }
 );
 
-// PATCH /api/combos/:id/status: Toggle active/inactive
+// PATCH /api/combos/:id/status: Toggle or set active/inactive
 router.patch(
-  '/:id/status',
+  ['/:id/status', '/:id/toggle-status'],
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN, Role.HEAD, Role.MEMBER),
+  requireRoles(Role.DEVELOPER, Role.ADMIN),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const { status } = req.body;
+      let { status } = req.body;
 
-      if (!status || (status !== 'ACTIVE' && status !== 'INACTIVE')) {
+      if (!status) {
+        // If status is not provided (e.g. toggle-status called without body), toggle current status
+        const currentCombo = await prisma.combo.findUnique({
+          where: { id },
+          select: { status: true },
+        });
+        if (!currentCombo) {
+          res.status(404).json({ error: 'Combo not found' });
+          return;
+        }
+        status = currentCombo.status === ComboStatus.ACTIVE ? ComboStatus.INACTIVE : ComboStatus.ACTIVE;
+      } else if (status !== 'ACTIVE' && status !== 'INACTIVE') {
         res.status(400).json({ error: 'Status must be ACTIVE or INACTIVE' });
         return;
       }
@@ -587,7 +598,7 @@ router.patch(
 router.patch(
   '/:id/archive',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN, Role.HEAD, Role.MEMBER),
+  requireRoles(Role.DEVELOPER, Role.ADMIN),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -617,7 +628,7 @@ router.patch(
 router.delete(
   '/:id',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN, Role.HEAD, Role.MEMBER),
+  requireRoles(Role.DEVELOPER, Role.ADMIN),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { id } = req.params;

@@ -34,7 +34,8 @@ import {
 } from 'lucide-react';
 
 export const MemberSalePortalPage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, isDeveloper, isAdmin } = useAuth();
+  const canManageCombos = isDeveloper || isAdmin;
   const { socket } = useSocket();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -1337,27 +1338,31 @@ export const MemberSalePortalPage: React.FC = () => {
                     </div>
                     <h3 className="text-xs font-bold text-slate-800">No active combo offers for this stall</h3>
                     <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
-                      There are currently no active combo deals mapped to this event. You can create combos in the Combos page or sell normal products.
+                      There are currently no active combo deals mapped to this event. You can sell normal products or play games.
                     </p>
-                    <Link
-                      to={`/combos?action=create&eventId=${selectedEventId}`}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>+ Create Combo Offer</span>
-                    </Link>
+                    {canManageCombos && (
+                      <Link
+                        to={`/combos?action=create&eventId=${selectedEventId}`}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>+ Create Combo Offer</span>
+                      </Link>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-2.5">
                     <div className="flex items-center justify-between px-1">
                       <span className="text-xs font-bold text-slate-700">Available Stall Bundles</span>
-                      <Link
-                        to={`/combos?action=create&eventId=${selectedEventId}`}
-                        className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 hover:underline"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Create Combo Offer</span>
-                      </Link>
+                      {canManageCombos && (
+                        <Link
+                          to={`/combos?action=create&eventId=${selectedEventId}`}
+                          className="text-xs font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 hover:underline"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Create Combo Offer</span>
+                        </Link>
+                      )}
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
                     {combosWithStallStock.map(combo => {
