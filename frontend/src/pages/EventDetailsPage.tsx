@@ -271,16 +271,66 @@ export const EventDetailsPage: React.FC = () => {
 
   const isActive = event.status === 'ACTIVE';
   const isEnded = event.status === 'ENDED';
-  const summary = event.summary || {
-    totalRevenue: (event.totalRevenue || 0) + (event.gameRevenue || 0),
-    productRevenue: event.totalRevenue || 0,
-    gameRevenue: event.gameRevenue || 0,
-    totalAllocatedUnits: event.totalAllocated || 0,
-    totalSoldUnits: event.totalSold || 0,
-    totalRemainingUnits: event.totalRemaining || 0,
-    totalTransactions: (event.sales?.length || 0),
-    totalSalesCount: event.sales?.filter((s: any) => s.transactionType !== 'GAME').length || 0,
-    totalGamesPlayed: event.gamesPlayed || 0,
+
+  // Defensively calculate all summary metrics to prevent any undefined/null runtime exceptions
+  const productRevenue = Number(
+    (event as any).summary?.productRevenue ??
+    (event as any).summary?.totalSalesRevenue ??
+    (event as any).totalRevenue ??
+    0
+  );
+  const gameRevenue = Number(
+    (event as any).summary?.gameRevenue ??
+    (event as any).gameRevenue ??
+    0
+  );
+  const totalRevenue = Number(
+    (event as any).summary?.totalRevenue ??
+    (productRevenue + gameRevenue)
+  );
+  const totalAllocatedUnits = Number(
+    (event as any).summary?.totalAllocatedUnits ??
+    (event as any).summary?.totalAllocated ??
+    (event as any).totalAllocated ??
+    0
+  );
+  const totalSoldUnits = Number(
+    (event as any).summary?.totalSoldUnits ??
+    (event as any).summary?.totalSold ??
+    (event as any).totalSold ??
+    0
+  );
+  const totalRemainingUnits = Number(
+    (event as any).summary?.totalRemainingUnits ??
+    (event as any).summary?.totalRemaining ??
+    (event as any).totalRemaining ??
+    Math.max(0, totalAllocatedUnits - totalSoldUnits)
+  );
+  const totalTransactions = Number(
+    (event as any).summary?.totalTransactions ??
+    (event.sales?.length || 0)
+  );
+  const totalSalesCount = Number(
+    (event as any).summary?.totalSalesCount ??
+    (event.sales?.filter((s: any) => s.transactionType !== 'GAME').length || 0)
+  );
+  const totalGamesPlayed = Number(
+    (event as any).summary?.totalGamesPlayed ??
+    (event as any).summary?.gamesPlayed ??
+    (event as any).gamesPlayed ??
+    0
+  );
+
+  const summary = {
+    totalRevenue,
+    productRevenue,
+    gameRevenue,
+    totalAllocatedUnits,
+    totalSoldUnits,
+    totalRemainingUnits,
+    totalTransactions,
+    totalSalesCount,
+    totalGamesPlayed,
   };
 
   const soldPct = summary.totalAllocatedUnits > 0
@@ -289,11 +339,16 @@ export const EventDetailsPage: React.FC = () => {
 
   // Filtered Products for Products Tab
   const filteredAllocations = (event.allocations || []).filter(alloc => {
+    const pName = alloc.productName || (alloc as any).product?.name || '';
+    const pId = alloc.productId || '';
+    const pProject = alloc.projectName || (alloc as any).product?.project?.name || '';
+    const remQty = alloc.remainingQty ?? 0;
+
     const matchesSearch =
-      alloc.productName.toLowerCase().includes(productSearch.toLowerCase()) ||
-      alloc.productId.toLowerCase().includes(productSearch.toLowerCase());
-    const matchesProject = projectFilter === 'ALL' || alloc.projectName === projectFilter;
-    const matchesLowStock = !lowStockOnly || alloc.remainingQty <= 5;
+      pName.toLowerCase().includes(productSearch.toLowerCase()) ||
+      pId.toLowerCase().includes(productSearch.toLowerCase());
+    const matchesProject = projectFilter === 'ALL' || pProject === projectFilter;
+    const matchesLowStock = !lowStockOnly || remQty <= 5;
     return matchesSearch && matchesProject && matchesLowStock;
   });
 
@@ -759,7 +814,7 @@ export const EventDetailsPage: React.FC = () => {
                     <div className="space-y-3">
                       <div className="flex items-center justify-between gap-2">
                         <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase bg-slate-100 text-slate-700 border border-slate-200">
-                          {combo.comboType.replace(/_/g, ' ')}
+                          {combo.comboType ? combo.comboType.replace(/_/g, ' ') : 'COMBO'}
                         </span>
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
                           combo.status === 'ACTIVE'
@@ -793,9 +848,9 @@ export const EventDetailsPage: React.FC = () => {
                       {/* Items */}
                       <div className="space-y-1">
                         <div className="text-[11px] font-bold text-slate-400 uppercase">Includes:</div>
-                        {combo.items.map((ci, idx) => (
+                        {(combo.items || []).map((ci, idx) => (
                           <div key={idx} className="text-xs flex items-center justify-between text-slate-700 py-0.5">
-                            <span>{ci.quantity}× {ci.productName}</span>
+                            <span>{ci.quantity}× {ci.productName || 'Product'}</span>
                             {ci.availableStock !== undefined && (
                               <span className="text-[10px] text-slate-400 font-mono">
                                 ({ci.availableStock} in stall)
@@ -1040,31 +1095,31 @@ export const EventDetailsPage: React.FC = () => {
                     </tr>
                   ) : (
                     filteredAllocations.map(alloc => {
-                      const isDepleted = alloc.remainingQty <= 0;
-                      const isLow = alloc.remainingQty > 0 && alloc.remainingQty <= 5;
+                      const isDepleted = (alloc.remainingQty ?? 0) <= 0;
+                      const isLow = (alloc.remainingQty ?? 0) > 0 && (alloc.remainingQty ?? 0) <= 5;
 
                       return (
                         <tr key={alloc.id} className="hover:bg-slate-50/70 transition-colors">
                           <td className="px-4 py-3 font-mono font-semibold text-slate-600 whitespace-nowrap">
-                            {alloc.productId}
+                            {alloc.productId || '—'}
                           </td>
                           <td className="px-4 py-3 font-bold text-slate-900 min-w-[180px]">
-                            {alloc.productName}
+                            {alloc.productName || (alloc as any).product?.name || 'Product'}
                           </td>
                           <td className="px-4 py-3 text-slate-600 font-medium whitespace-nowrap">
-                            {alloc.projectName}
+                            {alloc.projectName || (alloc as any).product?.project?.name || '—'}
                           </td>
                           <td className="px-4 py-3 text-right font-black text-slate-900 whitespace-nowrap">
-                            ₹{Number(alloc.priceAtEvent).toFixed(2)}
+                            ₹{Number(alloc.priceAtEvent || 0).toFixed(2)}
                           </td>
                           <td className="px-4 py-3 text-right text-slate-600 font-semibold whitespace-nowrap">
-                            {alloc.allocatedQty}
+                            {alloc.allocatedQty ?? 0}
                           </td>
                           <td className="px-4 py-3 text-right text-emerald-700 font-bold whitespace-nowrap">
-                            {alloc.soldQty}
+                            {alloc.soldQty ?? 0}
                           </td>
                           <td className="px-4 py-3 text-right font-black text-slate-900 text-sm whitespace-nowrap">
-                            {alloc.remainingQty}
+                            {alloc.remainingQty ?? 0}
                           </td>
                           <td className="px-4 py-3 text-center whitespace-nowrap">
                             {isDepleted ? (

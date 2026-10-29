@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AppLayout } from './components/layout/AppLayout';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 // Pages
 import { LoginPage } from './pages/LoginPage';
@@ -26,7 +27,8 @@ export const App: React.FC = () => {
   const { user, isMember } = useAuth();
 
   return (
-    <Routes>
+    <ErrorBoundary>
+      <Routes>
       {/* Public Login & Customer Game View */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/play" element={<CustomerGameQrPage />} />
@@ -201,5 +203,6 @@ export const App: React.FC = () => {
         }
       />
     </Routes>
+  </ErrorBoundary>
   );
 };
