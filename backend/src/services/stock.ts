@@ -46,6 +46,7 @@ export async function assertAllocatedStock(
   tx: Prisma.TransactionClient, eventId: string,
   items: Array<{ productId: string; quantity: number; unitPrice?: number }>,
   checkPrice = false,
+  allowWarehouseFulfill = false,
 ) {
   await assertEventOpen(tx, eventId);
   const allocations = await tx.eventAllocation.findMany({ where: { eventId }, include: { product: true } });
@@ -56,12 +57,61 @@ export async function assertAllocatedStock(
     requested.set(item.productId, (requested.get(item.productId) || 0) + item.quantity);
   }
   for (const [productId, quantity] of requested) {
-    const allocation = allocations.find(a => a.productId === productId);
-    if (!allocation || allocation.product.isArchived || allocation.product.isDeleted ||
-        allocation.allocatedQty - (consumed.get(productId) || 0) < quantity) {
-      throw new StockConflict(`Insufficient eligible event stock for ${productId}.`);
+    let allocation = allocations.find(a => a.productId === productId);
+    const consumedQty = consumed.get(productId) || 0;
+    const currentAllocated = allocation ? allocation.allocatedQty : 0;
+    const currentRemaining = Math.max(0, currentAllocated - consumedQty);
+
+    if (currentRemaining < quantity) {
+      if (!allowWarehouseFulfill) {
+        throw new StockConflict(`Insufficient eligible event stock for ${productId}.`);
+      }
+      const shortfall = quantity - currentRemaining;
+      const inv = await tx.inventory.findUnique({
+        where: { productId },
+        include: { product: true },
+      });
+      if (!inv || inv.product.isArchived || inv.product.isDeleted || inv.quantityOnHand < shortfall) {
+        const availableWh = inv?.quantityOnHand || 0;
+        const prodName = inv?.product?.name || productId;
+        throw new StockConflict(
+          `Insufficient stock for ${prodName}. Needed ${quantity}, available: ${currentRemaining} at stall + ${availableWh} in warehouse.`
+        );
+      }
+
+      // Atomically decrement warehouse inventory by the exact shortfall
+      await tx.inventory.update({
+        where: { productId },
+        data: {
+          quantityOnHand: { decrement: shortfall },
+          lastUpdated: new Date(),
+        },
+      });
+
+      // Atomically increment (or create) event allocation for this stall
+      if (allocation) {
+        allocation = await tx.eventAllocation.update({
+          where: { id: allocation.id },
+          data: {
+            allocatedQty: { increment: shortfall },
+          },
+          include: { product: true },
+        });
+      } else {
+        allocation = await tx.eventAllocation.create({
+          data: {
+            eventId,
+            productId,
+            allocatedQty: shortfall,
+            priceAtEvent: inv.product.basePrice || 0,
+          },
+          include: { product: true },
+        });
+        allocations.push(allocation);
+      }
     }
-    if (checkPrice && items.some(i => i.productId === productId && i.unitPrice !== Number(allocation.priceAtEvent))) {
+
+    if (checkPrice && items.some(i => i.productId === productId && i.unitPrice !== Number(allocation!.priceAtEvent))) {
       throw new StockConflict(`Event price changed for ${productId}. Review the transaction before retrying.`);
     }
   }

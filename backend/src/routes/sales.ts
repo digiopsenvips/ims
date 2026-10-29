@@ -521,40 +521,48 @@ export const recordSale = async (req: AuthenticatedRequest, res: Response): Prom
             }
             const alloc = event.allocations.find(a => a.productId === pId);
             if (!alloc) {
-              res.status(400).json({ error: `Product ${pId} is not allocated to this event.` });
-              return;
+              const prod = await prisma.product.findUnique({ where: { id: pId }, include: { project: true } });
+              if (!prod || prod.isArchived || prod.isDeleted) {
+                res.status(400).json({ error: `Product ${pId} is not available.` });
+                return;
+              }
+              if (combo.projectId && prod.projectId !== combo.projectId) throw new StockConflict('Selected product is outside this offer project.');
+              resolvedComponents.push({
+                productId: pId,
+                productName: prod.name,
+                projectName: prod.project.name,
+                quantity: qty,
+                allocationPrice: Number(prod.basePrice || 0),
+              });
+            } else {
+              if (combo.projectId && alloc.product.projectId !== combo.projectId) throw new StockConflict('Selected product is outside this offer project.');
+              resolvedComponents.push({
+                productId: pId,
+                productName: alloc.product.name,
+                projectName: alloc.product.project.name,
+                quantity: qty,
+                allocationPrice: Number(alloc.priceAtEvent),
+              });
             }
-            if (combo.projectId && alloc.product.projectId !== combo.projectId) throw new StockConflict('Selected product is outside this offer project.');
-            resolvedComponents.push({
-              productId: pId,
-              productName: alloc.product.name,
-              projectName: alloc.product.project.name,
-              quantity: qty,
-              allocationPrice: Number(alloc.priceAtEvent),
-            });
           }
         } else {
           // FIXED_QUANTITY, MULTI_PRODUCT, BUY_X_GET_Y
           for (const ci of combo.items) {
             const neededQty = ci.quantity * comboQty;
             const alloc = event.allocations.find(a => a.productId === ci.productId);
-            if (!alloc) {
-              res.status(400).json({ error: `Combo component product ${ci.product.name} (${ci.productId}) is not allocated to this event.` });
-              return;
-            }
             resolvedComponents.push({
               productId: ci.productId,
               productName: ci.product.name,
               projectName: ci.product.project.name,
               quantity: neededQty,
-              allocationPrice: Number(alloc.priceAtEvent),
+              allocationPrice: alloc ? Number(alloc.priceAtEvent) : Number(ci.product.basePrice || 0),
             });
           }
         }
 
         if (resolvedComponents.length === 0) throw new StockConflict('The offer has no eligible components.');
 
-        // 4. Validate stock for each component
+        // 4. Validate stock for each component considering stall allocation and eligible warehouse stock
         for (const comp of resolvedComponents) {
           const salesAgg = await prisma.saleItem.aggregate({
             where: {
@@ -564,14 +572,18 @@ export const recordSale = async (req: AuthenticatedRequest, res: Response): Prom
             _sum: { quantity: true },
           });
           const soldSoFar = salesAgg._sum.quantity || 0;
-          const allocation = event.allocations.find(a => a.productId === comp.productId)!;
-          const remainingAllocated = allocation.allocatedQty - soldSoFar;
+          const allocation = event.allocations.find(a => a.productId === comp.productId);
+          const remainingAllocated = allocation ? Math.max(0, allocation.allocatedQty - soldSoFar) : 0;
+          const inv = await prisma.inventory.findUnique({ where: { productId: comp.productId } });
+          const warehouseStock = Math.max(0, inv?.quantityOnHand || 0);
+          const totalUsable = remainingAllocated + warehouseStock;
 
-          if (comp.quantity > remainingAllocated) {
+          if (comp.quantity > totalUsable) {
             res.status(400).json({
-              error: `Insufficient stock for combo component ${comp.productName}. Only ${remainingAllocated} remaining (${comp.quantity} required).`,
+              error: `Insufficient stock for combo component ${comp.productName}. Needed ${comp.quantity}, available: ${remainingAllocated} at stall + ${warehouseStock} in warehouse.`,
               productId: comp.productId,
               remainingAllocated,
+              warehouseStock,
             });
             return;
           }
@@ -641,7 +653,7 @@ export const recordSale = async (req: AuthenticatedRequest, res: Response): Prom
               currentCombo.updatedAt.getTime() !== combo.updatedAt.getTime()) {
             throw new StockConflict('Offer changed. Preserve this transaction for review.');
           }
-          await assertAllocatedStock(tx, eventId, validatedItems, !comboId);
+          await assertAllocatedStock(tx, eventId, validatedItems, false, true);
           const [{ nextVal }] = await tx.$queryRaw<[{ nextVal: bigint | number }]>`
             SELECT nextval('receipt_number_seq')::bigint as "nextVal"
           `;

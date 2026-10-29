@@ -1,4 +1,4 @@
-const CACHE_NAME = 'enactus-ims-cache-v3';
+const CACHE_NAME = 'enactus-ims-cache-v4';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -10,15 +10,28 @@ const STATIC_ASSETS = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('[SW] Precaching app shell (v3)');
+      console.log('[SW] Precaching app shell (v4)');
       return cache.addAll(STATIC_ASSETS);
     })
   );
   self.skipWaiting();
 });
 
-// Preserve existing caches; retiring old assets is a separate reviewed maintenance task.
-self.addEventListener('activate', event => { event.waitUntil(self.clients.claim()); });
+// Purge any outdated caches on activation and claim clients immediately
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames
+          .filter((name) => name !== CACHE_NAME)
+          .map((name) => {
+            console.log('[SW] Purging outdated cache:', name);
+            return caches.delete(name);
+          })
+      );
+    }).then(() => self.clients.claim())
+  );
+});
 
 // Fetch Event - Network-First Strategy for fresh code with offline fallback
 self.addEventListener('fetch', (event) => {

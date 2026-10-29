@@ -447,6 +447,11 @@ export interface Combo {
     isFree?: boolean;
     basePrice?: number | null;
     availableStock?: number;
+    stallStock?: number;
+    warehouseStock?: number;
+    usableStock?: number;
+    stallBundles?: number;
+    warehouseBundles?: number;
     isLowStock?: boolean;
     isOutOfStock?: boolean;
   }>;
@@ -454,6 +459,8 @@ export interface Combo {
   savings?: number;
   savingsPercent?: number;
   availableStock?: number;
+  stallBundles?: number;
+  warehouseBundles?: number;
   isLowStock?: boolean;
   isOutOfStock?: boolean;
   salesCount?: number;

@@ -96,8 +96,8 @@ router.get(
         const contextId = typeof eventId === 'string' ? eventId : combo.eventId;
         const context = contextId ? eventStocks.get(contextId) : undefined;
         let normalValue = 0;
-        let isOutOfStock = false;
         let minAvailableStock = Infinity;
+        let stallAvailableStock = Infinity;
 
         const enrichedItems = combo.items.map(item => {
           const product = item.product;
@@ -115,17 +115,20 @@ router.get(
             normalValue += unitPrice * item.quantity;
           }
 
-          const stock = product.isArchived || product.isDeleted ? 0
-            : contextId ? context?.get(item.productId)?.stock ?? 0 : product.inventory?.quantityOnHand ?? 0;
+          const isEligible = !product.isArchived && !product.isDeleted;
+          const warehouseStock = isEligible ? Math.max(0, product.inventory?.quantityOnHand ?? 0) : 0;
+          const stallStock = (contextId && isEligible) ? (context?.get(item.productId)?.stallStock ?? 0) : 0;
+          const usableStock = stallStock + warehouseStock;
+
           if (item.quantity > 0) {
-            const possibleCombos = Math.floor(stock / item.quantity);
+            const possibleCombos = Math.floor(usableStock / item.quantity);
             if (possibleCombos < minAvailableStock) {
               minAvailableStock = possibleCombos;
             }
-          }
-
-          if (stock < item.quantity) {
-            isOutOfStock = true;
+            const possibleStall = Math.floor(stallStock / item.quantity);
+            if (possibleStall < stallAvailableStock) {
+              stallAvailableStock = possibleStall;
+            }
           }
 
           return {
@@ -138,18 +141,23 @@ router.get(
             isFree: item.isFree,
             unitPrice,
             lineTotal: unitPrice * item.quantity,
-            availableStock: stock,
-            isOutOfStock: stock < item.quantity,
+            stallStock,
+            warehouseStock,
+            usableStock,
+            availableStock: usableStock,
+            isOutOfStock: usableStock < item.quantity,
           };
         });
 
         const comboPrice = Number(combo.price);
         const savings = Math.max(0, normalValue - comboPrice);
         const savingsPercent = normalValue > 0 ? Math.round((savings / normalValue) * 100) : 0;
-        const pickPool = combo.items.length > 0 ? enrichedItems.reduce((sum, item) => sum + item.availableStock, 0)
-          : [...(context?.values() || [])].filter(item => !combo.projectId || item.projectId === combo.projectId).reduce((sum, item) => sum + item.stock, 0);
+        const pickPool = combo.items.length > 0 ? enrichedItems.reduce((sum, item) => sum + item.usableStock, 0)
+          : [...(context?.values() || [])].filter(item => !combo.projectId || item.projectId === combo.projectId).reduce((sum, item) => sum + item.usableStock, 0);
         const availableStock = combo.comboType === 'PICK_ANY' ? Math.floor(pickPool / Math.max(1, combo.minItems || 1))
           : minAvailableStock === Infinity ? 0 : minAvailableStock;
+        const stallBundles = stallAvailableStock === Infinity ? 0 : stallAvailableStock;
+        const warehouseBundles = Math.max(0, availableStock - stallBundles);
 
         return {
           id: combo.id,
@@ -171,7 +179,9 @@ router.get(
           items: enrichedItems,
           totalComponentUnits: enrichedItems.reduce((sum, i) => sum + i.quantity, 0),
           availableStock,
-          isOutOfStock: combo.comboType === 'PICK_ANY' ? availableStock <= 0 : isOutOfStock || availableStock <= 0,
+          stallBundles,
+          warehouseBundles,
+          isOutOfStock: availableStock <= 0,
           salesCount: combo.sales.length,
           revenueGenerated: combo.sales.reduce((sum, s) => sum + Number(s.totalAmount), 0),
           createdAt: combo.createdAt,
@@ -233,6 +243,7 @@ router.get(
       const context = contextId ? await eventAvailability(contextId) : undefined;
       let normalValue = 0;
       let minAvailableStock = Infinity;
+      let stallAvailableStock = Infinity;
 
       const enrichedItems = combo.items.map(item => {
         const product = item.product;
@@ -249,12 +260,19 @@ router.get(
           normalValue += unitPrice * item.quantity;
         }
 
-        const stock = product.isArchived || product.isDeleted ? 0
-            : contextId ? context?.get(item.productId)?.stock ?? 0 : product.inventory?.quantityOnHand ?? 0;
+        const isEligible = !product.isArchived && !product.isDeleted;
+        const warehouseStock = isEligible ? Math.max(0, product.inventory?.quantityOnHand ?? 0) : 0;
+        const stallStock = (contextId && isEligible) ? (context?.get(item.productId)?.stallStock ?? 0) : 0;
+        const usableStock = stallStock + warehouseStock;
+
         if (item.quantity > 0) {
-          const possibleCombos = Math.floor(stock / item.quantity);
+          const possibleCombos = Math.floor(usableStock / item.quantity);
           if (possibleCombos < minAvailableStock) {
             minAvailableStock = possibleCombos;
+          }
+          const possibleStall = Math.floor(stallStock / item.quantity);
+          if (possibleStall < stallAvailableStock) {
+            stallAvailableStock = possibleStall;
           }
         }
 
@@ -268,18 +286,23 @@ router.get(
           isFree: item.isFree,
           unitPrice,
           lineTotal: unitPrice * item.quantity,
-          availableStock: stock,
-          isOutOfStock: stock < item.quantity,
+          stallStock,
+          warehouseStock,
+          usableStock,
+          availableStock: usableStock,
+          isOutOfStock: usableStock < item.quantity,
         };
       });
 
       const comboPrice = Number(combo.price);
       const savings = Math.max(0, normalValue - comboPrice);
       const savingsPercent = normalValue > 0 ? Math.round((savings / normalValue) * 100) : 0;
-      const pickPool = combo.items.length > 0 ? enrichedItems.reduce((sum, item) => sum + item.availableStock, 0)
-          : [...(context?.values() || [])].filter(item => !combo.projectId || item.projectId === combo.projectId).reduce((sum, item) => sum + item.stock, 0);
-        const availableStock = combo.comboType === 'PICK_ANY' ? Math.floor(pickPool / Math.max(1, combo.minItems || 1))
-          : minAvailableStock === Infinity ? 0 : minAvailableStock;
+      const pickPool = combo.items.length > 0 ? enrichedItems.reduce((sum, item) => sum + item.usableStock, 0)
+        : [...(context?.values() || [])].filter(item => !combo.projectId || item.projectId === combo.projectId).reduce((sum, item) => sum + item.usableStock, 0);
+      const availableStock = combo.comboType === 'PICK_ANY' ? Math.floor(pickPool / Math.max(1, combo.minItems || 1))
+        : minAvailableStock === Infinity ? 0 : minAvailableStock;
+      const stallBundles = stallAvailableStock === Infinity ? 0 : stallAvailableStock;
+      const warehouseBundles = Math.max(0, availableStock - stallBundles);
 
       res.json({
         combo: {
@@ -301,6 +324,8 @@ router.get(
           freeItemsCount: combo.freeItemsCount,
           items: enrichedItems,
           availableStock,
+          stallBundles,
+          warehouseBundles,
           isOutOfStock: availableStock <= 0,
           salesCount: combo.sales.length,
           revenueGenerated: combo.sales.reduce((sum, s) => sum + Number(s.totalAmount), 0),

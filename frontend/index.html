@@ -14,11 +14,12 @@
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
-      // Clear old service worker caches on load
+      // Clear legacy service worker caches on load
+      const CURRENT_CACHE = 'enactus-ims-cache-v4';
       if ('caches' in window) {
         caches.keys().then(names => {
           for (let name of names) {
-            if (name === 'enactus-ims-cache-v1') {
+            if (name !== CURRENT_CACHE) {
               console.log('Purging legacy cache:', name);
               caches.delete(name);
             }

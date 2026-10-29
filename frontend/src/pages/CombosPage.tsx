@@ -708,17 +708,24 @@ export const CombosPage: React.FC = () => {
 
                           <div className="flex items-center gap-1.5 flex-shrink-0">
                             {item.availableStock !== undefined && (
-                              <span
-                                className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
-                                  item.availableStock <= 0
-                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                    : item.availableStock < 5
-                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                    : 'bg-emerald-50 text-emerald-700 border-emerald-200/60'
-                                }`}
-                              >
-                                {item.availableStock} in stall
-                              </span>
+                              <div className="flex flex-col items-end gap-0.5">
+                                <span
+                                  className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                                    item.availableStock <= 0
+                                      ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                      : item.availableStock < 5
+                                      ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                      : 'bg-emerald-50 text-emerald-700 border-emerald-200/60'
+                                  }`}
+                                >
+                                  {item.usableStock ?? item.availableStock} usable
+                                </span>
+                                {(item.stallStock !== undefined || item.warehouseStock !== undefined) && (
+                                  <span className="text-[9px] text-slate-500 font-medium">
+                                    Stall: {item.stallStock ?? item.availableStock ?? 0} • Wh: {item.warehouseStock ?? 0}
+                                  </span>
+                                )}
+                              </div>
                             )}
                           </div>
                         </div>
@@ -738,9 +745,16 @@ export const CombosPage: React.FC = () => {
                         <AlertTriangle className="w-3.5 h-3.5" /> Low stock ({combo.availableStock} bundles)
                       </span>
                     ) : (
-                      <span className="font-semibold text-emerald-700 flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> {combo.availableStock ?? 'Available'} bundles available
-                      </span>
+                      <div className="text-right">
+                        <span className="font-semibold text-emerald-700 flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> {combo.availableStock ?? 'Available'} bundles available
+                        </span>
+                        {(combo.stallBundles !== undefined || combo.warehouseBundles !== undefined) && (
+                          <span className="text-[10px] text-slate-500 font-medium">
+                            Stall: {combo.stallBundles ?? 0} • Sourced from warehouse: {combo.warehouseBundles ?? 0}
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -948,61 +962,133 @@ export const CombosPage: React.FC = () => {
                 <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
                   {formItems.map((item, idx) => {
                     const selectedProd = products.find(p => p.id === item.productId);
+                    const selEvent = formEventId ? events.find(e => e.id === formEventId) : null;
+                    const alloc = selEvent?.allocations?.find(a => a.productId === item.productId);
+                    const stallStock = alloc ? Math.max(0, alloc.remainingQty) : 0;
+                    const warehouseStock = Math.max(0, (selectedProd as any)?.inventory?.quantityOnHand ?? (selectedProd as any)?.stockOnHand ?? 0);
+                    const usableStock = formEventId ? (stallStock + warehouseStock) : warehouseStock;
+                    const estBundles = item.quantity > 0 ? Math.floor(usableStock / item.quantity) : 0;
+
                     return (
                       <div
                         key={idx}
-                        className="flex items-center gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                        className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2"
                       >
-                        {/* Product Selector */}
-                        <div className="flex-1">
-                          <select
-                            required
-                            value={item.productId}
-                            onChange={e => handleUpdateFormItem(idx, { productId: e.target.value })}
-                            className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-                          >
-                            <option value="" disabled>Select physical product...</option>
-                            {products.map(p => (
-                              <option key={p.id} value={p.id}>
-                                {p.name} ({p.id}) — ₹{p.basePrice || 0}
-                              </option>
-                            ))}
-                          </select>
+                        <div className="flex items-center gap-2">
+                          {/* Product Selector */}
+                          <div className="flex-1">
+                            <select
+                              required
+                              value={item.productId}
+                              onChange={e => handleUpdateFormItem(idx, { productId: e.target.value })}
+                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                            >
+                              <option value="" disabled>Select physical product...</option>
+                              {products.map(p => (
+                                <option key={p.id} value={p.id}>
+                                  {p.name} ({p.id}) — ₹{p.basePrice || 0}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Quantity */}
+                          <div className="w-24">
+                            <input
+                              type="number"
+                              min="1"
+                              max="50"
+                              required
+                              value={item.quantity}
+                              onChange={e => handleUpdateFormItem(idx, { quantity: parseInt(e.target.value, 10) || 1 })}
+                              placeholder="Qty"
+                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-center font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                            />
+                          </div>
+
+                          {/* Price Preview */}
+                          <div className="w-20 text-right text-xs font-bold text-slate-700">
+                            ₹{((selectedProd?.basePrice || 0) * item.quantity).toFixed(0)}
+                          </div>
+
+                          {/* Remove */}
+                          {formItems.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveFormItem(idx)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 rounded-md transition-colors"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
 
-                        {/* Quantity */}
-                        <div className="w-24">
-                          <input
-                            type="number"
-                            min="1"
-                            max="50"
-                            required
-                            value={item.quantity}
-                            onChange={e => handleUpdateFormItem(idx, { quantity: parseInt(e.target.value, 10) || 1 })}
-                            placeholder="Qty"
-                            className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-center font-bold text-slate-900 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-                          />
-                        </div>
-
-                        {/* Price Preview */}
-                        <div className="w-20 text-right text-xs font-bold text-slate-700">
-                          ₹{((selectedProd?.basePrice || 0) * item.quantity).toFixed(0)}
-                        </div>
-
-                        {/* Remove */}
-                        {formItems.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveFormItem(idx)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-md transition-colors"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
+                        {/* 5-Point Component Inventory Breakdown */}
+                        {item.productId && (
+                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 pt-1 border-t border-slate-200/60 text-[10px] text-slate-600">
+                            <div className="bg-white px-2 py-1 rounded border border-slate-200/80">
+                              <span className="text-slate-400 block font-medium">At stall:</span>
+                              <span className="font-bold text-slate-900">{formEventId ? stallStock : 'All stalls'}</span>
+                            </div>
+                            <div className="bg-white px-2 py-1 rounded border border-slate-200/80">
+                              <span className="text-slate-400 block font-medium">In warehouse:</span>
+                              <span className="font-bold text-slate-900">{warehouseStock}</span>
+                            </div>
+                            <div className="bg-white px-2 py-1 rounded border border-emerald-200/80 bg-emerald-50/30">
+                              <span className="text-emerald-700 block font-semibold">Total usable:</span>
+                              <span className="font-black text-emerald-900">{usableStock}</span>
+                            </div>
+                            <div className="bg-white px-2 py-1 rounded border border-slate-200/80">
+                              <span className="text-slate-400 block font-medium">Req / bundle:</span>
+                              <span className="font-bold text-slate-900">{item.quantity}</span>
+                            </div>
+                            <div className="bg-white px-2 py-1 rounded border border-slate-200/80">
+                              <span className="text-slate-400 block font-medium">Est. bundles:</span>
+                              <span className={`font-black ${estBundles > 0 ? 'text-slate-900' : 'text-rose-600'}`}>
+                                {estBundles}
+                              </span>
+                            </div>
+                          </div>
                         )}
                       </div>
                     );
                   })}
                 </div>
+
+                {/* Theoretical Combo Availability Summary Box */}
+                {formItems.some(i => i.productId) && (
+                  <div className="p-3 bg-emerald-50/70 border border-emerald-200/80 rounded-xl flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <Package className="w-4 h-4 text-emerald-700 shrink-0" />
+                      <div>
+                        <span className="font-bold text-emerald-950">Theoretical Combined Bundle Availability</span>
+                        <p className="text-[11px] text-emerald-700">
+                          {formEventId
+                            ? 'Calculated across stall allocation + eligible warehouse stock'
+                            : 'Global combo: dynamic availability resolves per stall using available stall + warehouse inventory'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className="text-base font-black text-emerald-950">
+                        {Math.min(
+                          ...formItems
+                            .filter(i => i.productId)
+                            .map(i => {
+                              const p = products.find(prod => prod.id === i.productId);
+                              const selEvent = formEventId ? events.find(e => e.id === formEventId) : null;
+                              const alloc = selEvent?.allocations?.find(a => a.productId === i.productId);
+                              const sStock = alloc ? Math.max(0, alloc.remainingQty) : 0;
+                              const wStock = Math.max(0, (p as any)?.inventory?.quantityOnHand ?? (p as any)?.stockOnHand ?? 0);
+                              const tot = formEventId ? (sStock + wStock) : wStock;
+                              return i.quantity > 0 ? Math.floor(tot / i.quantity) : 0;
+                            })
+                        )}{' '}
+                        bundles
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Pricing & Savings Real-Time Calculator */}

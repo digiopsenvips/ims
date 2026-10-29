@@ -426,25 +426,25 @@ export const MemberSalePortalPage: React.FC = () => {
           let totalEligibleUnits = 0;
           allowed.forEach(pId => {
             const alloc = allocations.find(a => a.productId === pId);
-            if (alloc) {
-              totalEligibleUnits += alloc.remainingQty;
-              normalValue = Math.max(normalValue, Number(alloc.priceAtEvent) * (combo.minItems || 3));
-            }
+            const wh = (alloc as any)?.availableStock ?? 0;
+            const remaining = (alloc ? alloc.remainingQty : 0) + wh;
+            totalEligibleUnits += remaining;
+            const price = alloc ? Number(alloc.priceAtEvent) : 0;
+            normalValue = Math.max(normalValue, price * (combo.minItems || 3));
           });
           const minItems = combo.minItems || 3;
           maxBundles = Math.floor(totalEligibleUnits / minItems);
         } else {
           for (const item of combo.items) {
             const alloc = allocations.find(a => a.productId === item.productId);
-            if (!alloc) {
-              hasMissingComponent = true;
-              maxBundles = 0;
-            } else {
-              normalValue += Number(alloc.priceAtEvent) * item.quantity;
-              const bundlesForComp = Math.floor(alloc.remainingQty / item.quantity);
-              if (bundlesForComp < maxBundles) {
-                maxBundles = bundlesForComp;
-              }
+            const stallQty = alloc ? Math.max(0, alloc.remainingQty) : 0;
+            const whQty = (alloc as any)?.availableStock ?? item.warehouseStock ?? 0;
+            const usableQty = stallQty + whQty;
+            const unitPrice = alloc ? Number(alloc.priceAtEvent) : Number(item.basePrice || 0);
+            normalValue += unitPrice * item.quantity;
+            const bundlesForComp = Math.floor(usableQty / item.quantity);
+            if (bundlesForComp < maxBundles) {
+              maxBundles = bundlesForComp;
             }
           }
         }
@@ -595,10 +595,12 @@ export const MemberSalePortalPage: React.FC = () => {
         quantity: i.quantity,
       }));
 
-    // Stock check against current event allocations
+    // Stock check against current event allocations and eligible warehouse stock
     for (const comp of components) {
       const alloc = allocations.find(a => a.productId === comp.productId);
-      const remaining = alloc ? alloc.remainingQty : 0;
+      const remainingStall = alloc ? alloc.remainingQty : 0;
+      const whAvail = (alloc as any)?.availableStock ?? (combo.items.find(i => i.productId === comp.productId) as any)?.warehouseStock ?? 0;
+      const totalUsable = remainingStall + whAvail;
       let alreadyInCart = 0;
       cart.forEach(c => {
         if (c.isCombo && c.components) {
@@ -609,9 +611,9 @@ export const MemberSalePortalPage: React.FC = () => {
         }
       });
 
-      if (comp.quantity + alreadyInCart > remaining) {
+      if (comp.quantity + alreadyInCart > totalUsable) {
         setErrorMessage(
-          `Cannot add combo. Insufficient stall stock for ${comp.productName} (${remaining} remaining in stall).`
+          `Cannot add combo. Insufficient stock for ${comp.productName} (${remainingStall} at stall + ${whAvail} in warehouse).`
         );
         return;
       }
@@ -663,6 +665,8 @@ export const MemberSalePortalPage: React.FC = () => {
             for (const comp of item.components) {
               const alloc = allocations.find(a => a.productId === comp.productId);
               const remaining = alloc ? alloc.remainingQty : 0;
+              const wh = (alloc as any)?.availableStock ?? 0;
+              const totalUsable = remaining + wh;
               let otherInCart = 0;
               prevCart.forEach(c => {
                 if (c.productId === productId) return;
@@ -674,8 +678,8 @@ export const MemberSalePortalPage: React.FC = () => {
                 }
               });
 
-              if (comp.quantity * nextQty + otherInCart > remaining) {
-                setErrorMessage(`Stall stock limit reached for component ${comp.productName} (${remaining} in stall).`);
+              if (comp.quantity * nextQty + otherInCart > totalUsable) {
+                setErrorMessage(`Stock limit reached for component ${comp.productName} (${remaining} stall + ${wh} warehouse).`);
                 return item;
               }
             }
@@ -1348,11 +1352,15 @@ export const MemberSalePortalPage: React.FC = () => {
                                   <span className="truncate">
                                     {ci.quantity}× {ci.productName}
                                   </span>
-                                  {ci.availableStock !== undefined && (
-                                    <span className="text-slate-400 font-mono text-[9px]">
-                                      {ci.availableStock} in stall
+                                  {(ci.stallStock !== undefined || ci.warehouseStock !== undefined) ? (
+                                    <span className="text-slate-500 font-mono text-[9px]">
+                                      Stall: {ci.stallStock ?? ci.availableStock ?? 0} • Wh: {ci.warehouseStock ?? 0}
                                     </span>
-                                  )}
+                                  ) : ci.availableStock !== undefined ? (
+                                    <span className="text-slate-400 font-mono text-[9px]">
+                                      {ci.availableStock} usable
+                                    </span>
+                                  ) : null}
                                 </div>
                               ))}
                             </div>

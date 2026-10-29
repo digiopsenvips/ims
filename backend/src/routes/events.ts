@@ -35,7 +35,7 @@ router.get(
           allocations: {
             include: {
               product: {
-                include: { project: true },
+                include: { project: true, inventory: true },
               },
             },
           },
@@ -104,6 +104,7 @@ router.get(
             soldQty: sold,
             remainingQty: remaining,
             priceAtEvent: alloc.priceAtEvent,
+            availableStock: alloc.product.inventory?.quantityOnHand ?? 0,
           };
         });
 
