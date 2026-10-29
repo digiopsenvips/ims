@@ -14,6 +14,8 @@ import {
   ArrowUpDown,
   Phone,
   User as UserIcon,
+  Pencil,
+  Trash2,
   X,
   AlertTriangle,
   Check,
@@ -75,6 +77,18 @@ export const SalesManagementPage: React.FC = () => {
   // Modal & Details State
   const [selectedSaleForDetails, setSelectedSaleForDetails] = useState<Sale | null>(null);
   const [copiedReceiptText, setCopiedReceiptText] = useState<boolean>(false);
+
+  // Developer Edit State
+  const [editingSale, setEditingSale] = useState<Sale | null>(null);
+  const [editQty, setEditQty] = useState<number>(1);
+  const [editPrice, setEditPrice] = useState<number>(0);
+  const [editPaymentMethod, setEditPaymentMethod] = useState<PaymentMethod>('CASH');
+  const [editCashAmount, setEditCashAmount] = useState<string>('');
+  const [editUpiAmount, setEditUpiAmount] = useState<string>('');
+  const [editCustomerName, setEditCustomerName] = useState<string>('');
+  const [editCustomerPhone, setEditCustomerPhone] = useState<string>('');
+  const [editSaleTime, setEditSaleTime] = useState<string>('');
+  const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
 
   const canViewRevenue = isDeveloper || isAdmin || hasPermission('view_revenue');
   const canViewPII = isDeveloper || isAdmin || hasPermission('view_customer_pii');
@@ -244,8 +258,10 @@ export const SalesManagementPage: React.FC = () => {
     };
 
     socket.on('sale:created', handleNewSale);
+    socket.on('sale:deleted', handleNewSale);
     return () => {
       socket.off('sale:created', handleNewSale);
+      socket.off('sale:deleted', handleNewSale);
     };
   }, [socket, fetchSalesData]);
 
@@ -278,6 +294,90 @@ export const SalesManagementPage: React.FC = () => {
 
   const handlePaymentChange = (payment: 'ALL' | 'UPI' | 'CASH' | 'CASH_UPI') => {
     updateUrlState({ page: 1, payment });
+  };
+
+  // Developer Edit Handlers
+  const handleOpenEdit = (sale: Sale) => {
+    setEditingSale(sale);
+    setEditQty(sale.quantity || 1);
+    setEditPrice(sale.unitPrice || 0);
+    setEditPaymentMethod(sale.paymentMethod);
+    setEditCashAmount(sale.cashAmount != null ? sale.cashAmount.toString() : '');
+    setEditUpiAmount(sale.upiAmount != null ? sale.upiAmount.toString() : '');
+    setEditCustomerName(sale.customerName || '');
+    setEditCustomerPhone(sale.customerPhone || '');
+    setEditSaleTime(sale.saleTime ? new Date(sale.saleTime).toISOString().slice(0, 16) : '');
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSale) return;
+
+    const lineTotal = editQty * editPrice;
+    let cashVal: number | undefined;
+    let upiVal: number | undefined;
+
+    if (editPaymentMethod === 'CASH_UPI') {
+      cashVal = parseFloat(editCashAmount) || 0;
+      upiVal = parseFloat(editUpiAmount) || 0;
+      if (Math.abs(lineTotal - (cashVal + upiVal)) > 0.01) {
+        alert(`Split amounts (Cash ₹${cashVal} + UPI ₹${upiVal}) must equal total amount ₹${lineTotal.toFixed(2)}.`);
+        return;
+      }
+    } else if (editPaymentMethod === 'CASH') {
+      cashVal = lineTotal;
+      upiVal = 0;
+    } else if (editPaymentMethod === 'UPI') {
+      cashVal = 0;
+      upiVal = lineTotal;
+    }
+
+    setIsSavingEdit(true);
+    try {
+      const res = await api.put(`/sales/${editingSale.id}`, {
+        quantity: editQty,
+        unitPrice: editPrice,
+        paymentMethod: editPaymentMethod,
+        cashAmount: cashVal,
+        upiAmount: upiVal,
+        customerName: editCustomerName.trim() || null,
+        customerPhone: editCustomerPhone.trim() || null,
+        saleTime: editSaleTime ? new Date(editSaleTime).toISOString() : undefined,
+      });
+      if (res?.sale) {
+        setSales(prev => prev.map(s => (s.id === editingSale.id ? { ...s, ...res.sale } : s)));
+        if (selectedSaleForDetails && selectedSaleForDetails.id === editingSale.id) {
+          setSelectedSaleForDetails(res.sale);
+        }
+      }
+      await fetchSalesData();
+      const receiptLabel = editingSale.receiptNumber ? `#${editingSale.receiptNumber}` : `ID-${editingSale.id}`;
+      setEditingSale(null);
+      setActionMessage(`Sale (${receiptLabel}) updated successfully!`);
+      setTimeout(() => setActionMessage(null), 3500);
+    } catch (err: any) {
+      alert(err.message || 'Failed to update sale record');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleDeleteSale = async (sale: Sale) => {
+    const receiptLabel = sale.receiptNumber ? `#${sale.receiptNumber}` : `ID-${sale.id}`;
+    if (!window.confirm(`Developer Action:\n\nAre you sure you want to permanently delete Sale (${receiptLabel})?\n\nThis will remove this transaction and linked items from the database.`)) {
+      return;
+    }
+    try {
+      await api.delete(`/sales/${sale.id}`);
+      setActionMessage(`Sale (${receiptLabel}) deleted successfully!`);
+      if (selectedSaleForDetails && selectedSaleForDetails.id === sale.id) {
+        setSelectedSaleForDetails(null);
+      }
+      await fetchSalesData();
+      setTimeout(() => setActionMessage(null), 3500);
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete sale record');
+    }
   };
 
   // Receipt Text Formatter for WhatsApp / Copy
@@ -428,7 +528,7 @@ export const SalesManagementPage: React.FC = () => {
             </h1>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Official chronological transactions ledger with multi-payment tracking and audit-preserved records.
+            Official chronological transactions ledger with multi-payment tracking and developer controls.
           </p>
         </div>
 
@@ -623,7 +723,7 @@ export const SalesManagementPage: React.FC = () => {
                 <th scope="col" className="px-4 py-3 w-28 whitespace-nowrap">Time</th>
                 <th scope="col" className="px-4 py-3 w-32 whitespace-nowrap">Event</th>
                 <th scope="col" className="px-4 py-3 w-36 whitespace-nowrap">Customer Info</th>
-                <th scope="col" className="px-4 py-3 text-center w-24 whitespace-nowrap">Details</th>
+                <th scope="col" className="px-4 py-3 text-center w-36 whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -818,17 +918,40 @@ export const SalesManagementPage: React.FC = () => {
                           <span className="text-slate-400 italic">None</span>
                         )}
                       </td>
-                      {/* Active View Details Action */}
+                      {/* Active Actions: Details + Developer Edit & Delete */}
                       <td className="px-4 py-3 text-center whitespace-nowrap">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedSaleForDetails(sale)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-colors cursor-pointer"
-                          title="View receipt and transaction details"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>Details</span>
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedSaleForDetails(sale)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-colors cursor-pointer"
+                            title="View receipt and transaction details"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>Details</span>
+                          </button>
+
+                          {isDeveloper && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEdit(sale)}
+                                className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 hover:border-blue-200 rounded-md transition-colors cursor-pointer"
+                                title="Edit sale record (Developer)"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteSale(sale)}
+                                className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-md transition-colors cursor-pointer"
+                                title="Delete sale record (Developer)"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -953,8 +1076,8 @@ export const SalesManagementPage: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Card Bottom: Payment & View Details button */}
-                  <div className="flex items-center justify-between gap-2 pt-1.5">
+                  {/* Card Bottom: Payment & Actions */}
+                  <div className="flex items-center justify-between gap-2 pt-1.5 flex-wrap">
                     <div className="flex items-center gap-2">
                       {canViewRevenue && sale.totalAmount != null && (
                         <span className="font-black text-slate-900 text-sm">
@@ -972,14 +1095,37 @@ export const SalesManagementPage: React.FC = () => {
                       </span>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setSelectedSaleForDetails(sale)}
-                      className="inline-flex items-center gap-1 px-3 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      <span>Details</span>
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedSaleForDetails(sale)}
+                        className="inline-flex items-center gap-1 px-3 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>Details</span>
+                      </button>
+
+                      {isDeveloper && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEdit(sale)}
+                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+                            title="Edit sale (Developer)"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteSale(sale)}
+                            className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+                            title="Delete sale (Developer)"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -1112,11 +1258,15 @@ export const SalesManagementPage: React.FC = () => {
                 <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
                 <div className="space-y-1">
                   <div className="font-bold text-xs text-amber-950 flex items-center gap-1.5">
-                    <span>Protected Financial Ledger Record</span>
-                    <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-amber-200/80 text-amber-900 uppercase">Immutable</span>
+                    <span>Official Financial Ledger Record</span>
+                    <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-amber-200/80 text-amber-900 uppercase">
+                      {isDeveloper ? 'Developer Authorized' : 'Protected'}
+                    </span>
                   </div>
                   <p className="text-[11px] text-amber-800 leading-relaxed">
-                    This transaction is preserved in the official ledger for audit compliance, sales reconciliation, and stock integrity. Historical transactions cannot be deleted directly. To adjust figures or correct errors, record an auditable offset in the Event Reconciliation log.
+                    {isDeveloper
+                      ? 'As System Developer, you have authorized privileges to edit or delete transactions when required for accounting corrections.'
+                      : 'This transaction is preserved in the official ledger for audit compliance, sales reconciliation, and stock integrity.'}
                   </p>
                 </div>
               </div>
@@ -1301,24 +1451,47 @@ export const SalesManagementPage: React.FC = () => {
             </div>
 
             {/* Modal Footer */}
-            <div className="flex items-center justify-between px-5 py-3.5 border-t border-slate-100 bg-slate-50/50">
-              <button
-                type="button"
-                onClick={handleCopyReceipt}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer shadow-2xs"
-              >
-                {copiedReceiptText ? (
+            <div className="flex items-center justify-between px-5 py-3.5 border-t border-slate-100 bg-slate-50/50 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopyReceipt}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer shadow-2xs"
+                >
+                  {copiedReceiptText ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span className="text-emerald-700 font-bold">Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Copy Receipt</span>
+                    </>
+                  )}
+                </button>
+
+                {isDeveloper && (
                   <>
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    <span className="text-emerald-700 font-bold">Copied!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Copy Receipt</span>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEdit(selectedSaleForDetails)}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors cursor-pointer shadow-2xs"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSale(selectedSaleForDetails)}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors cursor-pointer shadow-2xs"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete</span>
+                    </button>
                   </>
                 )}
-              </button>
+              </div>
 
               <button
                 type="button"
@@ -1328,6 +1501,207 @@ export const SalesManagementPage: React.FC = () => {
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Developer Edit Sale Modal */}
+      {editingSale && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50/50">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Edit Sale Record (DB #{editingSale.id})
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  {editingSale.receiptNumber ? `Receipt #${editingSale.receiptNumber}` : ''} • {editingSale.eventName}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingSale(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="p-5 space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-600 font-semibold mb-1">
+                    Quantity Purchased
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    required
+                    value={editQty}
+                    onChange={e => setEditQty(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-600 font-semibold mb-1">
+                    Unit Price (₹)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    required
+                    value={editPrice}
+                    onChange={e => setEditPrice(Math.max(0, parseFloat(e.target.value) || 0))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                  />
+                </div>
+              </div>
+
+              {/* Calculated Total */}
+              <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between font-semibold">
+                <span className="text-slate-600">Calculated Total:</span>
+                <span className="text-sm font-black text-emerald-700">
+                  ₹{(editQty * editPrice).toFixed(2)}
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-slate-600 font-semibold mb-1">
+                  Payment Method
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditPaymentMethod('CASH')}
+                    className={`py-2 px-3 rounded-lg font-bold text-center border transition-all cursor-pointer ${
+                      editPaymentMethod === 'CASH'
+                        ? 'border-emerald-600 bg-emerald-50 text-emerald-800 ring-1 ring-emerald-600'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    💵 CASH
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditPaymentMethod('UPI')}
+                    className={`py-2 px-3 rounded-lg font-bold text-center border transition-all cursor-pointer ${
+                      editPaymentMethod === 'UPI'
+                        ? 'border-blue-600 bg-blue-50 text-blue-800 ring-1 ring-blue-600'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    📱 UPI
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditPaymentMethod('CASH_UPI')}
+                    className={`py-2 px-3 rounded-lg font-bold text-center border transition-all cursor-pointer ${
+                      editPaymentMethod === 'CASH_UPI'
+                        ? 'border-purple-600 bg-purple-50 text-purple-800 ring-1 ring-purple-600'
+                        : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    💵+📱 SPLIT
+                  </button>
+                </div>
+
+                {editPaymentMethod === 'CASH_UPI' && (
+                  <div className="mt-2.5 p-3 bg-purple-50/50 border border-purple-200 rounded-lg space-y-2">
+                    <div className="text-xs font-bold text-purple-900">
+                      Split Amounts (Total: ₹{(editQty * editPrice).toFixed(2)})
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-0.5">
+                          Cash Portion (₹)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={editCashAmount}
+                          onChange={e => setEditCashAmount(e.target.value)}
+                          placeholder="0.00"
+                          className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-purple-600"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-0.5">
+                          UPI Portion (₹)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={editUpiAmount}
+                          onChange={e => setEditUpiAmount(e.target.value)}
+                          placeholder="0.00"
+                          className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-purple-600"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-600 font-semibold mb-1">
+                    Customer Name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Rahul Sharma"
+                    value={editCustomerName}
+                    onChange={e => setEditCustomerName(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-600 font-semibold mb-1">
+                    Customer Phone
+                  </label>
+                  <input
+                    type="tel"
+                    placeholder="e.g. 9876543210"
+                    value={editCustomerPhone}
+                    onChange={e => setEditCustomerPhone(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-600 font-semibold mb-1">
+                  Sale Timestamp
+                </label>
+                <input
+                  type="datetime-local"
+                  value={editSaleTime}
+                  onChange={e => setEditSaleTime(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingSale(null)}
+                  disabled={isSavingEdit}
+                  className="px-4 py-2 border border-slate-300 text-slate-700 font-semibold rounded-lg hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEdit}
+                  className="px-4 py-2 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingEdit ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

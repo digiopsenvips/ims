@@ -1118,7 +1118,202 @@ router.put(
   '/:id',
   authenticateToken,
   requireRoles(Role.DEVELOPER),
-  preserveRecords
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      res.status(400).json({ error: 'Invalid sale ID' });
+      return;
+    }
+
+    const {
+      quantity,
+      unitPrice,
+      paymentMethod,
+      cashAmount,
+      upiAmount,
+      customerName,
+      customerPhone,
+      saleTime,
+    } = req.body;
+
+    try {
+      const existing = await prisma.sale.findUnique({
+        where: { id },
+        include: {
+          product: { include: { project: true } },
+          event: true,
+          member: true,
+          items: {
+            include: {
+              product: { include: { project: true } },
+            },
+          },
+        },
+      });
+
+      if (!existing) {
+        res.status(404).json({ error: 'Sale record not found' });
+        return;
+      }
+
+      const updateData: any = {};
+
+      if (quantity !== undefined) {
+        const newQty = parseInt(quantity, 10);
+        if (isNaN(newQty) || newQty <= 0) {
+          res.status(400).json({ error: 'Quantity must be a positive integer' });
+          return;
+        }
+        updateData.quantity = newQty;
+      }
+
+      if (unitPrice !== undefined) {
+        const newPrice = parseFloat(unitPrice);
+        if (isNaN(newPrice) || newPrice < 0) {
+          res.status(400).json({ error: 'Unit price must be a non-negative number' });
+          return;
+        }
+        updateData.unitPrice = newPrice;
+      }
+
+      const effectiveQty = updateData.quantity !== undefined ? updateData.quantity : (existing.quantity || 1);
+      const effectivePrice = updateData.unitPrice !== undefined ? updateData.unitPrice : Number(existing.unitPrice || 0);
+      if (updateData.quantity !== undefined || updateData.unitPrice !== undefined) {
+        updateData.totalAmount = effectiveQty * effectivePrice;
+      }
+
+      if (paymentMethod !== undefined) {
+        const rawMethod = String(paymentMethod).toUpperCase().replace(/[\s\+]/g, '_');
+        if (rawMethod === 'CASH') {
+          updateData.paymentMethod = PaymentMethod.CASH;
+          updateData.cashAmount = updateData.totalAmount !== undefined ? updateData.totalAmount : existing.totalAmount;
+          updateData.upiAmount = 0;
+        } else if (rawMethod === 'UPI') {
+          updateData.paymentMethod = PaymentMethod.UPI;
+          updateData.cashAmount = 0;
+          updateData.upiAmount = updateData.totalAmount !== undefined ? updateData.totalAmount : existing.totalAmount;
+        } else if (rawMethod === 'CASH_UPI' || rawMethod === 'CASH_AND_UPI' || rawMethod === 'SPLIT') {
+          updateData.paymentMethod = PaymentMethod.CASH_UPI;
+          if (cashAmount !== undefined && upiAmount !== undefined) {
+            updateData.cashAmount = parseFloat(cashAmount);
+            updateData.upiAmount = parseFloat(upiAmount);
+          }
+        } else {
+          res.status(400).json({ error: 'Payment method must be CASH, UPI, or CASH + UPI' });
+          return;
+        }
+      }
+
+      if (customerName !== undefined) {
+        updateData.customerName = customerName ? String(customerName).trim() : null;
+      }
+
+      if (customerPhone !== undefined) {
+        updateData.customerPhone = customerPhone ? String(customerPhone).trim() : null;
+      }
+
+      if (saleTime !== undefined) {
+        updateData.saleTime = new Date(saleTime);
+      }
+
+      const updated = await prisma.sale.update({
+        where: { id },
+        data: updateData,
+        include: {
+          product: { include: { project: true } },
+          event: true,
+          member: true,
+          items: {
+            include: {
+              product: { include: { project: true } },
+            },
+          },
+        },
+      });
+
+      broadcast('inventory:updated', { action: 'sale_updated', id });
+
+      const rawItems = (updated.items && updated.items.length > 0)
+        ? updated.items.map(item => ({
+            id: item.id,
+            productId: item.productId,
+            productName: item.product?.name || item.productId,
+            projectId: item.product?.project?.id || '',
+            projectName: item.product?.project?.name || '',
+            quantity: item.quantity,
+            unitPrice: Number(item.unitPrice),
+            lineTotal: Number(item.lineTotal),
+          }))
+        : updated.productId
+        ? [{
+            id: updated.id,
+            productId: updated.productId,
+            productName: updated.product?.name || updated.productId,
+            projectId: updated.product?.project?.id || '',
+            projectName: updated.product?.project?.name || '',
+            quantity: updated.quantity || 1,
+            unitPrice: Number(updated.unitPrice || 0),
+            lineTotal: Number(updated.totalAmount || 0),
+          }]
+        : [];
+
+      const totalUnits = rawItems.reduce((sum, item) => sum + item.quantity, 0) || updated.quantity || 0;
+      const uniqueProjects = Array.from(new Set(rawItems.map(item => item.projectName).filter(Boolean)));
+      const primaryProject = uniqueProjects.length > 0 ? uniqueProjects.join(' + ') : (updated.product?.project?.name || 'Multiple');
+      const productSummary = rawItems.map(item => `${item.productName} × ${item.quantity}`).join(', ') || updated.product?.name || 'No Products';
+
+      const firstItem = rawItems[0] || {};
+
+      const formatted = {
+        id: updated.id,
+        receiptNumber: updated.receiptNumber,
+        serialNumber: updated.receiptNumber,
+        clientTxId: updated.clientTxId,
+        eventId: updated.eventId,
+        eventName: updated.event.name,
+        productId: firstItem.productId || updated.productId || '',
+        productName: productSummary,
+        projectId: firstItem.projectId || updated.product?.project?.id || '',
+        projectName: primaryProject,
+        projectNames: uniqueProjects,
+        memberId: updated.sellerUserIdAtSale || updated.memberId || '',
+        memberName: updated.sellerNameAtSale || updated.member?.name || 'Unknown Member',
+        memberUsername: updated.sellerUsernameAtSale || updated.member?.username || '',
+        memberDepartment: updated.member?.department || null,
+        sellerUserIdAtSale: updated.sellerUserIdAtSale || updated.memberId || undefined,
+        sellerUsernameAtSale: updated.sellerUsernameAtSale || updated.member?.username || undefined,
+        sellerNameAtSale: updated.sellerNameAtSale || updated.member?.name || undefined,
+        items: rawItems,
+        totalUnits,
+        quantity: totalUnits,
+        unitPrice: Number(firstItem.unitPrice ?? updated.unitPrice ?? 0),
+        totalAmount: Number(updated.totalAmount),
+        paymentMethod: updated.paymentMethod,
+        cashAmount: updated.cashAmount !== null && updated.cashAmount !== undefined
+          ? Number(updated.cashAmount)
+          : updated.paymentMethod === 'CASH'
+          ? Number(updated.totalAmount)
+          : 0,
+        upiAmount: updated.upiAmount !== null && updated.upiAmount !== undefined
+          ? Number(updated.upiAmount)
+          : updated.paymentMethod === 'UPI'
+          ? Number(updated.totalAmount)
+          : 0,
+        customerName: updated.customerName,
+        customerPhone: updated.customerPhone,
+        saleTime: updated.saleTime,
+        createdAt: updated.createdAt,
+      };
+
+      res.json({
+        message: 'Sale updated successfully',
+        sale: sanitizeSaleForUser(formatted, req.user),
+      });
+    } catch (error) {
+      console.error('Update sale error:', error);
+      res.status(500).json({ error: 'Failed to update sale' });
+    }
+  }
 );
 
 // DELETE /api/sales/:id: Delete a single sale record (DEVELOPER ONLY)
@@ -1126,7 +1321,36 @@ router.delete(
   '/:id',
   authenticateToken,
   requireRoles(Role.DEVELOPER),
-  preserveRecords
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      res.status(400).json({ error: 'Invalid sale ID' });
+      return;
+    }
+
+    try {
+      const existing = await prisma.sale.findUnique({
+        where: { id },
+      });
+
+      if (!existing) {
+        res.status(404).json({ error: 'Sale record not found' });
+        return;
+      }
+
+      await prisma.$transaction([
+        prisma.gameSession.deleteMany({ where: { saleId: id } }),
+        prisma.sale.delete({ where: { id } }),
+      ]);
+      broadcast('inventory:updated', { action: 'sale_deleted', id });
+      broadcast('sale:deleted', { id, receiptNumber: existing.receiptNumber });
+
+      res.json({ message: `Sale #${id} deleted successfully`, id });
+    } catch (error) {
+      console.error('Delete sale error:', error);
+      res.status(500).json({ error: 'Failed to delete sale' });
+    }
+  }
 );
 
 export default router;
