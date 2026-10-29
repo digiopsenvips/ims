@@ -85,7 +85,7 @@ router.get(
           (sum, a) => sum + a.allocatedQty,
           0
         );
-        const totalSoldAtActive = soldMap.get(item.productId) || 0;
+        const totalSoldAtActive = totalAllocated > 0 ? (soldMap.get(item.productId) || 0) : 0;
         const activeStallStock = Math.max(0, totalAllocated - totalSoldAtActive);
         const warehouseStock = item.quantityOnHand;
         const totalAvailable = warehouseStock + activeStallStock;

@@ -455,9 +455,12 @@ router.post(
         });
 
         for (const alloc of validAllocations) {
-          const qty = nonnegativeInteger(alloc.allocatedQty, 'Allocation');
+          const rawQty = alloc.allocatedQty === undefined || alloc.allocatedQty === null || alloc.allocatedQty === '' ? 0 : alloc.allocatedQty;
+          const qty = nonnegativeInteger(rawQty, 'Allocation');
           if (!Number.isSafeInteger(qty) || qty < 0) throw new InputError('Allocation must be a non-negative whole number.');
-          const price = moneyCents(alloc.priceAtEvent) / 100;
+          const price = (alloc.priceAtEvent === undefined || alloc.priceAtEvent === null || alloc.priceAtEvent === '')
+            ? 0
+            : moneyCents(alloc.priceAtEvent) / 100;
 
           if (qty < 0) {
             throw new Error(`Allocated quantity cannot be negative for product ${alloc.productId}.`);
@@ -586,9 +589,12 @@ router.put(
 
         if (Array.isArray(allocations)) {
           for (const alloc of allocations) {
-            const newQty = nonnegativeInteger(alloc.allocatedQty, 'Allocation');
+            const rawQty = alloc.allocatedQty === undefined || alloc.allocatedQty === null || alloc.allocatedQty === '' ? 0 : alloc.allocatedQty;
+            const newQty = nonnegativeInteger(rawQty, 'Allocation');
             if (!Number.isSafeInteger(newQty) || newQty < 0) throw new InputError('Allocation must be a non-negative whole number.');
-            const newPrice = alloc.priceAtEvent === undefined ? NaN : moneyCents(alloc.priceAtEvent) / 100;
+            const newPrice = (alloc.priceAtEvent === undefined || alloc.priceAtEvent === null || alloc.priceAtEvent === '')
+              ? NaN
+              : moneyCents(alloc.priceAtEvent) / 100;
             const soldSoFar = salesByProduct[alloc.productId] || 0;
 
             if (newQty < 0) {

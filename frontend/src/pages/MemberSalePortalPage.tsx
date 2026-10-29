@@ -33,6 +33,7 @@ import {
   Tag,
   Percent,
   MessageCircle,
+  Clock,
 } from 'lucide-react';
 
 export const MemberSalePortalPage: React.FC = () => {
@@ -1072,16 +1073,32 @@ export const MemberSalePortalPage: React.FC = () => {
 
       {/* Fast Success State Banner (Non-blocking: POS is immediately ready for next customer) */}
       {lastCompletedBill && (
-        <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-3 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 animate-fadeIn">
+        <div className={`border rounded-xl p-3 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 animate-fadeIn ${
+          lastCompletedBill.syncedImmediately
+            ? 'bg-emerald-50 border-emerald-300'
+            : 'bg-amber-50 border-amber-300'
+        }`}>
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
-              <Check className="w-5 h-5 stroke-[2.5]" />
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-2xs ${
+              lastCompletedBill.syncedImmediately
+                ? 'bg-emerald-600 text-white'
+                : 'bg-amber-500 text-white'
+            }`}>
+              {lastCompletedBill.syncedImmediately ? (
+                <Check className="w-5 h-5 stroke-[2.5]" />
+              ) : (
+                <Clock className="w-5 h-5 stroke-[2.5]" />
+              )}
             </div>
             <div>
-              <div className="text-xs font-bold text-emerald-950 flex items-center gap-2">
-                <span>✓ Sale Recorded ({lastCompletedBill.billNo})</span>
-                <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100/60 px-1.5 py-0.2 rounded">
-                  {lastCompletedBill.syncedImmediately ? 'Synced Online' : 'Pending Backend Confirmation'}
+              <div className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                <span>{lastCompletedBill.syncedImmediately ? '✓ Sale Recorded' : '⚠️ Sale Queued Offline'} ({lastCompletedBill.billNo})</span>
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                  lastCompletedBill.syncedImmediately
+                    ? 'text-emerald-800 bg-emerald-100/80 border border-emerald-200'
+                    : 'text-amber-900 bg-amber-100 border border-amber-300'
+                }`}>
+                  {lastCompletedBill.syncedImmediately ? 'Synced Online' : 'Pending Network Sync'}
                 </span>
               </div>
               <div className="text-xs text-emerald-800 font-medium mt-0.5">

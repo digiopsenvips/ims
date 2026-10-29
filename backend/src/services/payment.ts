@@ -18,10 +18,14 @@ export function nonnegativeInteger(value: unknown, label: string): number {
 }
 
 export function moneyCents(value: unknown): number {
-  if ((typeof value !== 'number' && typeof value !== 'string') || !/^\d+(?:\.\d{1,2})?$/.test(String(value))) {
-    throw new InputError('Amounts must be non-negative numbers with at most two decimal places.');
+  if (value === null || value === undefined || value === '') {
+    throw new InputError('Amount is required.');
   }
-  const cents = Math.round(Number(value) * 100);
+  const num = typeof value === 'number' ? value : parseFloat(String(value).trim());
+  if (typeof num !== 'number' || isNaN(num) || !Number.isFinite(num) || num < 0) {
+    throw new InputError('Amounts must be non-negative numbers.');
+  }
+  const cents = Math.round(num * 100);
   if (!Number.isSafeInteger(cents) || cents > 9999999999) throw new InputError('Amount is out of range.');
   return cents;
 }

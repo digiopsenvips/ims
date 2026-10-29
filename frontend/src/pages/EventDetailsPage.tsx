@@ -41,6 +41,44 @@ import {
   Percent,
 } from 'lucide-react';
 
+function toISTDateString(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  return formatter.format(d);
+}
+
+function toISTTimeString(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  return formatter.format(d);
+}
+
+interface AllocationInput {
+  productId: string;
+  productName: string;
+  projectName: string;
+  availableStock: number;
+  maxAllocatable: number;
+  initialAllocatedQty: number;
+  allocatedQty: number;
+  soldQty: number;
+  remainingQty: number;
+  initialPriceAtEvent: number;
+  priceAtEvent: number;
+}
+
 function formatISTDateTime(iso?: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -108,11 +146,152 @@ export const EventDetailsPage: React.FC = () => {
   const [showEditEventModal, setShowEditEventModal] = useState(false);
   const [editName, setEditName] = useState('');
   const [editLocation, setEditLocation] = useState('');
+  const [editStartDate, setEditStartDate] = useState('');
+  const [editStartTime, setEditStartTime] = useState('');
+  const [editEndDate, setEditEndDate] = useState('');
+  const [editEndTime, setEditEndTime] = useState('');
+  const [editAllocations, setEditAllocations] = useState<AllocationInput[]>([]);
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const [isEndingEvent, setIsEndingEvent] = useState(false);
   const [isOpeningStall, setIsOpeningStall] = useState(false);
 
   const canManage = isDeveloper || isAdmin || hasPermission('edit_events');
   const canManageCombos = isDeveloper || isAdmin;
+
+  const handleOpenEditModal = () => {
+    if (!event) return;
+    setEditName(event.name);
+    setEditLocation(event.location);
+    setEditStartDate(toISTDateString(event.startDatetime));
+    setEditStartTime(toISTTimeString(event.startDatetime));
+    setEditEndDate(toISTDateString(event.endDatetime));
+    setEditEndTime(toISTTimeString(event.endDatetime));
+    setEditError(null);
+
+    const grid: AllocationInput[] = products.map(p => {
+      const existingAlloc = event.allocations?.find(a => a.productId === p.id);
+      const allocatedQty = existingAlloc ? existingAlloc.allocatedQty : 0;
+      const soldQty = existingAlloc ? (existingAlloc.soldQty || 0) : 0;
+      const priceAtEvent = existingAlloc
+        ? Number(existingAlloc.priceAtEvent)
+        : p.basePrice
+        ? Number(p.basePrice)
+        : 0;
+      const mainInventoryStock = p.inventory ? p.inventory.quantityOnHand : 0;
+      const remainingInEvent = Math.max(0, allocatedQty - soldQty);
+      const maxAllocatable = mainInventoryStock + remainingInEvent;
+
+      return {
+        productId: p.id,
+        productName: p.name,
+        projectName: p.project?.name || '—',
+        availableStock: maxAllocatable,
+        maxAllocatable,
+        initialAllocatedQty: allocatedQty,
+        allocatedQty,
+        soldQty,
+        remainingQty: remainingInEvent,
+        initialPriceAtEvent: priceAtEvent,
+        priceAtEvent,
+      };
+    });
+
+    setEditAllocations(grid);
+    setShowEditEventModal(true);
+  };
+
+  const handleSetMaxAllocation = (productId: string) => {
+    setEditAllocations(prev =>
+      prev.map(row => {
+        if (row.productId !== productId) return row;
+        const newAlloc = row.maxAllocatable;
+        return {
+          ...row,
+          allocatedQty: newAlloc,
+          remainingQty: Math.max(0, newAlloc - row.soldQty),
+        };
+      })
+    );
+  };
+
+  const handleAllocationChange = (
+    productId: string,
+    field: 'allocatedQty' | 'priceAtEvent',
+    val: number
+  ) => {
+    setEditAllocations(prev =>
+      prev.map(row => {
+        if (row.productId !== productId) return row;
+        if (field === 'allocatedQty') {
+          return {
+            ...row,
+            allocatedQty: val,
+            remainingQty: Math.max(0, val - row.soldQty),
+          };
+        }
+        return {
+          ...row,
+          [field]: val,
+        };
+      })
+    );
+  };
+
+  const handleSaveEditEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!event) return;
+    if (!editName.trim() || !editLocation.trim() || !editStartDate || !editEndDate) {
+      setEditError('Please fill in all stall details.');
+      return;
+    }
+
+    const startDatetime = new Date(`${editStartDate}T${editStartTime || '00:00'}:00+05:30`).toISOString();
+    const endDatetime = new Date(`${editEndDate}T${editEndTime || '23:59'}:00+05:30`).toISOString();
+
+    if (new Date(endDatetime).getTime() <= new Date(startDatetime).getTime()) {
+      setEditError('End date and time must be after the start date and time.');
+      return;
+    }
+
+    for (const row of editAllocations) {
+      if (row.allocatedQty < row.soldQty) {
+        setEditError(`Allocation cannot be lower than sold units. ${row.productName} has already sold ${row.soldQty} unit(s).`);
+        return;
+      }
+      if (row.allocatedQty > row.maxAllocatable) {
+        setEditError(`Maximum available quantity for ${row.productName} is ${row.maxAllocatable}.`);
+        return;
+      }
+    }
+
+    setIsSubmittingEdit(true);
+    setEditError(null);
+
+    try {
+      const payload = {
+        name: editName.trim(),
+        location: editLocation.trim(),
+        startDatetime,
+        endDatetime,
+        status: event.status,
+        allocations: editAllocations.map(a => ({
+          productId: a.productId,
+          allocatedQty: a.allocatedQty,
+          priceAtEvent: a.priceAtEvent,
+        })),
+      };
+
+      await api.put(`/events/${event.id}`, payload);
+      setStatusMessage({ type: 'success', text: `Stall '${editName}' and allocations saved successfully!` });
+      setShowEditEventModal(false);
+      await fetchEventData();
+    } catch (err: any) {
+      setEditError(err.message || 'Failed to update event stall');
+    } finally {
+      setIsSubmittingEdit(false);
+    }
+  };
 
   const fetchEventData = async () => {
     if (!eventId) return;
@@ -455,6 +634,18 @@ export const EventDetailsPage: React.FC = () => {
 
           {/* Quick Stall Actions */}
           <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {canManage && (
+              <button
+                type="button"
+                onClick={handleOpenEditModal}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+                title="Edit stall metadata, inventory allocations, and custom pricing"
+              >
+                <Edit className="w-4 h-4 text-blue-600" />
+                <span>Edit Stall & Pricing</span>
+              </button>
+            )}
+
             {canManageCombos && (
               <Link
                 to={`/combos?action=create&eventId=${event.id}`}
@@ -1076,8 +1267,21 @@ export const EventDetailsPage: React.FC = () => {
               </button>
             </div>
 
-            <div className="text-xs font-bold text-slate-500 shrink-0">
-              Showing {filteredAllocations.length} of {event.allocations?.length || 0} product allocations
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="text-xs font-bold text-slate-500">
+                Showing {filteredAllocations.length} of {event.allocations?.length || 0} product allocations
+              </div>
+              {canManage && (
+                <button
+                  type="button"
+                  onClick={handleOpenEditModal}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                  title="Adjust event stock allocations and custom prices"
+                >
+                  <Edit className="w-3.5 h-3.5" />
+                  <span>Adjust Allocations & Pricing</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -1590,6 +1794,234 @@ export const EventDetailsPage: React.FC = () => {
                   </div>
                 </div>
               )}
+            </form>
+          </div>
+        </div>
+      )}
+      {/* Edit Stall & Pricing Modal */}
+      {showEditEventModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl my-8 overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[90vh]">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+                  <Edit className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Edit Stall & Allocations
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Modify stall details, product allocations, and event-specific prices
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEditEventModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {editError && (
+              <div className="mx-5 mt-4 p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-xl flex items-center gap-2 shrink-0">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{editError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveEditEvent} className="flex-1 overflow-y-auto p-5 space-y-6">
+              {/* Event Metadata */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Event / Stall Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-1 focus:ring-slate-900 font-medium"
+                    placeholder="e.g. Diya Stall 2026"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Location / Venue *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editLocation}
+                    onChange={e => setEditLocation(e.target.value)}
+                    className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-1 focus:ring-slate-900 font-medium"
+                    placeholder="e.g. VIPS Campus Gate 1"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Start Date & Time (IST) *
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="date"
+                      required
+                      value={editStartDate}
+                      onChange={e => setEditStartDate(e.target.value)}
+                      className="w-2/3 text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-1 focus:ring-slate-900"
+                    />
+                    <input
+                      type="time"
+                      required
+                      value={editStartTime}
+                      onChange={e => setEditStartTime(e.target.value)}
+                      className="w-1/3 text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-1 focus:ring-slate-900"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    End Date & Time (IST) *
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="date"
+                      required
+                      value={editEndDate}
+                      onChange={e => setEditEndDate(e.target.value)}
+                      className="w-2/3 text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-1 focus:ring-slate-900"
+                    />
+                    <input
+                      type="time"
+                      required
+                      value={editEndTime}
+                      onChange={e => setEditEndTime(e.target.value)}
+                      className="w-1/3 text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-1 focus:ring-slate-900"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Allocations & Pricing Table */}
+              <div className="space-y-2">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                    Product Allocations & Event Pricing
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    Allocate units from warehouse and set stall-specific prices (historical sales remain protected)
+                  </p>
+                </div>
+
+                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-72 overflow-y-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] font-bold sticky top-0 z-10 border-b border-slate-200">
+                      <tr>
+                        <th className="py-2.5 px-3">Product</th>
+                        <th className="py-2.5 px-3 text-center">Available Max</th>
+                        <th className="py-2.5 px-3 text-center">Sold So Far</th>
+                        <th className="py-2.5 px-3 text-center w-36">Allocated Qty</th>
+                        <th className="py-2.5 px-3 text-right w-32">Event Price (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {editAllocations.map(row => (
+                        <tr key={row.productId} className="hover:bg-slate-50/60 transition-colors">
+                          <td className="py-2.5 px-3">
+                            <div className="font-bold text-slate-900">{row.productName}</div>
+                            <div className="text-[10px] text-slate-400">{row.productId} • {row.projectName}</div>
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-medium text-slate-600">
+                            {row.maxAllocatable}
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-bold text-slate-700">
+                            {row.soldQty}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <div className="flex items-center gap-1 justify-center">
+                              <input
+                                type="number"
+                                min={row.soldQty}
+                                max={row.maxAllocatable}
+                                value={row.allocatedQty}
+                                onChange={e =>
+                                  handleAllocationChange(
+                                    row.productId,
+                                    'allocatedQty',
+                                    parseInt(e.target.value, 10) || 0
+                                  )
+                                }
+                                className="w-20 p-1.5 text-center text-xs border border-slate-300 rounded-lg font-bold focus:ring-1 focus:ring-slate-900"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleSetMaxAllocation(row.productId)}
+                                className="px-1.5 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors cursor-pointer"
+                                title="Set to maximum available warehouse stock"
+                              >
+                                Max
+                              </button>
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <span className="text-slate-400 font-bold">₹</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.5"
+                                value={row.priceAtEvent}
+                                onChange={e =>
+                                  handleAllocationChange(
+                                    row.productId,
+                                    'priceAtEvent',
+                                    parseFloat(e.target.value) || 0
+                                  )
+                                }
+                                className="w-20 p-1.5 text-right text-xs border border-slate-300 rounded-lg font-bold focus:ring-1 focus:ring-slate-900"
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowEditEventModal(false)}
+                  disabled={isSubmittingEdit}
+                  className="px-4 py-2 border border-slate-300 text-slate-700 font-bold text-xs rounded-xl hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingEdit}
+                  className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-2"
+                >
+                  {isSubmittingEdit ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving Changes...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4 stroke-[3]" />
+                      <span>Save Stall & Allocations</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </form>
           </div>
         </div>
