@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../lib/api';
@@ -197,7 +198,19 @@ export const LiveStallModal: React.FC<LiveStallModalProps> = ({
     }
   };
 
-  // Keyboard navigation & accessibility
+  // Prevent background scrolling while modal is open, restoring it cleanly on close
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isOpen]);
+
+  // Keyboard navigation & accessibility (Escape to dismiss)
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -224,9 +237,9 @@ export const LiveStallModal: React.FC<LiveStallModalProps> = ({
     stallDetails?.gamesCount ??
     (stallDetails?.games ? stallDetails.games.filter((g: any) => g.status === 'ACTIVE').length : 0);
 
-  return (
+  const modalContent = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 md:p-6 bg-slate-900/60 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-150"
       role="dialog"
       aria-modal="true"
       aria-labelledby="live-stall-title"
@@ -234,9 +247,9 @@ export const LiveStallModal: React.FC<LiveStallModalProps> = ({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg my-auto overflow-hidden animate-in zoom-in-95 duration-150">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg my-auto flex flex-col max-h-[92vh] sm:max-h-[85vh] overflow-hidden animate-in zoom-in-95 duration-150">
         {/* Modal Header */}
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80 shrink-0">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-xl bg-emerald-100 text-emerald-800 shadow-2xs">
               <Store className="w-5 h-5 text-emerald-700" />
@@ -271,7 +284,7 @@ export const LiveStallModal: React.FC<LiveStallModalProps> = ({
         {/* Status / Alert Messages */}
         {statusMessage && (
           <div
-            className={`px-5 py-3 border-b text-xs flex items-start gap-2.5 ${
+            className={`px-5 py-3 border-b text-xs flex items-start gap-2.5 shrink-0 ${
               statusMessage.type === 'success'
                 ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
                 : 'bg-rose-50 border-rose-200 text-rose-900'
@@ -292,7 +305,7 @@ export const LiveStallModal: React.FC<LiveStallModalProps> = ({
         )}
 
         {/* Modal Body */}
-        <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+        <div className="p-5 space-y-4 overflow-y-auto flex-1 min-h-0">
           {isLoading ? (
             <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-400">
               <RefreshCw className="w-6 h-6 animate-spin text-emerald-600" />
@@ -564,7 +577,7 @@ export const LiveStallModal: React.FC<LiveStallModalProps> = ({
         </div>
 
         {/* Modal Footer */}
-        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between text-xs text-slate-400">
+        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between text-xs text-slate-400 shrink-0">
           <span>ENACTUS VIPS-TC IMS</span>
           <button
             type="button"
@@ -577,4 +590,7 @@ export const LiveStallModal: React.FC<LiveStallModalProps> = ({
       </div>
     </div>
   );
+
+  if (typeof document === 'undefined') return null;
+  return createPortal(modalContent, document.body);
 };
