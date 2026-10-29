@@ -84,6 +84,7 @@ export async function assertAllocatedStock(
         where: { productId },
         data: {
           quantityOnHand: { decrement: shortfall },
+          notes: `Auto-sourced ${shortfall} units to event ${eventId} for combo fulfillment`,
           lastUpdated: new Date(),
         },
       });

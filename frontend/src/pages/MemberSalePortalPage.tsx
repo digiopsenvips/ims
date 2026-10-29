@@ -34,6 +34,7 @@ import {
   Percent,
   MessageCircle,
   Clock,
+  Power,
 } from 'lucide-react';
 
 export const MemberSalePortalPage: React.FC = () => {
@@ -133,6 +134,20 @@ export const MemberSalePortalPage: React.FC = () => {
   } | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState<boolean>(false);
   const [copiedReceipt, setCopiedReceipt] = useState<boolean>(false);
+  const [isOpeningStall, setIsOpeningStall] = useState<boolean>(false);
+
+  const handleOpenStallNow = async () => {
+    if (!selectedEventId) return;
+    try {
+      setIsOpeningStall(true);
+      await api.post(`/events/${selectedEventId}/open`);
+      await fetchEvents();
+    } catch (err: any) {
+      setErrorMessage(err?.error || err?.message || 'Failed to open stall');
+    } finally {
+      setIsOpeningStall(false);
+    }
+  };
 
   // Keyboard navigation shortcuts: '/' to search, 'Escape' to clear, 'u'/'c'/'s' for payment modes
   useEffect(() => {
@@ -1228,11 +1243,24 @@ export const MemberSalePortalPage: React.FC = () => {
           )}
 
           {isEventUpcoming && (
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3.5 flex items-center gap-2.5 text-blue-900 text-xs shadow-2xs">
-              <AlertCircle className="w-5 h-5 text-blue-600 shrink-0" />
-              <div>
-                <span className="font-bold">This stall/event has not started yet.</span> Sales cannot be recorded until scheduled start time.
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-blue-900 text-xs shadow-2xs">
+              <div className="flex items-center gap-2.5">
+                <AlertCircle className="w-5 h-5 text-blue-600 shrink-0" />
+                <div>
+                  <span className="font-bold">This stall/event is scheduled as Upcoming.</span> Sales cannot be recorded until scheduled start time or until stall is opened.
+                </div>
               </div>
+              {canManageCombos && (
+                <button
+                  type="button"
+                  onClick={handleOpenStallNow}
+                  disabled={isOpeningStall}
+                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg shrink-0 cursor-pointer text-xs transition-colors shadow-2xs flex items-center gap-1.5 self-start sm:self-auto"
+                >
+                  <Power className="w-3.5 h-3.5" />
+                  <span>{isOpeningStall ? 'Opening Stall...' : 'Open Stall for Sales Now'}</span>
+                </button>
+              )}
             </div>
           )}
 

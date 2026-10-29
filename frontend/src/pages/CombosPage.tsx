@@ -102,8 +102,9 @@ export const CombosPage: React.FC = () => {
   const fetchData = async () => {
     try {
       setIsLoading(true);
+      const evParam = eventFilter && eventFilter !== 'ALL' && eventFilter !== 'GLOBAL' ? `?eventId=${eventFilter}` : '';
       const [combosRes, productsRes, eventsRes, projectsRes] = await Promise.all([
-        api.get('/combos'),
+        api.get(`/combos${evParam}`),
         api.get('/products'),
         api.get('/events'),
         api.get('/projects'),
@@ -132,7 +133,7 @@ export const CombosPage: React.FC = () => {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [eventFilter]);
 
   // Handle URL direct action trigger (e.g. /combos?action=create or /combos?action=create&eventId=...)
   useEffect(() => {
@@ -181,7 +182,7 @@ export const CombosPage: React.FC = () => {
       if (typeFilter !== 'ALL' && c.comboType !== typeFilter) return false;
       if (eventFilter !== 'ALL') {
         if (eventFilter === 'GLOBAL' && c.eventId !== null) return false;
-        if (eventFilter !== 'GLOBAL' && c.eventId !== eventFilter) return false;
+        if (eventFilter !== 'GLOBAL' && c.eventId !== null && c.eventId !== eventFilter) return false;
       }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
@@ -964,9 +965,11 @@ export const CombosPage: React.FC = () => {
                     const selectedProd = products.find(p => p.id === item.productId);
                     const selEvent = formEventId ? events.find(e => e.id === formEventId) : null;
                     const alloc = selEvent?.allocations?.find(a => a.productId === item.productId);
-                    const stallStock = alloc ? Math.max(0, alloc.remainingQty) : 0;
+                    const stallStock = formEventId
+                      ? (alloc ? Math.max(0, alloc.remainingQty) : 0)
+                      : events.reduce((sum, ev) => sum + (ev.allocations?.find(a => a.productId === item.productId)?.remainingQty || 0), 0);
                     const warehouseStock = Math.max(0, (selectedProd as any)?.inventory?.quantityOnHand ?? (selectedProd as any)?.stockOnHand ?? 0);
-                    const usableStock = formEventId ? (stallStock + warehouseStock) : warehouseStock;
+                    const usableStock = stallStock + warehouseStock;
                     const estBundles = item.quantity > 0 ? Math.floor(usableStock / item.quantity) : 0;
 
                     return (
@@ -1078,9 +1081,11 @@ export const CombosPage: React.FC = () => {
                               const p = products.find(prod => prod.id === i.productId);
                               const selEvent = formEventId ? events.find(e => e.id === formEventId) : null;
                               const alloc = selEvent?.allocations?.find(a => a.productId === i.productId);
-                              const sStock = alloc ? Math.max(0, alloc.remainingQty) : 0;
+                              const sStock = formEventId
+                                ? (alloc ? Math.max(0, alloc.remainingQty) : 0)
+                                : events.reduce((sum, ev) => sum + (ev.allocations?.find(a => a.productId === i.productId)?.remainingQty || 0), 0);
                               const wStock = Math.max(0, (p as any)?.inventory?.quantityOnHand ?? (p as any)?.stockOnHand ?? 0);
-                              const tot = formEventId ? (sStock + wStock) : wStock;
+                              const tot = sStock + wStock;
                               return i.quantity > 0 ? Math.floor(tot / i.quantity) : 0;
                             })
                         )}{' '}

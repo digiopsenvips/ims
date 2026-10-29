@@ -91,6 +91,25 @@ router.get(
       const contextIds = new Set(combos.map(combo => typeof eventId === 'string' ? eventId : combo.eventId).filter((id): id is string => Boolean(id)));
       for (const id of contextIds) eventStocks.set(id, await eventAvailability(id));
 
+      // For global combos when no specific event is queried, aggregate stall stock across all active/upcoming events
+      const globalStallStocks = new Map<string, number>();
+      if (!eventId) {
+        const activeEvents = await prisma.event.findMany({
+          where: {
+            isDeleted: false,
+            status: { in: ['ACTIVE', 'UPCOMING'] },
+          },
+          select: { id: true },
+        });
+        for (const ev of activeEvents) {
+          const avail = eventStocks.get(ev.id) || await eventAvailability(ev.id);
+          eventStocks.set(ev.id, avail);
+          for (const [prodId, data] of avail.entries()) {
+            globalStallStocks.set(prodId, (globalStallStocks.get(prodId) || 0) + (data.stallStock || 0));
+          }
+        }
+      }
+
       // Enrich combos with live normal price, savings, and stock status
       const enriched = combos.map(combo => {
         const contextId = typeof eventId === 'string' ? eventId : combo.eventId;
@@ -117,7 +136,9 @@ router.get(
 
           const isEligible = !product.isArchived && !product.isDeleted;
           const warehouseStock = isEligible ? Math.max(0, product.inventory?.quantityOnHand ?? 0) : 0;
-          const stallStock = (contextId && isEligible) ? (context?.get(item.productId)?.stallStock ?? 0) : 0;
+          const stallStock = isEligible
+            ? (contextId ? (context?.get(item.productId)?.stallStock ?? 0) : (globalStallStocks.get(item.productId) ?? 0))
+            : 0;
           const usableStock = stallStock + warehouseStock;
 
           if (item.quantity > 0) {
@@ -241,6 +262,23 @@ router.get(
 
       const contextId = typeof req.query.eventId === 'string' ? req.query.eventId : combo.eventId;
       const context = contextId ? await eventAvailability(contextId) : undefined;
+      const globalStallStocks = new Map<string, number>();
+      if (!contextId) {
+        const activeEvents = await prisma.event.findMany({
+          where: {
+            isDeleted: false,
+            status: { in: ['ACTIVE', 'UPCOMING'] },
+          },
+          select: { id: true },
+        });
+        for (const ev of activeEvents) {
+          const avail = await eventAvailability(ev.id);
+          for (const [prodId, data] of avail.entries()) {
+            globalStallStocks.set(prodId, (globalStallStocks.get(prodId) || 0) + (data.stallStock || 0));
+          }
+        }
+      }
+
       let normalValue = 0;
       let minAvailableStock = Infinity;
       let stallAvailableStock = Infinity;
@@ -262,7 +300,9 @@ router.get(
 
         const isEligible = !product.isArchived && !product.isDeleted;
         const warehouseStock = isEligible ? Math.max(0, product.inventory?.quantityOnHand ?? 0) : 0;
-        const stallStock = (contextId && isEligible) ? (context?.get(item.productId)?.stallStock ?? 0) : 0;
+        const stallStock = isEligible
+          ? (contextId ? (context?.get(item.productId)?.stallStock ?? 0) : (globalStallStocks.get(item.productId) ?? 0))
+          : 0;
         const usableStock = stallStock + warehouseStock;
 
         if (item.quantity > 0) {
