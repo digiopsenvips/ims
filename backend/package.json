@@ -8,10 +8,12 @@
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
     "db:generate": "prisma generate",
-    "db:push": "prisma db push",
-    "db:seed": "tsx prisma/seed.ts",
-    "db:reset": "prisma migrate reset --force && tsx prisma/seed.ts",
-    "postinstall": "node -e \"const fs=require('fs'),p='./node_modules/whatsapp-rust-bridge/package.json';if(fs.existsSync(p)){const j=JSON.parse(fs.readFileSync(p,'utf8'));j.main='./dist/index.js';j.exports={'.':{'import':'./dist/index.js','require':'./dist/index.js','default':'./dist/index.js','types':'./dist/index.d.ts'}};fs.writeFileSync(p,JSON.stringify(j,null,4));}\""
+    "db:push": "node scripts/guard-disposable-db.cjs && prisma db push",
+    "db:seed": "node scripts/guard-disposable-db.cjs && tsx prisma/seed.ts",
+    "db:reset": "node scripts/guard-disposable-db.cjs && prisma migrate reset --force && tsx prisma/seed.ts",
+    "postinstall": "node -e \"const fs=require('fs'),p='./node_modules/whatsapp-rust-bridge/package.json';if(fs.existsSync(p)){const j=JSON.parse(fs.readFileSync(p,'utf8'));j.main='./dist/index.js';j.exports={'.':{'import':'./dist/index.js','require':'./dist/index.js','default':'./dist/index.js','types':'./dist/index.d.ts'}};fs.writeFileSync(p,JSON.stringify(j,null,4));}\"",
+    "test": "node scripts/run-regression.cjs",
+    "test:offline": "node --test tests/offline.test.cjs"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

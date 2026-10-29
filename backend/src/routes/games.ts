@@ -1,3 +1,4 @@
+import { responsePolicy } from '../middleware/responsePolicy';
 import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { authenticateToken } from '../middleware/auth';
@@ -6,9 +7,13 @@ import { requireRoles } from '../middleware/rbac';
 import { sanitizeSaleForUser } from '../middleware/piiSanitizer';
 import { broadcast } from '../sockets';
 import { Role, GameStatus, GameResult, PaymentMethod, TransactionType, GameSessionStatus } from '@prisma/client';
-import { computeEventStatus, reconcileSingleEvent } from '../services/eventLifecycle';
+import { computeEventStatus } from '../services/eventLifecycle';
+import { stockTransaction, assertEventOpen, assertAllocatedStock, StockConflict } from '../services/stock';
+import { validateOperation, paymentAmounts } from '../services/payment';
+import { existingSaleAcknowledgement } from '../services/idempotency';
 
 const router = Router();
+router.use(responsePolicy);
 
 // GET /api/games: List all games with live reward stock and aggregate metrics
 router.get(
@@ -799,7 +804,7 @@ router.post(
 
       let resolvedProjectId = projectId ? String(projectId) : winProduct.projectId;
 
-      const newGame = await prisma.game.create({
+      const newGame = await stockTransaction(tx => tx.game.create({
         data: {
           name: name.trim(),
           description: description ? String(description).trim() : null,
@@ -818,7 +823,7 @@ router.post(
           winRewardProduct: true,
           loseRewardProduct: true,
         },
-      });
+      }));
 
       broadcast('game:updated', { action: 'created', gameId: newGame.id });
 
@@ -939,7 +944,7 @@ router.put(
         updateData.loseRewardQuantity = loseQty;
       }
 
-      const updated = await prisma.game.update({
+      const updated = await stockTransaction(tx => tx.game.update({
         where: { id },
         data: updateData,
         include: {
@@ -948,7 +953,7 @@ router.put(
           winRewardProduct: true,
           loseRewardProduct: true,
         },
-      });
+      }));
 
       broadcast('game:updated', { action: 'updated', gameId: updated.id });
 
@@ -985,10 +990,10 @@ router.patch(
         ? GameStatus.INACTIVE
         : GameStatus.ACTIVE;
 
-      const updated = await prisma.game.update({
+      const updated = await stockTransaction(tx => tx.game.update({
         where: { id },
         data: { status: targetStatus },
-      });
+      }));
 
       broadcast('game:updated', { action: 'status_changed', gameId: updated.id, status: targetStatus });
 
@@ -1009,35 +1014,12 @@ router.delete(
   authenticateToken,
   requireRoles(Role.DEVELOPER),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      const { id } = req.params;
-
-      const existing = await prisma.game.findUnique({
-        where: { id },
-        include: { sessions: true },
-      });
-
-      if (!existing) {
-        res.status(404).json({ error: 'Game not found' });
-        return;
-      }
-
-      if (existing.sessions.length > 0) {
-        res.status(400).json({
-          error: `Cannot delete game "${existing.name}" because it has ${existing.sessions.length} historical game play record(s). Deactivate the game instead to preserve audit logs.`,
-        });
-        return;
-      }
-
-      await prisma.game.delete({ where: { id } });
-      broadcast('game:updated', { action: 'deleted', gameId: id });
-
-      res.json({ message: `Game "${existing.name}" deleted successfully` });
-    } catch (error) {
-      console.error('Delete game error:', error);
-      res.status(500).json({ error: 'Failed to delete game' });
+      try {
+        await stockTransaction(tx => tx.game.update({ where: { id: req.params.id }, data: { status: 'INACTIVE' } }));
+        broadcast('game:updated', { action: 'retired' });
+        res.json({ retired: true, message: 'Retired for future use. Existing records and history are preserved.' });
+      } catch { res.status(400).json({ error: 'Unable to retire record. No history was deleted.' }); }
     }
-  }
 );
 
 // POST /api/games/play: Atomic transaction for game play, result, inventory deduction, and receipt generation
@@ -1047,6 +1029,11 @@ router.post(
   authenticateToken,
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
+      const acknowledged = typeof req.body?.clientTxId === 'string'
+        ? await existingSaleAcknowledgement(prisma, req.body, req.user!.id) : null;
+      if (acknowledged) { res.status(200).json({ receipt: acknowledged.receipt, saleId: acknowledged.id }); return; }
+      validateOperation(req.body, req.user!.id);
+
       const {
         gameId,
         eventId,
@@ -1127,11 +1114,6 @@ router.post(
       const isPastEnd = new Date().getTime() >= new Date(event.endDatetime).getTime();
 
       if (eventStatus === 'ENDED' || event.status === 'ENDED' || isPastEnd) {
-        if (!event.reconciledAt) {
-          reconcileSingleEvent(event.id).catch(err =>
-            console.error('Failed to reconcile ended event on game play:', err)
-          );
-        }
         res.status(400).json({ error: 'This event has ended and is no longer accepting transactions.' });
         return;
       }
@@ -1221,107 +1203,35 @@ router.post(
       const entryFeeNum = Number(game.entryFee);
 
       // Validate payment split
-      let resolvedCashAmount: number;
-      let resolvedUpiAmount: number;
-
-      if (normMethod === PaymentMethod.CASH_UPI) {
-        const cashVal = parseFloat(String(cashAmount ?? ''));
-        const upiVal = parseFloat(String(upiAmount ?? ''));
-
-        if (isNaN(cashVal) || isNaN(upiVal) || cashVal < 0 || upiVal < 0) {
-          res.status(400).json({
-            error: 'Cash and UPI amounts must be non-negative numbers for split payment',
-          });
-          return;
-        }
-
-        const totalSplitCents = Math.round((cashVal + upiVal) * 100);
-        const grandTotalCents = Math.round(entryFeeNum * 100);
-
-        if (totalSplitCents !== grandTotalCents) {
-          res.status(400).json({
-            error: `Split payment total (₹${(totalSplitCents / 100).toFixed(2)}) must exactly match entry fee (₹${(grandTotalCents / 100).toFixed(2)})`,
-            cashAmount: cashVal,
-            upiAmount: upiVal,
-            billTotal: entryFeeNum,
-          });
-          return;
-        }
-
-        resolvedCashAmount = Math.round(cashVal * 100) / 100;
-        resolvedUpiAmount = Math.round(upiVal * 100) / 100;
-      } else if (normMethod === PaymentMethod.CASH) {
-        resolvedCashAmount = entryFeeNum;
-        resolvedUpiAmount = 0;
-      } else {
-        resolvedCashAmount = 0;
-        resolvedUpiAmount = entryFeeNum;
-      }
+      const amounts = paymentAmounts(normMethod, cashAmount, upiAmount, entryFeeNum);
+      const resolvedCashAmount = amounts.cash, resolvedUpiAmount = amounts.upi;
 
       // Execute in atomic Prisma transaction
-      const transactionResult = await prisma.$transaction(async tx => {
-        // Idempotency check if clientTxId supplied
-        if (clientTxId) {
-          const existingSession = await tx.gameSession.findFirst({
-            where: {
-              sale: { clientTxId: String(clientTxId) },
-            },
-            include: {
-              game: true,
-              event: true,
-              rewardProduct: true,
-              sale: true,
-            },
-          });
-          if (existingSession) {
-            return {
-              isDuplicate: true,
-              gameSession: existingSession,
-              sale: existingSession.sale,
-              rewardProduct: existingSession.rewardProduct,
-            };
-          }
+      let concurrentAcknowledgement: Awaited<ReturnType<typeof existingSaleAcknowledgement>> = null;
+      const transactionResult = await stockTransaction(async tx => {
+        const existing = await existingSaleAcknowledgement(tx, req.body, req.user!.id);
+        if (existing) { concurrentAcknowledgement = existing; return null; }
+        await assertEventOpen(tx, eventId);
+        const currentGame = await tx.game.findUnique({ where: { id: game.id } });
+        if (!currentGame || currentGame.status !== 'ACTIVE' || currentGame.updatedAt.getTime() !== game.updatedAt.getTime()) {
+          throw new StockConflict('Game configuration changed. Preserve the operation for review.');
         }
+        if (!Number.isSafeInteger(rewardQuantity) || rewardQuantity < 0) throw new StockConflict('Invalid configured reward quantity.');
 
         // 1. Deduct Reward atomically
         if (rewardQuantity > 0) {
           if (isEventAllocationReward) {
-            // Verify stall allocation concurrency inside the atomic transaction
-            const eventAllocTx = await tx.eventAllocation.findFirst({
-              where: { eventId, productId: rewardProductId },
-            });
-            if (!eventAllocTx) {
-              throw new Error(`Event allocation for ${rewardProductObj.name} not found.`);
-            }
-            const txSalesAgg = await tx.saleItem.aggregate({
-              where: {
-                productId: rewardProductId,
-                sale: { eventId },
-              },
-              _sum: { quantity: true },
-            });
-            const txSold = txSalesAgg._sum.quantity || 0;
-            const txRemaining = eventAllocTx.allocatedQty - txSold;
-            if (txRemaining < rewardQuantity) {
-              throw new Error(`Insufficient stall allocation for ${rewardProductObj.name} (${txRemaining} remaining, ${rewardQuantity} required).`);
-            }
-            // In the IMS inventory model, warehouse inventory was already decremented upon allocating to the event.
-            // The SaleItem record created below (with sale: { eventId }) tracks this reward as sold under the event,
-            // so event reconciliation (reconcileSingleEvent) returns unsold = allocatedQty - sold accurately upon event close.
+            await assertAllocatedStock(tx, eventId, [{ productId: rewardProductId, quantity: rewardQuantity }]);
           } else {
             // Reward not part of stall allocation: deduct directly from central warehouse inventory
-            const updatedInv = await tx.inventory.update({
-              where: { productId: rewardProductId },
-              data: {
-                quantityOnHand: { decrement: rewardQuantity },
-                lastUpdated: new Date(),
-                notes: `Reward issued for game "${game.name}" (${normResult})`,
-              },
+            const eligible = await tx.product.findUnique({ where: { id: rewardProductId } });
+            if (!eligible || eligible.isArchived || eligible.isDeleted) throw new StockConflict('Reward product is retired.');
+            const deduction = await tx.inventory.updateMany({
+              where: { productId: rewardProductId, quantityOnHand: { gte: rewardQuantity } },
+              data: { quantityOnHand: { decrement: rewardQuantity }, lastUpdated: new Date() },
             });
+            if (deduction.count !== 1) throw new StockConflict('Insufficient warehouse reward stock.');
 
-            if (updatedInv.quantityOnHand < 0) {
-              throw new Error(`Insufficient stock for ${rewardProductObj.name}. Inventory cannot become negative.`);
-            }
           }
         }
 
@@ -1378,17 +1288,6 @@ router.post(
           },
         });
 
-        // Deduct from central warehouse if reward was drawn from warehouse stock rather than stall allocation
-        if (!isEventAllocationReward && rewardQuantity > 0) {
-          await tx.inventory.update({
-            where: { productId: rewardProductId },
-            data: {
-              quantityOnHand: { decrement: rewardQuantity },
-              lastUpdated: new Date(),
-            },
-          });
-        }
-
         // 5. Create GameSession Record
         const newSession = await tx.gameSession.create({
           data: {
@@ -1426,6 +1325,7 @@ router.post(
         };
       });
 
+      if (!transactionResult) { res.status(200).json({ receipt: (concurrentAcknowledgement as Awaited<ReturnType<typeof existingSaleAcknowledgement>>)?.receipt, saleId: (concurrentAcknowledgement as Awaited<ReturnType<typeof existingSaleAcknowledgement>>)?.id }); return; }
       const { gameSession, sale, isDuplicate } = transactionResult;
 
       // Broadcast WebSocket updates
@@ -1474,6 +1374,7 @@ router.post(
       }
 
       res.status(isDuplicate ? 200 : 201).json({
+        saleId: sale.id,
         message: isDuplicate ? 'Game session already recorded (idempotent)' : 'Game played and reward issued successfully!',
         receipt: {
           receiptNumber: gameSession.receiptNumber,
@@ -1499,7 +1400,7 @@ router.post(
       });
     } catch (error: any) {
       console.error('Play game error:', error);
-      res.status(500).json({ error: error.message || 'Failed to process game play' });
+      res.status(error.status || 500).json({ error: error.message || 'Failed to process game play' });
     }
   }
 );

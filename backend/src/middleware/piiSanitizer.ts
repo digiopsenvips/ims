@@ -3,8 +3,10 @@ import { Role } from '@prisma/client';
 
 export const sanitizeSaleForUser = (sale: any, user?: AuthUserPayload) => {
   const isHead = user?.role === Role.HEAD;
-  const canViewPII = !isHead || !!user?.permissions?.['view_customer_pii'];
-  const canViewRevenue = !isHead || !!user?.permissions?.['view_revenue'];
+  const ownSale = user?.role === Role.MEMBER && (sale.memberId === user.id || sale.sellerUserIdAtSale === user.id);
+  const elevated = user?.role === Role.ADMIN || user?.role === Role.DEVELOPER;
+  const canViewPII = elevated || ownSale || (isHead && !!user?.permissions?.['view_customer_pii']);
+  const canViewRevenue = elevated || ownSale || (isHead && !!user?.permissions?.['view_revenue']);
 
   const sanitized = { ...sale };
 
@@ -18,6 +20,9 @@ export const sanitizeSaleForUser = (sale: any, user?: AuthUserPayload) => {
     delete sanitized.totalAmount;
     sanitized.unitPrice = null;
     sanitized.totalAmount = null;
+    sanitized.cashAmount = null;
+    sanitized.upiAmount = null;
+    sanitized.totalOrderAmount = null;
     if (Array.isArray(sanitized.items)) {
       sanitized.items = sanitized.items.map((i: any) => ({
         ...i,

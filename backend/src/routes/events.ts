@@ -1,3 +1,5 @@
+import { responsePolicy } from '../middleware/responsePolicy';
+import { preserveRecords } from '../middleware/preservation';
 import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { authenticateToken } from '../middleware/auth';
@@ -8,10 +10,13 @@ import { EventStatus, Role } from '@prisma/client';
 import {
   computeEventStatus,
   reconcileSingleEvent,
-  reconcileAllExpiredEvents,
 } from '../services/eventLifecycle';
 
+import { stockTransaction, StockConflict } from '../services/stock';
+import { InputError, nonnegativeInteger, moneyCents } from '../services/payment';
+
 const router = Router();
+router.use(responsePolicy);
 
 // GET /api/events: List events with live allocation & sales metrics
 router.get(
@@ -20,7 +25,7 @@ router.get(
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       // Reconcile any expired events first so status is 100% authoritative
-      await reconcileAllExpiredEvents();
+      // Reads never change event status or return inventory.
 
       const activeGamesCount = await prisma.game.count({ where: { status: 'ACTIVE' } });
 
@@ -148,7 +153,7 @@ router.get(
 
     try {
       // Reconcile status/inventory if expired
-      await reconcileSingleEvent(id);
+      // Read-only: lifecycle transitions are handled separately.
 
       const [event, games] = await Promise.all([
         prisma.event.findUnique({
@@ -377,9 +382,9 @@ router.get(
           totalAllocated,
           totalSold,
           totalRemaining,
-          totalRevenue: totalSalesRevenue + gameRevenue,
+          totalRevenue: totalSalesRevenue,
           totalSalesRevenue,
-          productRevenue: totalSalesRevenue,
+          productRevenue: event.sales.filter(sale => sale.transactionType !== 'GAME').reduce((sum, sale) => sum + Number(sale.totalAmount), 0),
           gamesCount: enrichedGames.length,
           gamesPlayed,
           gameRevenue,
@@ -435,9 +440,10 @@ router.post(
 
     try {
       const validAllocations = Array.isArray(allocations) ? allocations : [];
+      if (new Set(validAllocations.map((a: any) => a.productId)).size !== validAllocations.length) throw new InputError('Duplicate allocations are not allowed.');
 
       // Execute in Prisma Transaction
-      const result = await prisma.$transaction(async tx => {
+      const result = await stockTransaction(async tx => {
         const newEvent = await tx.event.create({
           data: {
             name: name.trim(),
@@ -449,8 +455,9 @@ router.post(
         });
 
         for (const alloc of validAllocations) {
-          const qty = parseInt(alloc.allocatedQty, 10) || 0;
-          const price = parseFloat(alloc.priceAtEvent);
+          const qty = nonnegativeInteger(alloc.allocatedQty, 'Allocation');
+          if (!Number.isSafeInteger(qty) || qty < 0) throw new InputError('Allocation must be a non-negative whole number.');
+          const price = moneyCents(alloc.priceAtEvent) / 100;
 
           if (qty < 0) {
             throw new Error(`Allocated quantity cannot be negative for product ${alloc.productId}.`);
@@ -462,7 +469,7 @@ router.post(
               include: { product: true },
             });
 
-            if (!inv || inv.quantityOnHand < qty) {
+            if (!inv || inv.product.isArchived || inv.product.isDeleted || inv.quantityOnHand < qty) {
               const avail = inv ? inv.quantityOnHand : 0;
               const prodName = inv?.product?.name || alloc.productId;
               throw new Error(
@@ -515,7 +522,8 @@ router.put(
     const { name, location, startDatetime, endDatetime, status, allocations } = req.body;
 
     try {
-      const existingEvent = await prisma.event.findUnique({
+      await stockTransaction(async tx => {
+      const existingEvent = await tx.event.findUnique({
         where: { id },
         include: {
           allocations: true,
@@ -526,25 +534,24 @@ router.put(
       });
 
       if (!existingEvent) {
-        res.status(404).json({ error: 'Event not found' });
-        return;
+        throw new StockConflict('Event not found.');
       }
 
       const parsedStart = startDatetime ? new Date(startDatetime) : existingEvent.startDatetime;
       const parsedEnd = endDatetime ? new Date(endDatetime) : existingEvent.endDatetime;
 
       if (isNaN(parsedStart.getTime()) || isNaN(parsedEnd.getTime())) {
-        res.status(400).json({ error: 'Valid start date/time and end date/time are required' });
-        return;
+        throw new InputError('Valid start and end dates are required.');
       }
 
       if (parsedEnd.getTime() <= parsedStart.getTime()) {
-        res.status(400).json({ error: 'End date and time must be after the start date and time.' });
-        return;
+        throw new InputError('End date must be after start date.');
       }
 
       // For ENDED/finalized events: do NOT automatically reopen or change status
-      const isAlreadyEnded = existingEvent.status === EventStatus.ENDED;
+      const isAlreadyEnded = existingEvent.status === EventStatus.ENDED || Boolean(existingEvent.reconciledAt);
+      if (isAlreadyEnded && Array.isArray(allocations)) throw new StockConflict('Closed event allocations are immutable.');
+      if (Array.isArray(allocations) && new Set(allocations.map((a: any) => a.productId)).size !== allocations.length) throw new InputError('Duplicate allocations are not allowed.');
       const computedStatus = isAlreadyEnded
         ? EventStatus.ENDED
         : computeEventStatus(
@@ -566,7 +573,6 @@ router.put(
       }
 
       // Handle allocations update in transaction
-      await prisma.$transaction(async tx => {
         await tx.event.update({
           where: { id },
           data: {
@@ -580,8 +586,9 @@ router.put(
 
         if (Array.isArray(allocations)) {
           for (const alloc of allocations) {
-            const newQty = parseInt(alloc.allocatedQty, 10) || 0;
-            const newPrice = parseFloat(alloc.priceAtEvent);
+            const newQty = nonnegativeInteger(alloc.allocatedQty, 'Allocation');
+            if (!Number.isSafeInteger(newQty) || newQty < 0) throw new InputError('Allocation must be a non-negative whole number.');
+            const newPrice = alloc.priceAtEvent === undefined ? NaN : moneyCents(alloc.priceAtEvent) / 100;
             const soldSoFar = salesByProduct[alloc.productId] || 0;
 
             if (newQty < 0) {
@@ -606,7 +613,7 @@ router.put(
                   where: { productId: alloc.productId },
                   include: { product: true },
                 });
-                if (!inv || inv.quantityOnHand < diff) {
+                if (!inv || inv.product.isArchived || inv.product.isDeleted || inv.quantityOnHand < diff) {
                   const avail = inv ? inv.quantityOnHand : 0;
                   const prodName = inv?.product?.name || alloc.productId;
                   throw new Error(
@@ -647,7 +654,7 @@ router.put(
                 where: { productId: alloc.productId },
                 include: { product: true },
               });
-              if (!inv || inv.quantityOnHand < newQty) {
+              if (!inv || inv.product.isArchived || inv.product.isDeleted || inv.quantityOnHand < newQty) {
                 const avail = inv ? inv.quantityOnHand : 0;
                 const prodName = inv?.product?.name || alloc.productId;
                 throw new Error(
@@ -689,87 +696,16 @@ router.put(
 
 // Core transactional service for closing an event/stall and returning unsold inventory
 async function executeCloseEvent(id: string) {
-  const event = await prisma.event.findUnique({
-    where: { id },
-    include: {
-      allocations: {
-        include: { product: true },
-      },
-      sales: true,
-    },
-  });
-
-  if (!event || event.isDeleted) {
-    throw { status: 404, message: 'Event / Stall not found' };
-  }
-
-  if (event.status === EventStatus.ENDED && event.reconciledAt) {
-    throw { status: 400, message: 'Event / Stall has already been finalized and ended.' };
-  }
-
-  // Count sold quantities from sale_items
-  const soldMap: Record<string, number> = {};
-  const soldItems = await prisma.saleItem.groupBy({
-    by: ['productId'],
-    where: { sale: { eventId: id } },
-    _sum: { quantity: true },
-  });
-  for (const item of soldItems) {
-    soldMap[item.productId] = (soldMap[item.productId] || 0) + (item._sum.quantity || 0);
-  }
-
-  // Return unsold quantities to main warehouse inventory
-  const returnedItems: { productId: string; productName: string; returnedQty: number }[] = [];
-  const now = new Date();
-
-  await prisma.$transaction(async tx => {
-    for (const alloc of event.allocations) {
-      const sold = soldMap[alloc.productId] || 0;
-      const unsold = Math.max(0, alloc.allocatedQty - sold);
-
-      if (unsold > 0) {
-        await tx.inventory.update({
-          where: { productId: alloc.productId },
-          data: {
-            quantityOnHand: { increment: unsold },
-            lastUpdated: now,
-          },
-        });
-
-        returnedItems.push({
-          productId: alloc.productId,
-          productName: alloc.product.name,
-          returnedQty: unsold,
-        });
-      }
-    }
-
-    // Mark event as ENDED and set reconciledAt; adjust endDatetime if in the future
-    await tx.event.update({
-      where: { id },
-      data: {
-        status: EventStatus.ENDED,
-        reconciledAt: now,
-        endDatetime: event.endDatetime > now ? now : event.endDatetime,
-      },
-    });
-  });
-
-  // Real-time broadcasts
-  broadcast('event:updated', { eventId: id, action: 'ended' });
-  broadcast('event:status_changed', { eventId: id, status: 'ENDED' });
-  broadcast('inventory:updated', { action: 'event_ended_stock_returned', eventId: id });
-
-  return {
-    message: `Stall '${event.name}' successfully closed. Unsold stock returned to main inventory.`,
-    returnedItems,
-    status: EventStatus.ENDED,
-  };
+  const result = await reconcileSingleEvent(id, true);
+  return { ...result, message: result.reconciled
+    ? 'Stall closed. Unsold stock returned once to the warehouse.'
+    : 'Stall was already closed. No stock was returned again.' };
 }
 
 // Core transactional service for opening an event/stall
 async function executeOpenEvent(id: string) {
-  const event = await prisma.event.findUnique({
+  return stockTransaction(async tx => {
+  const event = await tx.event.findUnique({
     where: { id },
     include: {
       allocations: {
@@ -798,15 +734,14 @@ async function executeOpenEvent(id: string) {
     };
   }
 
+  if (now >= event.endDatetime) throw new StockConflict('An expired stall cannot be reopened. Reconcile its existing operations first.');
+
   // Adjust start time to now if scheduled for the future
   const newStart = event.startDatetime > now ? now : event.startDatetime;
   let newEnd = event.endDatetime;
-  if (now >= event.endDatetime) {
-    // Extend endDatetime by 8 hours if it was in the past
-    newEnd = new Date(now.getTime() + 8 * 60 * 60 * 1000);
-  }
 
-  const updated = await prisma.event.update({
+
+  const updated = await tx.event.update({
     where: { id },
     data: {
       status: EventStatus.ACTIVE,
@@ -830,6 +765,7 @@ async function executeOpenEvent(id: string) {
     event: updated,
     status: EventStatus.ACTIVE,
   };
+  });
 }
 
 // POST /api/events/:id/open or /api/events/:id/start: Open a stall for live transactions
@@ -898,92 +834,7 @@ router.delete(
   '/:id',
   authenticateToken,
   requireRoles(Role.DEVELOPER, Role.ADMIN),
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const { id } = req.params;
-
-    try {
-      const event = await prisma.event.findUnique({
-        where: { id },
-        include: {
-          allocations: true,
-          sales: { select: { id: true } },
-        },
-      });
-
-      if (!event) {
-        res.status(404).json({ error: 'Event not found' });
-        return;
-      }
-
-      // If event is not ENDED, return any unsold allocated stock back to main inventory
-      if (event.status !== EventStatus.ENDED) {
-        const salesCount = await prisma.saleItem.groupBy({
-          by: ['productId'],
-          where: { sale: { eventId: id } },
-          _sum: { quantity: true },
-        });
-
-        const salesByProduct: Record<string, number> = {};
-        for (const s of salesCount) {
-          salesByProduct[s.productId] = s._sum.quantity || 0;
-        }
-
-        for (const alloc of event.allocations) {
-          const sold = salesByProduct[alloc.productId] || 0;
-          const unsold = Math.max(0, alloc.allocatedQty - sold);
-          if (unsold > 0) {
-            await prisma.inventory.update({
-              where: { productId: alloc.productId },
-              data: {
-                quantityOnHand: { increment: unsold },
-                lastUpdated: new Date(),
-              },
-            });
-          }
-        }
-      }
-
-      // In a transaction, cleanly delete all event dependencies and the event
-      await prisma.$transaction(async tx => {
-        // 1. Unbind any game associated with this event
-        await tx.game.updateMany({
-          where: { eventId: id },
-          data: { eventId: null },
-        });
-
-        // 2. Delete game sessions associated with this event
-        await tx.gameSession.deleteMany({
-          where: { eventId: id },
-        });
-
-        // 3. Delete sales items and sales associated with this event
-        await tx.saleItem.deleteMany({
-          where: { sale: { eventId: id } },
-        });
-        await tx.sale.deleteMany({
-          where: { eventId: id },
-        });
-
-        // 4. Delete event allocations
-        await tx.eventAllocation.deleteMany({
-          where: { eventId: id },
-        });
-
-        // 5. Delete the event record
-        await tx.event.delete({
-          where: { id },
-        });
-      });
-
-      broadcast('event:updated', { eventId: id, action: 'deleted' });
-      broadcast('inventory:updated', { action: 'event_deleted', eventId: id });
-
-      res.json({ message: `Event '${event.name}' deleted successfully` });
-    } catch (error: any) {
-      console.error('Delete event error:', error);
-      res.status(500).json({ error: error?.message || 'Failed to delete event' });
-    }
-  }
+  preserveRecords
 );
 
 export default router;

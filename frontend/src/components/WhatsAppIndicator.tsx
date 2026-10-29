@@ -19,6 +19,7 @@ interface WhatsAppIndicatorProps {
 
 export const WhatsAppIndicator: React.FC<WhatsAppIndicatorProps> = ({ className = '', showTextAlways = true }) => {
   const { user } = useAuth();
+  const canManage = user?.role === 'DEVELOPER' || user?.role === 'ADMIN';
   const [status, setStatus] = useState<WhatsAppStatusResponse | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -27,6 +28,7 @@ export const WhatsAppIndicator: React.FC<WhatsAppIndicatorProps> = ({ className 
   const [isSendingTest, setIsSendingTest] = useState(false);
 
   const fetchStatus = async () => {
+    if (!canManage) return;
     try {
       const data = await api.get<WhatsAppStatusResponse>('/whatsapp/status');
       setStatus(data);
@@ -39,7 +41,7 @@ export const WhatsAppIndicator: React.FC<WhatsAppIndicatorProps> = ({ className 
     fetchStatus();
     const interval = setInterval(fetchStatus, showModal ? 4000 : 15000);
     return () => clearInterval(interval);
-  }, [showModal]);
+  }, [showModal, canManage]);
 
   const handleLogout = async () => {
     if (!window.confirm('Are you sure you want to unlink the current WhatsApp number?')) return;
@@ -69,6 +71,8 @@ export const WhatsAppIndicator: React.FC<WhatsAppIndicatorProps> = ({ className 
       setIsSendingTest(false);
     }
   };
+
+  if (!canManage) return null;
 
   const isConnected = status?.isConnected ?? false;
   const isScanQr = status?.status === 'SCAN_QR';

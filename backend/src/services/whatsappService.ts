@@ -69,14 +69,7 @@ class WhatsAppService {
    */
   private async getAuthState() {
     try {
-      await prisma.$executeRawUnsafe(`
-        CREATE TABLE IF NOT EXISTS whatsapp_sessions (
-          key TEXT PRIMARY KEY,
-          value TEXT NOT NULL,
-          updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-        );
-      `);
-
+      // The session table is provisioned separately; startup must not apply DDL.
       const credsRow = await prisma.$queryRaw<Array<{ value: string }>>`
         SELECT value FROM whatsapp_sessions WHERE key = 'creds' LIMIT 1
       `;

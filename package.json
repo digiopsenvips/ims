@@ -10,7 +10,7 @@
     "build": "npm run build --prefix backend && npm run build --prefix frontend",
     "build:backend": "npm run build --prefix backend",
     "build:frontend": "npm run build --prefix frontend",
-    "setup:backend": "npm --prefix backend install && npm --prefix backend run db:push && npm --prefix backend run db:seed",
+    "setup:backend": "node backend/scripts/guard-disposable-db.cjs && npm --prefix backend install && npm --prefix backend run db:push && npm --prefix backend run db:seed",
     "setup:frontend": "npm --prefix frontend install",
     "setup": "npm run setup:backend && npm run setup:frontend",
     "seed": "npm run db:seed --prefix backend"

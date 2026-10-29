@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { SyncIndicator } from '../SyncIndicator';
 import { WhatsAppIndicator } from '../WhatsAppIndicator';
@@ -8,6 +8,7 @@ import { api } from '../../lib/api';
 import { AppEvent } from '../../types';
 import { useSocket } from '../../context/SocketContext';
 import { LiveStallModal } from '../LiveStallModal';
+import { selectedEventId as resolveEventId } from '../../lib/event-context';
 
 interface NavbarProps {
   onToggleSidebar: () => void;
@@ -18,13 +19,15 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
   const location = useLocation();
   const { socket } = useSocket();
   const [activeEvents, setActiveEvents] = useState<AppEvent[]>([]);
-  const [activeEvent, setActiveEvent] = useState<AppEvent | null>(null);
+  const requestRef = useRef(0);
   const [showStallModal, setShowStallModal] = useState<boolean>(false);
   const [modalTargetEventId, setModalTargetEventId] = useState<string | undefined>(undefined);
 
   const fetchActiveEvent = async () => {
+    const requestId = ++requestRef.current;
     try {
       const res = await api.get<any>('/events');
+      if (requestId !== requestRef.current) return;
       const eventList: AppEvent[] = Array.isArray(res) ? res : (res?.events || []);
       const now = Date.now();
       const liveEvents = eventList.filter(
@@ -33,17 +36,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
       const activeFallback = liveEvents.length > 0 ? liveEvents : eventList.filter(e => e.status === 'ACTIVE');
       setActiveEvents(activeFallback);
 
-      const searchParams = new URLSearchParams(location.search);
-      const urlEventId = searchParams.get('eventId');
-      const storageKey = user?.id ? `enactus_ims_pos_event_${user.id}` : 'enactus_ims_pos_event_guest';
-      let savedEventId: string | null = null;
-      try {
-        savedEventId = localStorage.getItem(storageKey);
-      } catch {}
-
-      const preferredId = urlEventId || savedEventId;
-      const matched = preferredId ? activeFallback.find(e => e.id === preferredId) : null;
-      setActiveEvent(matched || activeFallback[0] || null);
     } catch {
       // Ignore background fetch error
     }
@@ -68,6 +60,13 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
     };
   }, [socket]);
 
+  const storageKey = user?.id ? `enactus_ims_pos_event_${user.id}` : 'enactus_ims_pos_event_guest';
+  let savedId: string | null = null;
+  try { savedId = localStorage.getItem(storageKey); } catch {}
+  const explicitId = new URLSearchParams(location.search).get('eventId') || location.pathname.match(/^\/events\/([^/]+)/)?.[1];
+  const preferredId = resolveEventId(activeEvents, explicitId, null, savedId);
+  const activeEvent = activeEvents.find(event => event.id === preferredId) || null;
+
   // Get readable page name from route
   const getPageTitle = () => {
     const path = location.pathname;
@@ -88,9 +87,9 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
   };
 
   return (
-    <header className="sticky top-0 z-20 h-16 bg-white/95 backdrop-blur-sm border-b border-slate-200 px-4 sm:px-6 lg:px-8 flex items-center justify-between shadow-xs">
+    <header className="sticky top-0 z-20 min-h-16 h-auto py-2 sm:py-0 sm:h-16 bg-white/95 backdrop-blur-sm border-b border-slate-200 px-4 sm:px-6 lg:px-8 flex items-center justify-between shadow-xs">
       {/* Left side: Mobile menu toggle + Breadcrumbs */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 shrink-0 sm:shrink sm:min-w-0">
         <button
           onClick={onToggleSidebar}
           className="lg:hidden p-2 text-slate-600 hover:text-slate-900 rounded-md hover:bg-slate-100 transition-colors cursor-pointer"
@@ -100,17 +99,17 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
         </button>
 
         {/* Breadcrumb path */}
-        <div className="flex items-center gap-1.5 text-xs">
+        <div className="hidden sm:flex items-center gap-1.5 text-xs min-w-0">
           <span className="text-slate-400 font-medium hidden sm:inline">Enactus VIPS-TC</span>
           <ChevronRight className="w-3 h-3 text-slate-300 hidden sm:inline" />
-          <span className="font-bold text-slate-900 tracking-tight text-sm">
+          <span className="font-bold text-slate-900 tracking-tight text-sm truncate">
             {getPageTitle()}
           </span>
         </div>
       </div>
 
       {/* Middle/Right: Active Stall Badge & Sync & Quick Actions */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-1 min-w-0 flex-wrap sm:flex-nowrap justify-end items-center gap-1 sm:gap-3">
         {activeEvent ? (
           <div className="flex items-center gap-2 px-2.5 sm:px-3 py-1 bg-emerald-50 border border-emerald-200 rounded-full text-xs text-emerald-900 shadow-2xs">
             <button
@@ -129,11 +128,11 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
               <span className="font-black text-[11px] uppercase tracking-wide text-emerald-800 hidden sm:inline">
                 Live Stall:
               </span>
-              <span className="font-bold text-slate-800 text-xs max-w-[110px] sm:max-w-[160px] truncate" title={activeEvent.name}>
+              <span className="font-bold text-slate-800 text-xs max-w-[90px] sm:max-w-[160px] truncate" title={activeEvent.name}>
                 {activeEvent.name}
               </span>
               {activeEvents.length > 1 && (
-                <span className="px-1.5 py-0.5 bg-emerald-200/80 text-emerald-900 text-[9px] font-black rounded uppercase tracking-wider shrink-0" title={`${activeEvents.length} stalls running simultaneously`}>
+                <span className="hidden sm:inline-block px-1.5 py-0.5 bg-emerald-200/80 text-emerald-900 text-[9px] font-black rounded uppercase tracking-wider shrink-0" title={`${activeEvents.length} stalls running simultaneously`}>
                   {activeEvents.length} Live
                 </span>
               )}
@@ -169,7 +168,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
           </div>
         )}
 
-        <WhatsAppIndicator />
+        <WhatsAppIndicator showTextAlways={false} />
         <SyncIndicator />
 
         {!isMember && location.pathname !== '/sales-entry' && (

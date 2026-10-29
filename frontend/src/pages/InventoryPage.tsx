@@ -158,6 +158,7 @@ export const InventoryPage: React.FC = () => {
 
     try {
       await api.put(`/inventory/${adjustItem.productId}`, {
+        expectedQuantityOnHand: adjustItem.quantityOnHand,
         quantityOnHand: qty,
         notes: adjustNotesInput,
       });

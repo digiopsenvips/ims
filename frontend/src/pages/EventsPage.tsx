@@ -747,7 +747,8 @@ export const EventsPage: React.FC = () => {
                       <button
                         onClick={() => setDeleteEventTarget(event)}
                         className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer ml-auto sm:ml-0"
-                        title="Delete Event"
+                        disabled
+                        title="Events and their history are preserved."
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                         <span className="hidden sm:inline">Delete</span>

@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../config/prisma';
 import { ENV } from '../config/env';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, credentialVersion } from '../middleware/auth';
 import { AuthenticatedRequest } from '../types';
 import { Role } from '@prisma/client';
 
@@ -86,6 +86,7 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
 
     const payload = {
       id: user.id,
+      credentialVersion: credentialVersion(user.passwordHash),
       name: activeName,
       username: user.username,
       role: user.role,
@@ -150,6 +151,7 @@ router.post('/volunteer-checkin', authenticateToken, async (req: AuthenticatedRe
 
     const payload = {
       id: updated.id,
+      credentialVersion: credentialVersion(updated.passwordHash),
       name: updated.name,
       username: updated.username,
       role: updated.role,

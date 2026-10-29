@@ -4,6 +4,7 @@ import { requireRoles } from '../middleware/rbac';
 import { AuthenticatedRequest } from '../types';
 import { Role } from '@prisma/client';
 import { whatsappService } from '../services/whatsappService';
+import { prisma } from '../config/prisma';
 
 const router = Router();
 
@@ -11,6 +12,7 @@ const router = Router();
 router.get(
   '/status',
   authenticateToken,
+  requireRoles(Role.DEVELOPER, Role.ADMIN),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const status = whatsappService.getStatus();
@@ -80,37 +82,34 @@ router.post(
   }
 );
 
-// POST /api/whatsapp/send-receipt - Generic receipt dispatch endpoint
-router.post(
-  '/send-receipt',
-  async (req, res): Promise<void> => {
-    const { phone, customerName, receiptNumber, eventName, eventLocation, items, totalAmount, paymentMethod, cashAmount, upiAmount, sellerName, saleTime } = req.body;
-    if (!phone) {
-      res.status(400).json({ error: 'phone number is required' });
-      return;
-    }
-
-    try {
-      const result = await whatsappService.sendSaleReceipt({
-        phone: String(phone),
-        customerName,
-        receiptNumber: receiptNumber || 'RECEIPT',
-        eventName,
-        eventLocation,
-        items: Array.isArray(items) ? items : [],
-        totalAmount: Number(totalAmount || 0),
-        paymentMethod: paymentMethod || 'UPI',
-        cashAmount,
-        upiAmount,
-        sellerName,
-        saleTime,
-      });
-
-      res.json(result);
-    } catch (error: any) {
-      res.status(500).json({ error: error?.message || 'Failed to send receipt' });
-    }
+// Dispatch only an authorized stored receipt to its recorded recipient.
+router.post('/send-receipt', authenticateToken, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const receiptNumber = Number(req.body.receiptNumber);
+  if (!Number.isSafeInteger(receiptNumber) || receiptNumber < 1) {
+    res.status(400).json({ error: 'A stored receipt number is required.' }); return;
   }
-);
-
+  try {
+    const sale = await prisma.sale.findUnique({ where: { receiptNumber }, include: {
+      event: true, items: { include: { product: true } },
+    } });
+    const elevated = req.user?.role === Role.DEVELOPER || req.user?.role === Role.ADMIN;
+    if (!sale || (!elevated && (sale.sellerUserIdAtSale || sale.memberId) !== req.user?.id)) {
+      res.status(403).json({ error: 'Receipt access denied.' }); return;
+    }
+    if (!sale.customerPhone || (req.body.phone && req.body.phone !== sale.customerPhone)) {
+      res.status(400).json({ error: 'Receipt can only be sent to its recorded recipient.' }); return;
+    }
+    const result = await whatsappService.sendSaleReceipt({
+      phone: sale.customerPhone, customerName: sale.customerName || undefined, receiptNumber,
+      eventName: sale.event.name, eventLocation: sale.event.location,
+      items: sale.items.map(item => ({ productName: item.product.name, quantity: item.quantity,
+        unitPrice: Number(item.unitPrice), lineTotal: Number(item.lineTotal) })),
+      totalAmount: Number(sale.totalAmount), paymentMethod: sale.paymentMethod,
+      cashAmount: sale.cashAmount === null ? null : Number(sale.cashAmount),
+      upiAmount: sale.upiAmount === null ? null : Number(sale.upiAmount),
+      sellerName: sale.sellerNameAtSale || undefined, saleTime: sale.saleTime,
+    });
+    res.json(result);
+  } catch { res.status(500).json({ error: 'Receipt dispatch failed.' }); }
+});
 export default router;

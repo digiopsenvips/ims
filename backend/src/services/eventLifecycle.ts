@@ -1,6 +1,7 @@
 import { EventStatus } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { broadcast } from '../sockets';
+import { stockTransaction, eventConsumption, StockConflict } from './stock';
 
 /**
  * Computes authoritative time-based status for an event.
@@ -35,136 +36,61 @@ export function computeEventStatus(
   return EventStatus.UPCOMING;
 }
 
-/**
- * Reconciles a single event's status and inventory idempotently.
- * Unsold allocated stock is returned to main inventory once and only once.
- */
-export async function reconcileSingleEvent(
-  eventId: string
-): Promise<{ reconciled: boolean; transitioned: boolean; status: EventStatus }> {
-  const event = await prisma.event.findUnique({
-    where: { id: eventId },
-    include: {
-      allocations: {
-        include: { product: true },
-      },
-    },
-  });
-
-  if (!event || event.isDeleted) {
-    return { reconciled: false, transitioned: false, status: EventStatus.ENDED };
-  }
-
-  const targetStatus = computeEventStatus(event.startDatetime, event.endDatetime, event.status);
-
-  // If event has ended
-  if (targetStatus === EventStatus.ENDED) {
-    // Check if inventory has already been reconciled
-    if (!event.reconciledAt) {
-      await prisma.$transaction(async tx => {
-        // Query total sold from sale_items for accuracy
-        const soldItems = await tx.saleItem.groupBy({
-          by: ['productId'],
-          where: { sale: { eventId } },
-          _sum: { quantity: true },
-        });
-
-        const soldMap: Record<string, number> = {};
-        for (const item of soldItems) {
-          soldMap[item.productId] = item._sum.quantity || 0;
-        }
-
-        // Return unsold units to main inventory
-        for (const alloc of event.allocations) {
-          const sold = soldMap[alloc.productId] || 0;
-          const unsold = Math.max(0, alloc.allocatedQty - sold);
-
-          if (unsold > 0) {
-            await tx.inventory.update({
-              where: { productId: alloc.productId },
-              data: {
-                quantityOnHand: { increment: unsold },
-                lastUpdated: new Date(),
-              },
-            });
-          }
-        }
-
-        // Set status to ENDED and timestamp reconciliation
-        await tx.event.update({
-          where: { id: eventId },
-          data: {
-            status: EventStatus.ENDED,
-            reconciledAt: new Date(),
-          },
-        });
-      });
-
-      broadcast('event:updated', { eventId, action: 'ended' });
-      broadcast('inventory:updated', { action: 'event_ended_stock_returned', eventId });
-
-      return { reconciled: true, transitioned: true, status: EventStatus.ENDED };
-    } else if (event.status !== EventStatus.ENDED) {
-      // Already reconciled, just ensure status is ENDED
-      await prisma.event.update({
-        where: { id: eventId },
-        data: { status: EventStatus.ENDED },
-      });
-      broadcast('event:updated', { eventId, action: 'ended' });
-      return { reconciled: false, transitioned: true, status: EventStatus.ENDED };
-    }
-
-    return { reconciled: false, transitioned: false, status: EventStatus.ENDED };
-  }
-
-  // If event should be ACTIVE but is currently UPCOMING
-  if (targetStatus === EventStatus.ACTIVE && event.status === EventStatus.UPCOMING) {
-    await prisma.event.update({
-      where: { id: eventId },
-      data: { status: EventStatus.ACTIVE },
+/** Manual closure and the timer share one locked, once-only return path. */
+export async function reconcileSingleEvent(eventId: string, forceClose = false) {
+  const result = await stockTransaction(async tx => {
+    const event = await tx.event.findUnique({
+      where: { id: eventId }, include: { allocations: { include: { product: true } } },
     });
-    broadcast('event:updated', { eventId, action: 'started' });
-    return { reconciled: false, transitioned: true, status: EventStatus.ACTIVE };
-  }
-
-  return { reconciled: false, transitioned: false, status: event.status };
-}
-
-/**
- * Scans all non-deleted events, transitions statuses and reconciles inventory for any expired events.
- */
-export async function reconcileAllExpiredEvents(): Promise<number> {
-  try {
-    const events = await prisma.event.findMany({
-      where: {
-        isDeleted: false,
-        OR: [
-          { status: { in: [EventStatus.UPCOMING, EventStatus.ACTIVE] } },
-          { reconciledAt: null },
-        ],
-      },
-      select: { id: true, startDatetime: true, endDatetime: true, status: true, reconciledAt: true },
-    });
-
-    let updatedCount = 0;
-    const now = new Date();
-
-    for (const ev of events) {
-      const isPastEnd = now.getTime() >= ev.endDatetime.getTime();
-      const isPastStart = now.getTime() >= ev.startDatetime.getTime();
-
-      if ((isPastEnd && (!ev.reconciledAt || ev.status !== EventStatus.ENDED)) ||
-          (isPastStart && !isPastEnd && ev.status === EventStatus.UPCOMING)) {
-        const res = await reconcileSingleEvent(ev.id);
-        if (res.transitioned || res.reconciled) {
-          updatedCount++;
+    if (!event || event.isDeleted) throw new StockConflict('Event / Stall not found.');
+    const target = forceClose ? EventStatus.ENDED : computeEventStatus(event.startDatetime, event.endDatetime, event.status);
+    const returnedItems: Array<{ productId: string; productName: string; returnedQty: number }> = [];
+    if (target === EventStatus.ENDED && !event.reconciledAt) {
+      const consumed = await eventConsumption(tx, eventId);
+      for (const allocation of event.allocations) {
+        const unsold = allocation.allocatedQty - (consumed.get(allocation.productId) || 0);
+        if (unsold < 0) throw new StockConflict(`Allocation discrepancy for ${allocation.productId}; closure needs review.`);
+        if (unsold > 0) {
+          await tx.inventory.update({ where: { productId: allocation.productId },
+            data: { quantityOnHand: { increment: unsold }, lastUpdated: new Date() } });
+          returnedItems.push({ productId: allocation.productId, productName: allocation.product.name, returnedQty: unsold });
         }
       }
+      const now = new Date();
+      await tx.event.update({ where: { id: eventId }, data: {
+        status: EventStatus.ENDED, reconciledAt: now,
+        ...(forceClose && event.endDatetime > now ? { endDatetime: now } : {}),
+      } });
+      return { reconciled: true, transitioned: true, status: EventStatus.ENDED, returnedItems };
     }
-
-    return updatedCount;
-  } catch (err) {
-    console.error('Error during reconcileAllExpiredEvents:', err);
-    return 0;
+    // Never reopen reconciled history, even if a stale caller requests a transition.
+    if (!event.reconciledAt && target !== event.status) {
+      await tx.event.update({ where: { id: eventId }, data: { status: target } });
+      return { reconciled: false, transitioned: true, status: target, returnedItems };
+    }
+    return { reconciled: false, transitioned: false, status: event.status, returnedItems };
+  });
+  if (result.transitioned) {
+    broadcast('event:updated', { eventId, action: result.status === 'ENDED' ? 'ended' : 'started' });
+    broadcast('inventory:updated', { eventId, action: 'event_lifecycle' });
   }
+  return result;
+}
+
+export async function reconcileAllExpiredEvents(): Promise<number> {
+  const events = await prisma.event.findMany({
+    where: { isDeleted: false, OR: [
+      { status: { in: [EventStatus.UPCOMING, EventStatus.ACTIVE] } }, { reconciledAt: null },
+    ] }, select: { id: true },
+  });
+  let count = 0;
+  for (const event of events) {
+    try {
+      const result = await reconcileSingleEvent(event.id);
+      if (result.transitioned || result.reconciled) count++;
+    } catch (error) {
+      console.error('Event lifecycle requires review:', event.id, error instanceof Error ? error.message : 'Unknown failure');
+    }
+  }
+  return count;
 }

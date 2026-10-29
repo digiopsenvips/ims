@@ -1,7 +1,8 @@
 import express from 'express';
 import http from 'http';
 import cors from 'cors';
-import { ENV } from './config/env';
+import { ENV, validateRuntimeConfiguration } from './config/env';
+import { corsOptions } from './config/http';
 import { initSockets } from './sockets';
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
@@ -23,13 +24,7 @@ const server = http.createServer(app);
 initSockets(server);
 
 // Middleware
-app.use(
-  cors({
-    origin: '*', // Local dev & preview
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Root Info Endpoint
@@ -74,14 +69,10 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 import { reconcileAllExpiredEvents } from './services/eventLifecycle';
-import { initializeDatabaseSequences } from './services/dbInit';
-
-// Synchronize database sequences before accepting connections
-initializeDatabaseSequences().catch(err =>
-  console.error('[Database] Startup sequence sync error:', err)
-);
-
-server.listen(ENV.PORT, () => {
+// Schema and sequence maintenance must be an explicitly reviewed operation, never startup work.
+export function startServer() {
+  validateRuntimeConfiguration();
+  return server.listen(ENV.PORT, () => {
   console.log(`🚀 Enactus IMS Backend running on http://localhost:${ENV.PORT}`);
   console.log(`📡 WebSocket server mounted and ready`);
 
@@ -107,4 +98,7 @@ server.listen(ENV.PORT, () => {
   );
 });
 
+}
+
+if (require.main === module) startServer();
 export { app, server };

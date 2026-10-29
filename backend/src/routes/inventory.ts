@@ -4,6 +4,8 @@ import { authenticateToken } from '../middleware/auth';
 import { requirePermission } from '../middleware/rbac';
 import { AuthenticatedRequest } from '../types';
 import { broadcast } from '../sockets';
+import { stockTransaction, StockConflict } from '../services/stock';
+import { positiveInteger, nonnegativeInteger } from '../services/payment';
 
 const router = Router();
 
@@ -115,18 +117,18 @@ router.post(
     }
 
     try {
+      const results = await stockTransaction(async tx => {
       const results = [];
-
       for (const item of items) {
         const { productId, quantity, notes } = item;
-        const qty = parseInt(quantity, 10);
+        const qty = positiveInteger(quantity, 'Intake quantity');
 
         if (!productId || isNaN(qty) || qty <= 0) {
-          continue;
+          throw new StockConflict('Every intake item needs a product and positive quantity.');
         }
 
         // Upsert inventory record
-        const updated = await prisma.inventory.upsert({
+        const updated = await tx.inventory.upsert({
           where: { productId },
           update: {
             quantityOnHand: { increment: qty },
@@ -148,6 +150,8 @@ router.post(
 
         results.push(updated);
       }
+      return results;
+      });
 
       // Broadcast inventory update via WebSocket
       broadcast('inventory:updated', {
@@ -176,23 +180,24 @@ router.put(
     const { productId } = req.params;
     const { quantityOnHand, notes } = req.body;
 
-    const qty = parseInt(quantityOnHand, 10);
-    if (isNaN(qty) || qty < 0) {
+    let qty: number;
+    try { qty = nonnegativeInteger(quantityOnHand, 'Stock quantity'); }
+    catch { res.status(400).json({ error: 'Stock quantity must be a non-negative whole number.' }); return; }
+    if (!Number.isSafeInteger(qty) || qty < 0) {
       res.status(400).json({ error: 'Valid quantityOnHand (>= 0) is required' });
       return;
     }
 
     try {
-      const updated = await prisma.inventory.update({
-        where: { productId },
-        data: {
-          quantityOnHand: qty,
-          notes: notes !== undefined ? notes.trim() : undefined,
-          lastUpdated: new Date(),
-        },
-        include: {
-          product: { include: { project: true } },
-        },
+      const expected = req.body.expectedQuantityOnHand;
+      if (!Number.isSafeInteger(expected) || expected < 0) throw new StockConflict('Refresh stock before applying a count adjustment.');
+      const updated = await stockTransaction(async tx => {
+        const result = await tx.inventory.updateMany({
+          where: { productId, quantityOnHand: expected },
+          data: { quantityOnHand: qty, notes: typeof notes === 'string' ? notes.trim() : undefined, lastUpdated: new Date() },
+        });
+        if (result.count !== 1) throw new StockConflict('Stock changed since this count was opened. Refresh and reconcile before retrying.');
+        return tx.inventory.findUnique({ where: { productId }, include: { product: { include: { project: true } } } });
       });
 
       broadcast('inventory:updated', {
@@ -204,7 +209,7 @@ router.put(
       res.json({ inventory: updated });
     } catch (error) {
       console.error('Adjust inventory error:', error);
-      res.status(500).json({ error: 'Failed to adjust inventory' });
+      res.status((error as any).status || 500).json({ error: (error as any).status ? (error as Error).message : 'Failed to adjust inventory' });
     }
   }
 );

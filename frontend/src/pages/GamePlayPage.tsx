@@ -3,6 +3,8 @@ import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { api } from '../lib/api';
+import { syncManager } from '../lib/sync';
+import { getAllQueuedSales, getOfflineSale } from '../lib/db';
 import { Game, AppEvent, PaymentMethod } from '../types';
 import {
   Gamepad2,
@@ -30,7 +32,7 @@ import {
 } from 'lucide-react';
 
 export const GamePlayPage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, isDeveloper, isAdmin } = useAuth();
   const { socket } = useSocket();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -84,12 +86,36 @@ export const GamePlayPage: React.FC = () => {
   const [recordedResult, setRecordedResult] = useState<'WIN' | 'LOSE' | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [pendingGameId, setPendingGameId] = useState<string | null>(null);
+  const pendingGameRef = useRef<string | null>(null);
 
   // Completed Receipt View
   const [completedReceipt, setCompletedReceipt] = useState<any | null>(null);
   const [copiedReceipt, setCopiedReceipt] = useState<boolean>(false);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  // Recover an unresolved play across reloads without issuing a new transaction key.
+  useEffect(() => {
+    let active = true;
+    const inspect = async () => {
+      const saved = pendingGameRef.current ? await getOfflineSale(pendingGameRef.current) : null;
+      if (!active) return;
+      if (saved?.syncStatus === 'committed' && saved.ownerUserId === user?.id &&
+          saved.eventId === selectedEventId && saved.gameId === selectedGameId) {
+        setCompletedReceipt(saved.acknowledgement?.receipt || null);
+        setPendingGameId(null); pendingGameRef.current = null; setErrorMessage(null); return;
+      }
+      const outstanding = (await getAllQueuedSales()).find(sale => sale.transactionType === 'GAME' &&
+        sale.ownerUserId === user?.id && sale.eventId === selectedEventId && sale.gameId === selectedGameId);
+      if (!active) return;
+      pendingGameRef.current = outstanding?.clientTxId || null; setPendingGameId(outstanding?.clientTxId || null);
+      if (outstanding) setErrorMessage(`Game operation ${outstanding.clientTxId} is preserved and awaiting confirmation or review. Do not issue the reward again.`);
+    };
+    void inspect().catch(() => {});
+    const unsubscribe = syncManager.subscribe(() => { void inspect().catch(() => {}); });
+    return () => { active = false; unsubscribe(); };
+  }, [selectedEventId, selectedGameId, user?.id]);
 
   // Load games and active events
   const loadInitialData = async () => {
@@ -272,14 +298,12 @@ export const GamePlayPage: React.FC = () => {
       setErrorMessage('This event has not started yet.');
       return;
     }
-    if (isSubmitting) return; // Prevent double click
+    if (isSubmitting || pendingGameId) return; // Preserve an unresolved play instead of submitting again
 
     setErrorMessage(null);
     setIsSubmitting(true);
 
     try {
-      const clientTxId = `game_tx_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-
       const payload = {
         gameId: currentGame.id,
         eventId: currentEvent.id,
@@ -289,13 +313,15 @@ export const GamePlayPage: React.FC = () => {
         upiAmount: paymentMethod === 'CASH_UPI' ? upiNum : paymentMethod === 'UPI' ? entryFee : 0,
         customerName: customerName.trim() || undefined,
         customerPhone: customerPhone.trim() || undefined,
-        clientTxId,
+        saleTime: new Date().toISOString(),
+        totalAmount: entryFee,
       };
 
-      const res = await api.post('/games/play', payload);
-
-      if (res?.receipt) {
-        setCompletedReceipt(res.receipt);
+      const result = await syncManager.recordGame(payload);
+      if (result.syncedImmediately && result.receipt) setCompletedReceipt(result.receipt);
+      else {
+        pendingGameRef.current = result.orderId; setPendingGameId(result.orderId);
+        setErrorMessage(`Game saved for confirmation (${result.orderId}). Do not issue or charge it again while confirmation is pending.`);
       }
     } catch (err: any) {
       console.error('Failed to issue reward:', err);
@@ -392,6 +418,7 @@ export const GamePlayPage: React.FC = () => {
             <ChevronLeft className="w-3.5 h-3.5" />
             <span>Back to POS</span>
           </Link>
+          {(isDeveloper || isAdmin) && (
           <Link
             to="/games"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 transition-colors cursor-pointer"
@@ -400,6 +427,7 @@ export const GamePlayPage: React.FC = () => {
             <Layers className="w-3.5 h-3.5" />
             <span>Manage Games</span>
           </Link>
+          )}
         </div>
       </div>
 
@@ -480,7 +508,7 @@ export const GamePlayPage: React.FC = () => {
               ) : (
                 <>
                   <Copy className="w-4 h-4 text-slate-500" />
-                  <span>Share WhatsApp Receipt</span>
+                  <span>Copy Receipt</span>
                 </>
               )}
             </button>
@@ -1015,7 +1043,7 @@ export const GamePlayPage: React.FC = () => {
                   type="button"
                   onClick={handleIssueReward}
                   disabled={
-                    isSubmitting ||
+                    isSubmitting || Boolean(pendingGameId) ||
                     !recordedResult ||
                     isRewardOutOfStock ||
                     !isSplitValid ||

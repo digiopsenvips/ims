@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, Role } from '../types';
-import { api } from '../lib/api';
+import { api, ApiError } from '../lib/api';
 
 interface AuthContextType {
   user: User | null;
@@ -22,7 +22,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('enactus_ims_user');
-    return saved ? JSON.parse(saved) : null;
+    try { return saved ? JSON.parse(saved) : null; } catch { return null; }
   });
   const [token, setToken] = useState<string | null>(() => {
     return localStorage.getItem('enactus_ims_token');
@@ -45,8 +45,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           localStorage.setItem('enactus_ims_user', JSON.stringify(data.user));
         }
       } catch (e) {
-        console.warn('Session verification failed, clearing auth:', e);
-        logout();
+        if (e instanceof ApiError && (e.status === 401 || e.status === 403)) logout();
+        else console.warn('Session could not be checked. Offline operations remain preserved.');
       } finally {
         setIsLoading(false);
       }

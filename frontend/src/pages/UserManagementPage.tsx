@@ -520,7 +520,8 @@ export const UserManagementPage: React.FC = () => {
                               <button
                                 onClick={() => setDeleteTargetUser(u)}
                                 className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                                title={`Delete account @${u.username}`}
+                                disabled
+                                title="Accounts are preserved. Retirement requires an approved workflow."
                                 aria-label={`Delete account @${u.username}`}
                               >
                                 <Trash2 className="w-4 h-4" />

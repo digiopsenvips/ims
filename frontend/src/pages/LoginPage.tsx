@@ -72,7 +72,7 @@ export const LoginPage: React.FC = () => {
 
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label htmlFor="ims-login-username" className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                 Username or Email
               </label>
               <div className="relative">
@@ -80,6 +80,8 @@ export const LoginPage: React.FC = () => {
                   <UserIcon className="w-4 h-4" />
                 </div>
                 <input
+                  id="ims-login-username"
+                  autoComplete="username"
                   type="text"
                   value={username}
                   onChange={e => setUsername(e.target.value)}
@@ -91,7 +93,7 @@ export const LoginPage: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label htmlFor="ims-login-password" className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                 Password
               </label>
               <div className="relative">
@@ -99,6 +101,8 @@ export const LoginPage: React.FC = () => {
                   <KeyRound className="w-4 h-4" />
                 </div>
                 <input
+                  id="ims-login-password"
+                  autoComplete="current-password"
                   type="password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}

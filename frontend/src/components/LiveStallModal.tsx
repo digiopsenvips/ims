@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -56,6 +56,7 @@ export const LiveStallModal: React.FC<LiveStallModalProps> = ({
   const { user, isDeveloper, isAdmin, isHead, hasPermission } = useAuth();
 
   const [eventsList, setEventsList] = useState<AppEvent[]>([]);
+  const requestRef = useRef(0);
   const [selectedEventId, setSelectedEventId] = useState<string>('');
   const [stallDetails, setStallDetails] = useState<AppEvent | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -67,25 +68,28 @@ export const LiveStallModal: React.FC<LiveStallModalProps> = ({
     details?: string;
   } | null>(null);
 
-  const canManage = isDeveloper || isAdmin || isHead || hasPermission('edit_events');
+  const canManage = isDeveloper || isAdmin || hasPermission('edit_events');
   const canViewRevenue =
-    isDeveloper || isAdmin || isHead || hasPermission('view_sales_revenue') || hasPermission('view_event_breakdown');
+    isDeveloper || isAdmin || hasPermission('view_revenue');
 
   // Load events and detailed stall info
   const loadStallData = useCallback(async () => {
     if (!isOpen) return;
+    const requestId = ++requestRef.current;
     setIsLoading(true);
     setStatusMessage(null);
     setConfirmClose(false);
 
     try {
       const res = await api.get<any>('/events');
+      if (requestId !== requestRef.current) return;
       const allEvents: AppEvent[] = Array.isArray(res) ? res : res?.events || [];
       setEventsList(allEvents);
 
       // Determine current target event ID
       const targetId =
         selectedEventId ||
+        initialEventId ||
         activeEvent?.id ||
         allEvents.find(e => e.status === 'ACTIVE')?.id ||
         allEvents[0]?.id ||
@@ -95,7 +99,7 @@ export const LiveStallModal: React.FC<LiveStallModalProps> = ({
         setSelectedEventId(targetId);
         const detailRes = await api.get<any>(`/events/${targetId}`);
         const eventData = detailRes?.event || detailRes;
-        setStallDetails(eventData);
+        if (requestId === requestRef.current) setStallDetails(eventData);
       } else {
         setStallDetails(null);
       }
@@ -123,6 +127,7 @@ export const LiveStallModal: React.FC<LiveStallModalProps> = ({
 
   // Handle switching selected stall in dropdown
   const handleSelectEvent = async (eventId: string) => {
+    const requestId = ++requestRef.current;
     setSelectedEventId(eventId);
     setIsLoading(true);
     setStatusMessage(null);
@@ -130,14 +135,14 @@ export const LiveStallModal: React.FC<LiveStallModalProps> = ({
     try {
       const detailRes = await api.get<any>(`/events/${eventId}`);
       const eventData = detailRes?.event || detailRes;
-      setStallDetails(eventData);
+      if (requestId === requestRef.current) setStallDetails(eventData);
     } catch (err: any) {
       setStatusMessage({
         type: 'error',
         text: err?.message || 'Failed to fetch selected stall details.',
       });
     } finally {
-      setIsLoading(false);
+      if (requestId === requestRef.current) setIsLoading(false);
     }
   };
 

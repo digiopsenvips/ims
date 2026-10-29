@@ -17,22 +17,8 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// Activate Event - Clean up all outdated caches immediately
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) {
-            console.log('[SW] Removing old cache:', key);
-            return caches.delete(key);
-          }
-        })
-      );
-    })
-  );
-  self.clients.claim();
-});
+// Preserve existing caches; retiring old assets is a separate reviewed maintenance task.
+self.addEventListener('activate', event => { event.waitUntil(self.clients.claim()); });
 
 // Fetch Event - Network-First Strategy for fresh code with offline fallback
 self.addEventListener('fetch', (event) => {

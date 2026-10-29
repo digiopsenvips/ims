@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { useAuth } from './AuthContext';
 
 interface SocketContextType {
   socket: Socket | null;
@@ -12,13 +13,16 @@ const SocketContext = createContext<SocketContextType>({
 });
 
 export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { token } = useAuth();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState<boolean>(false);
 
   useEffect(() => {
+    if (!token) { setSocket(null); setIsConnected(false); return; }
     const socketUrl = import.meta.env.VITE_SOCKET_URL || window.location.origin;
     const socketInstance = io(socketUrl, {
       transports: ['websocket', 'polling'],
+      auth: { token },
       autoConnect: true,
       reconnectionAttempts: 10,
     });
@@ -36,7 +40,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => {
       socketInstance.disconnect();
     };
-  }, []);
+  }, [token]);
 
   return (
     <SocketContext.Provider value={{ socket, isConnected }}>

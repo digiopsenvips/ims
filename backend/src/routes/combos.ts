@@ -1,3 +1,6 @@
+import { eventAvailability } from '../services/availability';
+import { stockTransaction } from '../services/stock';
+import { responsePolicy } from '../middleware/responsePolicy';
 import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { authenticateToken } from '../middleware/auth';
@@ -7,6 +10,7 @@ import { Role, ComboType, ComboStatus, Prisma } from '@prisma/client';
 import { broadcast } from '../sockets';
 
 const router = Router();
+router.use(responsePolicy);
 
 // GET /api/combos: List all combos with filtering and live pricing/stock calculation
 router.get(
@@ -83,18 +87,24 @@ router.get(
         orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
       });
 
+      const eventStocks = new Map<string, Awaited<ReturnType<typeof eventAvailability>>>();
+      const contextIds = new Set(combos.map(combo => typeof eventId === 'string' ? eventId : combo.eventId).filter((id): id is string => Boolean(id)));
+      for (const id of contextIds) eventStocks.set(id, await eventAvailability(id));
+
       // Enrich combos with live normal price, savings, and stock status
       const enriched = combos.map(combo => {
+        const contextId = typeof eventId === 'string' ? eventId : combo.eventId;
+        const context = contextId ? eventStocks.get(contextId) : undefined;
         let normalValue = 0;
         let isOutOfStock = false;
         let minAvailableStock = Infinity;
 
         const enrichedItems = combo.items.map(item => {
           const product = item.product;
-          let unitPrice = Number(product.basePrice || 0);
+          let unitPrice = context?.get(item.productId)?.price ?? Number(product.basePrice || 0);
 
           // If combo is tied to an event, check event allocation price
-          if (combo.event) {
+          if (combo.event && !contextId) {
             const alloc = combo.event.allocations.find(a => a.productId === item.productId);
             if (alloc) {
               unitPrice = Number(alloc.priceAtEvent);
@@ -105,7 +115,8 @@ router.get(
             normalValue += unitPrice * item.quantity;
           }
 
-          const stock = product.inventory?.quantityOnHand ?? 0;
+          const stock = product.isArchived || product.isDeleted ? 0
+            : contextId ? context?.get(item.productId)?.stock ?? 0 : product.inventory?.quantityOnHand ?? 0;
           if (item.quantity > 0) {
             const possibleCombos = Math.floor(stock / item.quantity);
             if (possibleCombos < minAvailableStock) {
@@ -135,7 +146,10 @@ router.get(
         const comboPrice = Number(combo.price);
         const savings = Math.max(0, normalValue - comboPrice);
         const savingsPercent = normalValue > 0 ? Math.round((savings / normalValue) * 100) : 0;
-        const availableStock = minAvailableStock === Infinity ? 0 : minAvailableStock;
+        const pickPool = combo.items.length > 0 ? enrichedItems.reduce((sum, item) => sum + item.availableStock, 0)
+          : [...(context?.values() || [])].filter(item => !combo.projectId || item.projectId === combo.projectId).reduce((sum, item) => sum + item.stock, 0);
+        const availableStock = combo.comboType === 'PICK_ANY' ? Math.floor(pickPool / Math.max(1, combo.minItems || 1))
+          : minAvailableStock === Infinity ? 0 : minAvailableStock;
 
         return {
           id: combo.id,
@@ -157,7 +171,7 @@ router.get(
           items: enrichedItems,
           totalComponentUnits: enrichedItems.reduce((sum, i) => sum + i.quantity, 0),
           availableStock,
-          isOutOfStock: isOutOfStock || availableStock <= 0,
+          isOutOfStock: combo.comboType === 'PICK_ANY' ? availableStock <= 0 : isOutOfStock || availableStock <= 0,
           salesCount: combo.sales.length,
           revenueGenerated: combo.sales.reduce((sum, s) => sum + Number(s.totalAmount), 0),
           createdAt: combo.createdAt,
@@ -215,14 +229,16 @@ router.get(
         return;
       }
 
+      const contextId = typeof req.query.eventId === 'string' ? req.query.eventId : combo.eventId;
+      const context = contextId ? await eventAvailability(contextId) : undefined;
       let normalValue = 0;
       let minAvailableStock = Infinity;
 
       const enrichedItems = combo.items.map(item => {
         const product = item.product;
-        let unitPrice = Number(product.basePrice || 0);
+        let unitPrice = context?.get(item.productId)?.price ?? Number(product.basePrice || 0);
 
-        if (combo.event) {
+        if (combo.event && !contextId) {
           const alloc = combo.event.allocations.find(a => a.productId === item.productId);
           if (alloc) {
             unitPrice = Number(alloc.priceAtEvent);
@@ -233,7 +249,8 @@ router.get(
           normalValue += unitPrice * item.quantity;
         }
 
-        const stock = product.inventory?.quantityOnHand ?? 0;
+        const stock = product.isArchived || product.isDeleted ? 0
+            : contextId ? context?.get(item.productId)?.stock ?? 0 : product.inventory?.quantityOnHand ?? 0;
         if (item.quantity > 0) {
           const possibleCombos = Math.floor(stock / item.quantity);
           if (possibleCombos < minAvailableStock) {
@@ -259,7 +276,10 @@ router.get(
       const comboPrice = Number(combo.price);
       const savings = Math.max(0, normalValue - comboPrice);
       const savingsPercent = normalValue > 0 ? Math.round((savings / normalValue) * 100) : 0;
-      const availableStock = minAvailableStock === Infinity ? 0 : minAvailableStock;
+      const pickPool = combo.items.length > 0 ? enrichedItems.reduce((sum, item) => sum + item.availableStock, 0)
+          : [...(context?.values() || [])].filter(item => !combo.projectId || item.projectId === combo.projectId).reduce((sum, item) => sum + item.stock, 0);
+        const availableStock = combo.comboType === 'PICK_ANY' ? Math.floor(pickPool / Math.max(1, combo.minItems || 1))
+          : minAvailableStock === Infinity ? 0 : minAvailableStock;
 
       res.json({
         combo: {
@@ -370,7 +390,7 @@ router.post(
       }
 
       // Create combo in transaction
-      const newCombo = await prisma.$transaction(async tx => {
+      const newCombo = await stockTransaction(async tx => {
         const created = await tx.combo.create({
           data: {
             name: name.trim(),
@@ -500,7 +520,7 @@ router.put(
         updateData.freeItemsCount = parseInt(String(freeItemsCount), 10) || 0;
       }
 
-      const updatedCombo = await prisma.$transaction(async tx => {
+      const updatedCombo = await stockTransaction(async tx => {
         // If items were sent, update components
         if (Array.isArray(items) && items.length > 0) {
           await tx.comboItem.deleteMany({ where: { comboId: id } });
@@ -576,10 +596,10 @@ router.patch(
         return;
       }
 
-      const updated = await prisma.combo.update({
+      const updated = await stockTransaction(tx => tx.combo.update({
         where: { id },
         data: { status: status as ComboStatus },
-      });
+      }));
 
       broadcast('combo:status_changed', { id: updated.id, status: updated.status });
 
@@ -603,13 +623,13 @@ router.patch(
     try {
       const { id } = req.params;
 
-      const updated = await prisma.combo.update({
+      const updated = await stockTransaction(tx => tx.combo.update({
         where: { id },
         data: {
           isArchived: true,
           status: ComboStatus.INACTIVE,
         },
-      });
+      }));
 
       broadcast('combo:archived', { id: updated.id });
 
@@ -630,48 +650,12 @@ router.delete(
   authenticateToken,
   requireRoles(Role.DEVELOPER, Role.ADMIN),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      const { id } = req.params;
-
-      const combo = await prisma.combo.findUnique({
-        where: { id },
-        include: {
-          sales: { select: { id: true } },
-        },
-      });
-
-      if (!combo) {
-        res.status(404).json({ error: 'Combo not found' });
-        return;
-      }
-
-      // If combo has sales history, do NOT delete - archive instead!
-      if (combo.sales.length > 0) {
-        await prisma.combo.update({
-          where: { id },
-          data: {
-            isArchived: true,
-            status: ComboStatus.INACTIVE,
-          },
-        });
-
-        res.json({
-          message: `Combo "${combo.name}" has ${combo.sales.length} historical sales records and cannot be permanently deleted. It has been archived instead.`,
-          archived: true,
-        });
-        return;
-      }
-
-      // If never used, delete
-      await prisma.combo.delete({ where: { id } });
-      broadcast('combo:deleted', { id });
-
-      res.json({ message: `Combo "${combo.name}" deleted successfully.` });
-    } catch (error: any) {
-      console.error('Delete combo error:', error);
-      res.status(500).json({ error: error.message || 'Failed to delete combo' });
+      try {
+        await stockTransaction(tx => tx.combo.update({ where: { id: req.params.id }, data: { isArchived: true, status: 'INACTIVE' } }));
+        broadcast('combo:updated', { action: 'retired' });
+        res.json({ retired: true, message: 'Retired for future use. Existing records and history are preserved.' });
+      } catch { res.status(400).json({ error: 'Unable to retire record. No history was deleted.' }); }
     }
-  }
 );
 
 export default router;

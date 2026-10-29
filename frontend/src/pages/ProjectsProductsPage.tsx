@@ -466,10 +466,11 @@ export const ProjectsProductsPage: React.FC = () => {
                 <button
                   onClick={() => {
                     const proj = projects.find(p => p.id === selectedProjectId);
-                    if (proj) setProjectToDelete(proj);
+                    if (proj) setStatusMessage({ type: 'error', text: 'Projects and their history are preserved. Retirement requires review.' });
                   }}
                   className="px-2.5 py-1.5 text-xs font-semibold rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                  title={`Delete ${projects.find(p => p.id === selectedProjectId)?.name} project`}
+                  disabled
+                  title="Projects and their history are preserved."
                 >
                   <Trash2 className="w-3 h-3" />
                   <span>Delete</span>
@@ -659,7 +660,7 @@ export const ProjectsProductsPage: React.FC = () => {
                         <button
                           onClick={() => setProductToDelete(prod)}
                           className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                          title="Delete product"
+                          title="Retire product while preserving history"
                           aria-label={`Delete ${prod.name}`}
                         >
                           <Trash2 className="w-3.5 h-3.5" />

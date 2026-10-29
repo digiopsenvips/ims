@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { syncManager, SyncState } from '../lib/sync';
-import { getAllQueuedSales, clearFailedOfflineSales } from '../lib/db';
+import { getAllQueuedSales } from '../lib/db';
 import { QueuedSale } from '../types';
 import {
   Wifi,
@@ -9,7 +9,7 @@ import {
   CheckCircle2,
   AlertCircle,
   X,
-  Trash2,
+  Download,
   Clock,
   ShoppingBag,
   RotateCcw,
@@ -74,24 +74,14 @@ export const SyncIndicator: React.FC = () => {
     setTimeout(() => setActionMessage(null), 3000);
   };
 
-  const handleDiscardSale = async (clientTxId: string) => {
-    if (window.confirm('Are you sure you want to discard this offline transaction? This cannot be undone.')) {
-      await syncManager.discardSale(clientTxId);
-      await loadQueue();
-      setActionMessage('Transaction removed from local storage');
-      setTimeout(() => setActionMessage(null), 3000);
-    }
+  const exportPreserved = (sales: QueuedSale[]) => {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(sales, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a'); link.href = url; link.download = 'ims-preserved-operations.json'; link.click();
+    URL.revokeObjectURL(url);
+    setActionMessage('Exported a copy for reconciliation. All original operations remain on this device.');
   };
-
-  const handleClearAllFailed = async () => {
-    if (window.confirm('Are you sure you want to clear all failed sync records? Legitimate un-synced sales should be retried instead.')) {
-      await clearFailedOfflineSales();
-      await syncManager.refreshCount();
-      await loadQueue();
-      setActionMessage('Cleared failed transactions');
-      setTimeout(() => setActionMessage(null), 3000);
-    }
-  };
+  const handleDiscardSale = async (id: string) => exportPreserved(queuedSales.filter(sale => sale.clientTxId === id));
+  const handleClearAllFailed = async () => exportPreserved(queuedSales);
 
   return (
     <>
@@ -146,7 +136,7 @@ export const SyncIndicator: React.FC = () => {
           <button
             onClick={handleOpenModal}
             className="flex items-center gap-1 px-2 py-0.5 text-slate-500 hover:text-slate-700 text-[11px] rounded transition-colors"
-            title="All local data synchronized. Click to inspect sync history."
+            title="Inspect unresolved operations. Committed acknowledgements are retained."
           >
             <CheckCircle2 className="w-3 h-3 text-emerald-500" />
             <span className="hidden sm:inline">Synced</span>
@@ -227,10 +217,10 @@ export const SyncIndicator: React.FC = () => {
                     <button
                       onClick={handleClearAllFailed}
                       className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-50 text-slate-600 border border-slate-200 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 transition-colors"
-                      title="Clear failed entries"
+                      title="Export preserved entries without deleting them"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Discard Failed
+                      <Download className="w-3.5 h-3.5" />
+                      Export for Review
                     </button>
                   </>
                 )}
@@ -257,14 +247,14 @@ export const SyncIndicator: React.FC = () => {
                   <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3">
                     <CheckCircle2 className="w-6 h-6" />
                   </div>
-                  <h4 className="text-sm font-bold text-slate-800">Queue is completely synchronized</h4>
+                  <h4 className="text-sm font-bold text-slate-800">No unresolved operations</h4>
                   <p className="text-xs text-slate-500 max-w-sm mt-1">
-                    All offline transactions have been safely processed and recorded in the database.
+                    There are no unresolved operations in this view. Backend acknowledgements remain stored on this device.
                   </p>
                 </div>
               ) : (
                 queuedSales.map(tx => {
-                  const isFailed = tx.syncStatus === 'failed';
+                  const isFailed = ['failed', 'rejected', 'conflict'].includes(tx.syncStatus);
                   const dateStr = tx.saleTime ? new Date(tx.saleTime).toLocaleString() : new Date(tx.queuedAt).toLocaleString();
 
                   return (
@@ -286,7 +276,7 @@ export const SyncIndicator: React.FC = () => {
                                   : 'bg-amber-100 text-amber-800 border border-amber-300'
                               }`}
                             >
-                              {isFailed ? 'Sync Error' : 'Pending Upload'}
+                              {isFailed ? 'Review Required' : 'Pending Confirmation'}
                             </span>
                             <span className="text-xs text-slate-400 font-mono">
                               #{tx.clientTxId.slice(0, 8)}
@@ -345,9 +335,9 @@ export const SyncIndicator: React.FC = () => {
                           <button
                             onClick={() => handleDiscardSale(tx.clientTxId)}
                             className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg border border-transparent hover:border-rose-200 transition-colors"
-                            title="Discard this transaction"
+                            title="Export preserved transaction"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Download className="w-4 h-4" />
                           </button>
                         </div>
                       </div>

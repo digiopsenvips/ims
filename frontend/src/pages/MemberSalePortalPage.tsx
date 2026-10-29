@@ -4,7 +4,9 @@ import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { api } from '../lib/api';
 import { syncManager } from '../lib/sync';
-import { cacheEvents, getCachedEvents } from '../lib/db';
+import { cacheEvents, getCachedEvents, getAllQueuedSales } from '../lib/db';
+import { withUnconfirmedStock } from '../lib/offline-stock';
+import { selectedEventId as resolveEventId } from '../lib/event-context';
 import { AppEvent, EventAllocation, PaymentMethod, CartItem, Combo, ComboType } from '../types';
 import {
   Receipt,
@@ -43,6 +45,7 @@ export const MemberSalePortalPage: React.FC = () => {
   const storageKey = user?.id ? `enactus_ims_pos_event_${user.id}` : 'enactus_ims_pos_event_guest';
 
   const [events, setEvents] = useState<AppEvent[]>([]);
+  const eventRequestRef = useRef(0);
   // Initialize from URL search param if present, then user-scoped localStorage fallback
   const [selectedEventId, setSelectedEventId] = useState<string>(() => {
     const urlEvent = searchParams.get('eventId');
@@ -64,6 +67,7 @@ export const MemberSalePortalPage: React.FC = () => {
 
   // Synchronize URL search params whenever event selection is updated
   const handleSelectEvent = useCallback((eventId: string) => {
+    eventRequestRef.current++;
     setSelectedEventId(eventId);
     selectedEventIdRef.current = eventId;
     try {
@@ -129,19 +133,6 @@ export const MemberSalePortalPage: React.FC = () => {
   const [showReceiptModal, setShowReceiptModal] = useState<boolean>(false);
   const [copiedReceipt, setCopiedReceipt] = useState<boolean>(false);
 
-  // Purge any outdated SW cache on mount to guarantee fresh POS UI
-  useEffect(() => {
-    if ('caches' in window) {
-      caches.keys().then(keys => {
-        keys.forEach(k => {
-          if (k !== 'enactus-ims-cache-v3') {
-            caches.delete(k);
-          }
-        });
-      });
-    }
-  }, []);
-
   // Keyboard navigation shortcuts: '/' to search, 'Escape' to clear, 'u'/'c'/'s' for payment modes
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -172,51 +163,22 @@ export const MemberSalePortalPage: React.FC = () => {
 
   // Resolve target event ID without ever clobbering an already valid event selection
   const resolveAuthoritativeEventId = useCallback((eventList: AppEvent[]): string => {
-    if (!eventList || eventList.length === 0) return '';
-
-    // 1. Explicit URL query parameter has top priority
-    const urlEvent = searchParams.get('eventId');
-    if (urlEvent && eventList.some(e => e.id === urlEvent)) {
-      return urlEvent;
-    }
-
-    // 2. Currently selected event in state/ref — preserve if valid!
-    const currentSelected = selectedEventIdRef.current;
-    if (currentSelected && eventList.some(e => e.id === currentSelected)) {
-      return currentSelected;
-    }
-
-    // 3. User-scoped persisted event in localStorage
-    try {
-      const saved = localStorage.getItem(storageKey);
-      if (saved && eventList.some(e => e.id === saved)) {
-        return saved;
-      }
-    } catch {
-      // Storage unavailable
-    }
-
-    // 4. Default to first active non-expired event only if no selection exists
-    const now = Date.now();
-    const active =
-      eventList.find(
-        (e: AppEvent) => e.status === 'ACTIVE' && now < new Date(e.endDatetime).getTime()
-      ) ||
-      eventList.find(
-        (e: AppEvent) => e.status !== 'ENDED' && now < new Date(e.endDatetime).getTime()
-      ) ||
-      eventList[0];
-
-    return active?.id || '';
+    let saved: string | null = null;
+    try { saved = localStorage.getItem(storageKey); } catch {}
+    return resolveEventId(eventList, searchParams.get('eventId'), selectedEventIdRef.current, saved);
   }, [searchParams, storageKey]);
 
   // Load events (from network or offline cache)
   const fetchEvents = useCallback(async () => {
+    const requestId = ++eventRequestRef.current;
     try {
       const data = await api.get('/events');
+      if (requestId !== eventRequestRef.current) return;
       if (data && Array.isArray(data.events)) {
-        setEvents(data.events);
+        const unresolved = await getAllQueuedSales();
         await cacheEvents(data.events);
+        if (requestId !== eventRequestRef.current) return;
+        setEvents(withUnconfirmedStock(data.events, unresolved));
 
         const targetId = resolveAuthoritativeEventId(data.events);
         if (targetId) {
@@ -240,8 +202,11 @@ export const MemberSalePortalPage: React.FC = () => {
     } catch (err) {
       console.warn('Network error loading events, checking offline cache:', err);
       const cached = await getCachedEvents();
+      if (requestId !== eventRequestRef.current) return;
       if (cached && cached.length > 0) {
-        setEvents(cached);
+        const unresolved = await getAllQueuedSales();
+        if (requestId !== eventRequestRef.current) return;
+        setEvents(withUnconfirmedStock(cached, unresolved));
         const targetId = resolveAuthoritativeEventId(cached);
         if (targetId && selectedEventIdRef.current !== targetId) {
           setSelectedEventId(targetId);
@@ -260,6 +225,7 @@ export const MemberSalePortalPage: React.FC = () => {
         ? `/combos?eventId=${activeId}&status=ACTIVE`
         : '/combos?status=ACTIVE';
       const data = await api.get(url);
+      if (activeId !== selectedEventIdRef.current) return;
       if (data && Array.isArray(data.combos)) {
         setCombos(data.combos);
       }
@@ -327,6 +293,8 @@ export const MemberSalePortalPage: React.FC = () => {
       socket.off('combo:sold', handleComboUpdate);
     };
   }, [socket]);
+
+  useEffect(() => syncManager.subscribe(() => { void fetchEventsRef.current(); }), []);
 
   // Current selected event object
   const currentEvent = events.find(e => e.id === selectedEventId);
@@ -876,6 +844,11 @@ export const MemberSalePortalPage: React.FC = () => {
       }
     }
 
+    if (cart.length > 1 && cart.some(item => item.isCombo)) {
+      setErrorMessage('Please record each combo bundle as a separate bill. Mixed combo bills need a verified pricing/history workflow before they can be submitted safely.');
+      return;
+    }
+
     setIsSubmitting(true);
     setErrorMessage(null);
 
@@ -954,64 +927,14 @@ export const MemberSalePortalPage: React.FC = () => {
       let resolvedSaleId: number | undefined;
       let isSynced = false;
 
-      const isOnline = syncManager.getStatus().isOnline && navigator.onLine;
+      // Every operation is durable before the first network request, even while online.
+      const result = await syncManager.recordOrder(orderPayload);
+      resolvedReceiptNumber = result.receiptNumber;
+      resolvedSaleId = result.saleId;
+      isSynced = result.syncedImmediately;
 
-      if (isOnline) {
-        // Direct authoritative write to trusted backend
-        const salePayload = {
-          eventId: selectedEventId,
-          paymentMethod,
-          cashAmount: paymentMethod === 'CASH_UPI' ? cashNum : paymentMethod === 'CASH' ? totalAmount : 0,
-          upiAmount: paymentMethod === 'CASH_UPI' ? upiNum : paymentMethod === 'UPI' ? totalAmount : 0,
-          customerName: customerName.trim() || undefined,
-          customerPhone: customerPhone.trim() || undefined,
-          comboId: targetComboId,
-          comboName: targetComboName,
-          comboQuantity: targetComboQuantity,
-          transactionType: isSingleComboOrder ? 'COMBO' : 'SALE',
-          clientTxId: crypto.randomUUID(),
-          saleTime,
-          items: orderItems,
-        };
-
-        const response = await api.post('/sales', salePayload);
-        if (response && response.sale) {
-          resolvedReceiptNumber = response.sale.receiptNumber;
-          resolvedSaleId = response.sale.id;
-          isSynced = true;
-        } else {
-          throw new Error('Server returned invalid response');
-        }
-      } else {
-        // Truly offline: queue in IndexedDB for subsequent background sync
-        const result = await syncManager.recordOrder(orderPayload);
-        resolvedReceiptNumber = result.receiptNumber;
-        resolvedSaleId = result.saleId;
-        isSynced = result.syncedImmediately;
-      }
-
-      // Optimistically decrement local remaining count in events for every physical component deducted
-      if (currentEvent) {
-        setEvents(prevEvents =>
-          prevEvents.map(evt => {
-            if (evt.id !== selectedEventId) return evt;
-            return {
-              ...evt,
-              allocations: evt.allocations.map(alloc => {
-                const totalDeducted = orderItems
-                  .filter(oi => oi.productId === alloc.productId)
-                  .reduce((sum, oi) => sum + oi.quantity, 0);
-                if (totalDeducted === 0) return alloc;
-                return {
-                  ...alloc,
-                  remainingQty: Math.max(0, alloc.remainingQty - totalDeducted),
-                  soldQty: alloc.soldQty + totalDeducted,
-                };
-              }),
-            };
-          })
-        );
-      }
+      // Refresh using server consumption plus preserved, unconfirmed local obligations.
+      void fetchEvents();
 
       const canonicalReceiptLabel = resolvedReceiptNumber
         ? `#${resolvedReceiptNumber}`
@@ -1158,7 +1081,7 @@ export const MemberSalePortalPage: React.FC = () => {
               <div className="text-xs font-bold text-emerald-950 flex items-center gap-2">
                 <span>✓ Sale Recorded ({lastCompletedBill.billNo})</span>
                 <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100/60 px-1.5 py-0.2 rounded">
-                  {lastCompletedBill.syncedImmediately ? 'Synced Online' : 'Saved to Offline Queue'}
+                  {lastCompletedBill.syncedImmediately ? 'Synced Online' : 'Pending Backend Confirmation'}
                 </span>
               </div>
               <div className="text-xs text-emerald-800 font-medium mt-0.5">
@@ -1674,14 +1597,14 @@ export const MemberSalePortalPage: React.FC = () => {
                               ) : item.remainingQty <= 5 ? (
                                 <span
                                   className="text-amber-700 font-bold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/80"
-                                  title={`Stall Allocation: ${item.allocatedQty} | Sold: ${item.soldQty || 0} | Remaining at Stall: ${item.remainingQty}`}
+                                  title={`Stall Allocation: ${item.allocatedQty} | Sold: ${item.soldQty || 0} | Pending on device: ${item.pendingQty || 0} | Available here: ${item.remainingQty}`}
                                 >
                                   {item.remainingQty} at stall
                                 </span>
                               ) : (
                                 <span
                                   className="text-slate-500 font-medium"
-                                  title={`Stall Allocation: ${item.allocatedQty} | Sold: ${item.soldQty || 0} | Remaining at Stall: ${item.remainingQty}`}
+                                  title={`Stall Allocation: ${item.allocatedQty} | Sold: ${item.soldQty || 0} | Pending on device: ${item.pendingQty || 0} | Available here: ${item.remainingQty}`}
                                 >
                                   {item.remainingQty} at stall
                                 </span>
@@ -2105,7 +2028,7 @@ export const MemberSalePortalPage: React.FC = () => {
               </div>
               <h3 className="text-sm font-bold text-slate-900">Sale Receipt</h3>
               <p className="text-[11px] text-slate-500">
-                {lastCompletedBill.syncedImmediately ? '✓ Synced to database' : '✓ Saved to offline queue'}
+                {lastCompletedBill.syncedImmediately ? '✓ Synced to database' : 'Saved locally; awaiting backend confirmation'}
               </p>
             </div>
 

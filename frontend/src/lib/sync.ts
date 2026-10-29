@@ -1,275 +1,111 @@
-import { api } from './api';
-import {
-  getPendingSales,
-  getPendingSalesCount,
-  getFailedSalesCount,
-  updateOfflineSaleStatus,
-  removeSyncedSales,
-  queueOfflineSale,
-  deleteOfflineSale,
-  retryFailedOfflineSales,
-} from './db';
+import { api, ApiError } from './api';
+import { getPendingSales, getPendingSalesCount, getFailedSalesCount, updateOfflineSaleStatus,
+  acknowledgeOfflineSale, queueOfflineSale, retryFailedOfflineSales, getOfflineSale } from './db';
 import { QueuedSale } from '../types';
 
-export interface SyncState {
-  isOnline: boolean;
-  pendingCount: number;
-  failedCount: number;
-  isSyncing: boolean;
-}
-
+export interface SyncState { isOnline: boolean; pendingCount: number; failedCount: number; isSyncing: boolean; }
 type SyncListener = (state: SyncState) => void;
-
+function currentOwner(): string | null {
+  try { return JSON.parse(localStorage.getItem('enactus_ims_user') || 'null')?.id || null; } catch { return null; }
+}
 class SyncManager {
-  private isOnline: boolean = typeof navigator !== 'undefined' ? navigator.onLine : true;
-  private isSyncing: boolean = false;
-  private pendingCount: number = 0;
-  private failedCount: number = 0;
-  private listeners: Set<SyncListener> = new Set();
-  private intervalId: any = null;
-
+  private state: SyncState = { isOnline: typeof navigator !== 'undefined' && navigator.onLine, pendingCount: 0, failedCount: 0, isSyncing: false };
+  private listeners = new Set<SyncListener>();
+  private processing = new Map<string, Promise<void>>();
+  private syncing: Promise<void> | null = null;
   constructor() {
     if (typeof window !== 'undefined') {
-      window.addEventListener('online', () => {
-        this.isOnline = true;
-        this.notify();
-        this.triggerSync();
-      });
-
-      window.addEventListener('offline', () => {
-        this.isOnline = false;
-        this.notify();
-      });
-
-      // Periodic check every 15 seconds
-      this.intervalId = setInterval(() => {
-        if (this.isOnline && !this.isSyncing) {
-          this.triggerSync();
-        }
-      }, 15000);
-
-      // Initial count refresh
-      this.refreshCount();
+      window.addEventListener('online', () => { this.state.isOnline = true; this.notify(); void this.triggerSync(); });
+      window.addEventListener('offline', () => { this.state.isOnline = false; this.notify(); });
+      setInterval(() => { if (this.state.isOnline) void this.triggerSync(); }, 15000);
+      void this.refreshCount();
     }
   }
-
-  public subscribe(listener: SyncListener) {
-    this.listeners.add(listener);
-    listener({
-      isOnline: this.isOnline,
-      pendingCount: this.pendingCount,
-      failedCount: this.failedCount,
-      isSyncing: this.isSyncing,
-    });
-    return () => this.listeners.delete(listener);
+  subscribe(listener: SyncListener) { this.listeners.add(listener); listener(this.getStatus()); return () => { this.listeners.delete(listener); }; }
+  private notify() { for (const listener of this.listeners) listener(this.getStatus()); }
+  getStatus(): SyncState { return { ...this.state }; }
+  async refreshCount() {
+    try { this.state.pendingCount = await getPendingSalesCount(); this.state.failedCount = await getFailedSalesCount(); }
+    catch (error) { console.error('Unable to read preserved sync state:', error); }
+    this.notify(); return { pending: this.state.pendingCount, failed: this.state.failedCount };
   }
-
-  private notify() {
-    for (const listener of this.listeners) {
-      listener({
-        isOnline: this.isOnline,
-        pendingCount: this.pendingCount,
-        failedCount: this.failedCount,
-        isSyncing: this.isSyncing,
-      });
-    }
-  }
-
-  public async refreshCount(): Promise<{ pending: number; failed: number }> {
-    try {
-      this.pendingCount = await getPendingSalesCount();
-      this.failedCount = await getFailedSalesCount();
-      this.notify();
-      return { pending: this.pendingCount, failed: this.failedCount };
-    } catch (e) {
-      console.error('Failed to get pending/failed sales count:', e);
-      return { pending: 0, failed: 0 };
-    }
-  }
-
-  public async recordSale(saleData: Omit<QueuedSale, 'clientTxId' | 'queuedAt' | 'syncStatus'>): Promise<{ clientTxId: string; syncedImmediately: boolean }> {
-    const clientTxId = crypto.randomUUID();
-    const queuedSale: QueuedSale = {
-      ...saleData,
-      clientTxId,
-      queuedAt: Date.now(),
-      syncStatus: 'pending',
-    };
-
-    // 1. Write to local IndexedDB immediately
-    await queueOfflineSale(queuedSale);
-    await this.refreshCount();
-
-    // 2. If online, attempt instant sync
-    let syncedImmediately = false;
-    if (this.isOnline) {
-      try {
-        const res = await api.post('/sales/sync', { sales: [queuedSale] });
-        if (res?.results?.[0]?.status === 'success' || res?.results?.[0]?.status === 'already_synced') {
-          await removeSyncedSales([clientTxId]);
-          syncedImmediately = true;
-          await this.refreshCount();
-        } else if (res?.results?.[0]?.status === 'failed') {
-          await updateOfflineSaleStatus(clientTxId, 'failed', res.results[0].error || 'Validation failed');
-          await this.refreshCount();
-        }
-      } catch (err) {
-        console.warn('Instant sync attempt failed, queued in IndexedDB for retry:', err);
+  private async sendOperation(sale: QueuedSale): Promise<void> {
+    const existing = this.processing.get(sale.clientTxId); if (existing) return existing;
+    const work = (async () => {
+      const saved = await getOfflineSale(sale.clientTxId);
+      if (!saved || saved.syncStatus === 'committed') return;
+      if (sale.ownerUserId && sale.ownerUserId !== currentOwner()) return;
+      if (!sale.ownerUserId) {
+        await updateOfflineSaleStatus(sale.clientTxId, 'conflict', 'Original seller is missing or differs from this login. Preserved for review; not replayed.'); return;
       }
-    }
-
-    return { clientTxId, syncedImmediately };
-  }
-
-  public async recordOrder(orderData: {
-    eventId: string;
-    eventName?: string;
-    paymentMethod: any;
-    cashAmount?: number;
-    upiAmount?: number;
-    customerName?: string;
-    customerPhone?: string;
-    saleTime: string;
-    comboId?: string;
-    comboName?: string;
-    comboQuantity?: number;
-    transactionType?: any;
-    items: Array<{
-      productId: string;
-      productName: string;
-      quantity: number;
-      unitPrice: number;
-      totalAmount: number;
-    }>;
-  }): Promise<{ orderId: string; syncedImmediately: boolean; count: number; saleId?: number; receiptNumber?: number }> {
-    const orderId = crypto.randomUUID();
-    const totalUnits = orderData.items.reduce((sum, i) => sum + i.quantity, 0);
-    const totalAmount = orderData.items.reduce((sum, i) => sum + i.totalAmount, 0);
-
-    const queuedTransaction: QueuedSale = {
-      clientTxId: orderId,
-      eventId: orderData.eventId,
-      eventName: orderData.eventName,
-      paymentMethod: orderData.paymentMethod,
-      cashAmount: orderData.cashAmount,
-      upiAmount: orderData.upiAmount,
-      customerName: orderData.customerName,
-      customerPhone: orderData.customerPhone,
-      comboId: orderData.comboId,
-      comboName: orderData.comboName,
-      comboQuantity: orderData.comboQuantity,
-      transactionType: orderData.transactionType,
-      saleTime: orderData.saleTime,
-      totalUnits,
-      totalAmount,
-      items: orderData.items.map(item => ({
-        productId: item.productId,
-        productName: item.productName,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        lineTotal: item.totalAmount,
-      })),
-      queuedAt: Date.now(),
-      syncStatus: 'pending',
-    };
-
-    // 1. Write the transaction to local IndexedDB immediately
-    await queueOfflineSale(queuedTransaction);
-    await this.refreshCount();
-
-    // 2. If online, attempt instant sync for the entire transaction
-    let syncedImmediately = false;
-    let syncedSaleId: number | undefined;
-    let syncedReceiptNumber: number | undefined;
-
-    if (this.isOnline) {
+      if (!this.state.isOnline || !localStorage.getItem('enactus_ims_token')) return;
+      await updateOfflineSaleStatus(sale.clientTxId, 'processing');
       try {
-        const res = await api.post('/sales/sync', { transactions: [queuedTransaction] });
-        if (res && Array.isArray(res.results)) {
-          const match = res.results.find((r: any) => r.clientTxId === orderId);
-          if (match && (match.status === 'success' || match.status === 'already_synced')) {
-            await removeSyncedSales([orderId]);
-            syncedImmediately = true;
-            syncedSaleId = match.saleId;
-            syncedReceiptNumber = match.receiptNumber;
-            await this.refreshCount();
-          } else if (match && match.status === 'failed') {
-            await updateOfflineSaleStatus(orderId, 'failed', match.error || 'Validation failed');
-            await this.refreshCount();
+        if (sale.transactionType === 'GAME') {
+          const response = await api.post('/games/play', sale);
+          if (!response?.receipt?.receiptNumber || !response?.saleId) throw new Error('Unconfirmed game response');
+          await acknowledgeOfflineSale(sale.clientTxId, { saleId: response.saleId, receiptNumber: response.receipt.receiptNumber, receipt: response.receipt });
+        } else {
+          const response = await api.post('/sales/sync', { transactions: [sale] });
+          const results = response?.results?.filter((r: any) => r.clientTxId === sale.clientTxId);
+          if (!Array.isArray(results) || results.length !== 1) {
+            await updateOfflineSaleStatus(sale.clientTxId, 'conflict', 'Ambiguous backend acknowledgement. Preserved for reconciliation.'); return;
+          }
+          const result = results[0];
+          if (result.status === 'success' || result.status === 'already_synced') {
+            await acknowledgeOfflineSale(sale.clientTxId, { saleId: result.saleId, receiptNumber: result.receiptNumber });
+          } else {
+            await updateOfflineSaleStatus(sale.clientTxId, result.status === 'conflict' ? 'conflict' : result.status === 'failed' ? 'rejected' : 'pending', result.error);
           }
         }
-      } catch (err) {
-        console.warn('Instant order sync attempt failed, queued in IndexedDB for retry:', err);
+      } catch (error) {
+        // A network/5xx error can follow a commit. Keep the same key for reconciliation/retry.
+        const status = error instanceof ApiError && error.status === 409 ? 'conflict'
+          : error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 401 && error.status !== 403 ? 'rejected' : 'pending';
+        await updateOfflineSaleStatus(sale.clientTxId, status, error instanceof Error ? error.message : 'Unconfirmed operation; retained.');
       }
-    }
-
-    return {
-      orderId,
-      syncedImmediately,
-      count: 1,
-      saleId: syncedSaleId,
-      receiptNumber: syncedReceiptNumber,
+    })();
+    this.processing.set(sale.clientTxId, work);
+    try { await work; } finally { this.processing.delete(sale.clientTxId); await this.refreshCount(); }
+  }
+  private async save(payload: Omit<QueuedSale, 'clientTxId' | 'queuedAt' | 'syncStatus'>) {
+    const ownerUserId = currentOwner(); if (!ownerUserId) throw new Error('Sign in before recording a transaction.');
+    const sale: QueuedSale = { ...payload, ownerUserId, clientTxId: crypto.randomUUID(), queuedAt: Date.now(), syncStatus: 'pending' };
+    // Durability precedes every network request, including an online transaction.
+    await queueOfflineSale(sale); await this.refreshCount();
+    await this.sendOperation(sale);
+    const saved = await getOfflineSale(sale.clientTxId);
+    if (saved?.syncStatus === 'rejected' || saved?.syncStatus === 'conflict') throw new Error(`${saved.errorMessage || 'Transaction needs review.'} Reference: ${sale.clientTxId}`);
+    return { orderId: sale.clientTxId, clientTxId: sale.clientTxId, syncedImmediately: saved?.syncStatus === 'committed', count: 1,
+      saleId: saved?.acknowledgement?.saleId, receiptNumber: saved?.acknowledgement?.receiptNumber, receipt: saved?.acknowledgement?.receipt };
+  }
+  async recordSale(payload: Omit<QueuedSale, 'clientTxId' | 'queuedAt' | 'syncStatus'>) { return this.save(payload); }
+  async recordOrder(order: {
+    eventId: string; eventName?: string; paymentMethod: any; cashAmount?: number; upiAmount?: number;
+    customerName?: string; customerPhone?: string; saleTime: string; comboId?: string; comboName?: string;
+    comboQuantity?: number; transactionType?: any;
+    items: Array<{ productId: string; productName: string; quantity: number; unitPrice: number; totalAmount: number }>;
+  }) {
+    return this.save({ ...order, totalUnits: order.items.reduce((sum, item) => sum + item.quantity, 0),
+      totalAmount: Number(order.items.reduce((sum, item) => sum + item.totalAmount, 0).toFixed(2)),
+      items: order.items.map(item => ({ productId: item.productId, productName: item.productName,
+        quantity: item.quantity, unitPrice: item.unitPrice, lineTotal: item.totalAmount })) });
+  }
+  async recordGame(payload: Omit<QueuedSale, 'clientTxId' | 'queuedAt' | 'syncStatus'>) { return this.save({ ...payload, transactionType: 'GAME' }); }
+  triggerSync(): Promise<void> {
+    if (this.syncing) return this.syncing;
+    const run = async () => {
+      if (!this.state.isOnline || !currentOwner() || !localStorage.getItem('enactus_ims_token')) return;
+      this.state.isSyncing = true; this.notify();
+      try { for (const sale of await getPendingSales()) await this.sendOperation(sale); }
+      catch (error) { console.error('Sync stopped; operations retained:', error); }
+      finally { this.state.isSyncing = false; await this.refreshCount(); }
     };
+    const syncing = Promise.resolve(typeof navigator !== 'undefined' && navigator.locks
+      ? navigator.locks.request('enactus-ims-sync', run) : run()).then(() => {}).finally(() => { this.syncing = null; });
+    this.syncing = syncing;
+    return syncing;
   }
-
-  public async triggerSync(): Promise<void> {
-    if (!this.isOnline || this.isSyncing) return;
-
-    try {
-      const pending = await getPendingSales();
-      if (pending.length === 0) {
-        await this.refreshCount();
-        return;
-      }
-
-      this.isSyncing = true;
-      this.notify();
-
-      const response = await api.post('/sales/sync', { transactions: pending });
-
-      if (response && Array.isArray(response.results)) {
-        const successfulIds: string[] = [];
-        for (const res of response.results) {
-          if (res.status === 'success' || res.status === 'already_synced') {
-            successfulIds.push(res.clientTxId);
-          } else if (res.status === 'failed') {
-            await updateOfflineSaleStatus(res.clientTxId, 'failed', res.error || 'Server rejected transaction');
-          }
-        }
-
-        if (successfulIds.length > 0) {
-          await removeSyncedSales(successfulIds);
-        }
-      }
-
-      await this.refreshCount();
-    } catch (error) {
-      console.error('Background sync failed:', error);
-    } finally {
-      this.isSyncing = false;
-      this.notify();
-    }
-  }
-
-  public async retryAllFailed(): Promise<void> {
-    await retryFailedOfflineSales();
-    await this.refreshCount();
-    await this.triggerSync();
-  }
-
-  public async discardSale(clientTxId: string): Promise<void> {
-    await deleteOfflineSale(clientTxId);
-    await this.refreshCount();
-  }
-
-  public getStatus(): SyncState {
-    return {
-      isOnline: this.isOnline,
-      pendingCount: this.pendingCount,
-      failedCount: this.failedCount,
-      isSyncing: this.isSyncing,
-    };
-  }
+  async retryAllFailed() { await retryFailedOfflineSales(currentOwner() || undefined); await this.triggerSync(); }
 }
-
 export const syncManager = new SyncManager();

@@ -1,3 +1,5 @@
+import { businessDateRange, businessDay } from '../services/reportDates';
+import { responsePolicy } from '../middleware/responsePolicy';
 import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { authenticateToken } from '../middleware/auth';
@@ -6,6 +8,7 @@ import { AuthenticatedRequest } from '../types';
 import { Role } from '@prisma/client';
 
 const router = Router();
+router.use(responsePolicy);
 
 // GET /api/analytics/dashboard: Comprehensive analytics data with permissions enforcement
 router.get(
@@ -35,19 +38,17 @@ router.get(
         whereClause.OR = [
           { product: { projectId: String(projectId) } },
           { items: { some: { product: { projectId: String(projectId) } } } },
+          { game: { projectId: String(projectId) } },
         ];
       }
-      if (startDate || endDate) {
-        whereClause.saleTime = {};
-        if (startDate) whereClause.saleTime.gte = new Date(String(startDate));
-        if (endDate) whereClause.saleTime.lte = new Date(String(endDate));
-      }
+      if (startDate || endDate) whereClause.saleTime = businessDateRange(startDate, endDate);
 
       // Fetch all matched sales with items, product, and event details
       const sales = await prisma.sale.findMany({
         where: whereClause,
         include: {
           event: true,
+          game: { include: { project: true } },
           product: {
             include: {
               project: true,
@@ -98,75 +99,43 @@ router.get(
       const dateMap: Record<string, { date: string; units: number; revenue: number }> = {};
 
       for (const s of sales) {
-        totalRevenue += Number(s.totalAmount);
-
-        const lineItems = (s.items && s.items.length > 0)
-          ? s.items.map(item => ({
-              productId: item.productId,
-              productName: item.product.name,
-              projectName: item.product.project.name,
-              quantity: item.quantity,
-              revenue: Number(item.lineTotal),
-            }))
-          : s.product
-          ? [{
-              productId: s.productId!,
-              productName: s.product.name,
-              projectName: s.product.project.name,
-              quantity: s.quantity || 1,
-              revenue: Number(s.totalAmount),
-            }]
-          : [];
-
-        for (const item of lineItems) {
-          totalUnitsSold += item.quantity;
-          const pId = item.productId;
-          const pName = item.productName;
-          const prjName = item.projectName;
-          const rev = item.revenue;
-
-          // Product
-          if (!productMap[pId]) {
-            productMap[pId] = { name: pName, project: prjName, units: 0, revenue: 0 };
-          }
-          productMap[pId].units += item.quantity;
-          productMap[pId].revenue += rev;
-
-          // Project
-          if (!projectMap[prjName]) {
-            projectMap[prjName] = { name: prjName, units: 0, revenue: 0 };
-          }
-          projectMap[prjName].units += item.quantity;
-          projectMap[prjName].revenue += rev;
-
-          // Event
+        const isGame = s.transactionType === 'GAME';
+        const lineItems = s.items.length > 0
+          ? s.items.map(item => ({ productId: item.productId, productName: item.product.name,
+              projectId: item.product.projectId, projectName: item.product.project.name,
+              quantity: item.quantity, revenue: Number(item.lineTotal) }))
+          : s.product ? [{ productId: s.productId!, productName: s.product.name,
+              projectId: s.product.projectId, projectName: s.product.project.name,
+              quantity: s.quantity || 0, revenue: Number(s.totalAmount) }] : [];
+        const selectedItems = projectId ? lineItems.filter(item => item.projectId === String(projectId)) : lineItems;
+        if (isGame && projectId && s.game?.projectId !== String(projectId)) continue;
+        const revenue = !projectId || isGame ? Number(s.totalAmount) : selectedItems.reduce((sum, item) => sum + item.revenue, 0);
+        const units = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
+        totalRevenue += revenue; totalUnitsSold += units;
+        // Fees are counted once per sale, even for a no-reward game loss.
+        const date = businessDay(s.saleTime);
+        if (!dateMap[date]) dateMap[date] = { date, units: 0, revenue: 0 };
+        dateMap[date].units += units; dateMap[date].revenue += revenue;
+        if (canViewEventBreakdown) {
+          if (!eventMap[s.eventId]) eventMap[s.eventId] = { eventId: s.eventId, eventName: s.event.name,
+            totalUnits: 0, totalRevenue: 0, productUnits: {} };
+          eventMap[s.eventId].totalUnits += units; eventMap[s.eventId].totalRevenue += revenue;
+        }
+        for (const item of selectedItems) {
+          if (!productMap[item.productId]) productMap[item.productId] = { name: item.productName, project: item.projectName, units: 0, revenue: 0 };
+          productMap[item.productId].units += item.quantity; productMap[item.productId].revenue += item.revenue;
+          if (!projectMap[item.projectName]) projectMap[item.projectName] = { name: item.projectName, units: 0, revenue: 0 };
+          projectMap[item.projectName].units += item.quantity; projectMap[item.projectName].revenue += item.revenue;
           if (canViewEventBreakdown) {
-            const eId = s.eventId;
-            const eName = s.event.name;
-            if (!eventMap[eId]) {
-              eventMap[eId] = {
-                eventId: eId,
-                eventName: eName,
-                totalUnits: 0,
-                totalRevenue: 0,
-                productUnits: {},
-              };
-            }
-            eventMap[eId].totalUnits += item.quantity;
-            eventMap[eId].totalRevenue += rev;
-            if (!eventMap[eId].productUnits[pId]) {
-              eventMap[eId].productUnits[pId] = { name: pName, count: 0 };
-            }
-            eventMap[eId].productUnits[pId].count += item.quantity;
+            const products = eventMap[s.eventId].productUnits;
+            if (!products[item.productId]) products[item.productId] = { name: item.productName, count: 0 };
+            products[item.productId].count += item.quantity;
           }
-
-          // Time trend (YYYY-MM-DD)
-          const dateKey = s.saleTime.toISOString().split('T')[0];
-          if (!dateMap[dateKey]) {
-            dateMap[dateKey] = { date: dateKey, units: 0, revenue: 0 };
-          }
-          dateMap[dateKey].units += item.quantity;
-          dateMap[dateKey].revenue += rev;
+        }
+        if (isGame) {
+          const project = s.game?.project?.name || 'Unassigned games';
+          if (!projectMap[project]) projectMap[project] = { name: project, units: 0, revenue: 0 };
+          projectMap[project].revenue += revenue;
         }
       }
 
@@ -213,11 +182,9 @@ router.get(
       // Fetch Game Sessions for game analytics
       const gameSessionWhere: any = { status: 'COMPLETED' };
       if (eventId) gameSessionWhere.eventId = String(eventId);
-      if (startDate || endDate) {
-        gameSessionWhere.createdAt = {};
-        if (startDate) gameSessionWhere.createdAt.gte = new Date(String(startDate));
-        if (endDate) gameSessionWhere.createdAt.lte = new Date(String(endDate));
-      }
+      if (startDate || endDate) gameSessionWhere.createdAt = businessDateRange(startDate, endDate);
+      if (projectId) gameSessionWhere.game = { projectId: String(projectId) };
+      if (memberId) gameSessionWhere.OR = [{ sellerId: String(memberId) }, { sale: { sellerUserIdAtSale: String(memberId) } }];
 
       const gameSessions = await prisma.gameSession.findMany({
         where: gameSessionWhere,

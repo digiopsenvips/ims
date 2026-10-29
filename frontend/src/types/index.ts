@@ -71,6 +71,7 @@ export interface Inventory {
 }
 
 export interface EventAllocation {
+  pendingQty?: number;
   id: string;
   productId: string;
   productName: string;
@@ -215,6 +216,12 @@ export interface QueuedSaleItem {
 }
 
 export interface QueuedTransaction {
+  ownerUserId?: string;
+  gameId?: string;
+  result?: GameResult;
+  acknowledgement?: { saleId: number; receiptNumber: number; receipt?: any };
+  errorMessage?: string;
+  lastAttemptAt?: number;
   clientTxId: string;
   receiptNumber?: number;
   eventId: string;
@@ -237,7 +244,7 @@ export interface QueuedTransaction {
   transactionType?: TransactionType;
   saleTime: string;
   queuedAt: number;
-  syncStatus: 'pending' | 'syncing' | 'failed';
+  syncStatus: 'pending' | 'processing' | 'committed' | 'rejected' | 'conflict' | 'syncing' | 'failed';
 }
 
 export type QueuedSale = QueuedTransaction;

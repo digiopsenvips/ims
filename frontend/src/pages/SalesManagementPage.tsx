@@ -208,7 +208,7 @@ export const SalesManagementPage: React.FC = () => {
       setIsLoading(false);
       setIsFetching(false);
     }
-  }, [currentPage, pageSize, activeTab, selectedEventId, paymentFilter, searchFromUrl]);
+  }, [currentPage, pageSize, activeTab, selectedEventId, paymentFilter, transactionFilter, searchFromUrl]);
 
   // Initial load: Fetch events list
   useEffect(() => {
@@ -836,7 +836,8 @@ export const SalesManagementPage: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => handleOpenEdit(sale)}
-                              title="Edit Sale Record"
+                              disabled
+                              title="Historical records are preserved; corrections require reconciliation."
                               className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors cursor-pointer"
                             >
                               <Pencil className="w-3.5 h-3.5" />
@@ -844,7 +845,8 @@ export const SalesManagementPage: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => handleDeleteSale(sale)}
-                              title="Delete Sale Record"
+                              disabled
+                              title="Historical sales cannot be deleted."
                               className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
                             >
                               <Trash2 className="w-3.5 h-3.5" />

@@ -1,3 +1,6 @@
+import { stockTransaction } from '../services/stock';
+import { responsePolicy } from '../middleware/responsePolicy';
+import { broadcast } from '../sockets';
 import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { authenticateToken } from '../middleware/auth';
@@ -6,6 +9,7 @@ import { AuthenticatedRequest } from '../types';
 import { Role } from '@prisma/client';
 
 const router = Router();
+router.use(responsePolicy);
 
 // GET /api/products: List all products with project and inventory
 router.get(
@@ -81,14 +85,14 @@ router.put(
         updateData.isArchived = req.body.isArchived;
       }
 
-      const updated = await prisma.product.update({
+      const updated = await stockTransaction(tx => tx.product.update({
         where: { id },
         data: updateData,
         include: {
           project: true,
           inventory: true,
         },
-      });
+      }));
 
       res.json({ product: updated, message: `Product '${updated.name}' updated successfully` });
     } catch (error) {
@@ -104,47 +108,12 @@ router.delete(
   authenticateToken,
   requireRoles(Role.DEVELOPER, Role.ADMIN),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const { id } = req.params;
-
-    try {
-      const product = await prisma.product.findUnique({
-        where: { id },
-        include: {
-          sales: { select: { id: true } },
-          saleItems: { select: { id: true } },
-          allocations: { select: { id: true } },
-        },
-      });
-
-      if (!product) {
-        res.status(404).json({ error: 'Product not found' });
-        return;
-      }
-
-      // If the product has historical sales or line items, NEVER DELETE IT. Safely retire it.
-      if (product.sales.length > 0 || product.saleItems.length > 0 || product.allocations.length > 0) {
-        await prisma.product.update({
-          where: { id },
-          data: { isArchived: true },
-        });
-
-        res.json({
-          message: `Product '${product.name}' (${product.id}) has historical transactions and cannot be deleted. It has been safely RETIRED.`,
-          retired: true,
-        });
-        return;
-      }
-
-      // If truly no historical dependencies exist, remove empty inventory and product
-      await prisma.inventory.deleteMany({ where: { productId: id } });
-      await prisma.product.delete({ where: { id } });
-
-      res.json({ message: `Product '${product.name}' deleted successfully` });
-    } catch (error) {
-      console.error('Delete product error:', error);
-      res.status(500).json({ error: 'Failed to delete product' });
+      try {
+        await stockTransaction(tx => tx.product.update({ where: { id: req.params.id }, data: { isArchived: true } }));
+        broadcast('inventory:updated', { action: 'retired' });
+        res.json({ retired: true, message: 'Retired for future use. Existing records and history are preserved.' });
+      } catch { res.status(400).json({ error: 'Unable to retire record. No history was deleted.' }); }
     }
-  }
 );
 
 export default router;

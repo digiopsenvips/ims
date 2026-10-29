@@ -70,8 +70,12 @@ export const EventDetailsPage: React.FC = () => {
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Tab State
-  const validTabs = ['overview', 'combos', 'games', 'products', 'sales', 'analytics'];
-  const activeTab = searchParams.get('tab') || 'overview';
+  const canViewRevenue = isDeveloper || isAdmin || hasPermission('view_revenue');
+  const canViewLedger = isDeveloper || isAdmin || hasPermission('view_event_breakdown');
+  const validTabs = ['overview', 'combos', 'games', 'products', ...(canViewLedger ? ['sales', 'analytics'] : [])];
+  const requestedTab = searchParams.get('tab') || 'overview';
+  const activeTab = validTabs.includes(requestedTab) ? requestedTab : 'overview';
+  const revenueLabel = (value: number) => canViewRevenue ? `₹${value.toLocaleString('en-IN')}` : 'Restricted';
   const setTab = (t: string) => {
     setSearchParams({ tab: t });
   };
@@ -107,7 +111,7 @@ export const EventDetailsPage: React.FC = () => {
   const [isEndingEvent, setIsEndingEvent] = useState(false);
   const [isOpeningStall, setIsOpeningStall] = useState(false);
 
-  const canManage = isDeveloper || isAdmin || isHead || hasPermission('edit_events');
+  const canManage = isDeveloper || isAdmin || hasPermission('edit_events');
   const canManageCombos = isDeveloper || isAdmin;
 
   const fetchEventData = async () => {
@@ -512,7 +516,7 @@ export const EventDetailsPage: React.FC = () => {
             { id: 'products', label: `Products (${event.allocations?.length || 0})`, icon: Package },
             { id: 'sales', label: `Sales (${eventSales.length})`, icon: ReceiptText },
             { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-          ].map(tab => (
+          ].filter(tab => validTabs.includes(tab.id)).map(tab => (
             <button
               key={tab.id}
               onClick={() => setTab(tab.id)}
@@ -542,11 +546,11 @@ export const EventDetailsPage: React.FC = () => {
                 Total Stall Revenue
               </div>
               <div className="text-2xl font-black text-emerald-700 mt-1">
-                ₹{summary.totalRevenue.toLocaleString('en-IN')}
+                {revenueLabel(summary.totalRevenue)}
               </div>
               <div className="text-xs text-slate-500 mt-1.5 space-y-0.5">
-                <div>🛍️ Products: <strong>₹{summary.productRevenue.toLocaleString('en-IN')}</strong></div>
-                <div>🎮 Games: <strong>₹{summary.gameRevenue.toLocaleString('en-IN')}</strong></div>
+                <div>🛍️ Products: <strong>{revenueLabel(summary.productRevenue)}</strong></div>
+                <div>🎮 Games: <strong>{revenueLabel(summary.gameRevenue)}</strong></div>
               </div>
             </div>
 
@@ -722,7 +726,7 @@ export const EventDetailsPage: React.FC = () => {
 
               {eventSales.length === 0 ? (
                 <div className="p-8 text-center bg-slate-50 rounded-xl text-xs text-slate-400">
-                  No transactions recorded at this stall yet.
+                  {canViewLedger ? 'No transactions recorded at this stall yet.' : 'Transaction history is restricted for this role.'}
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -752,7 +756,7 @@ export const EventDetailsPage: React.FC = () => {
                         </div>
 
                         <div className="text-right font-black text-slate-900">
-                          ₹{Number(s.totalAmount).toFixed(2)}
+                          {revenueLabel(Number(s.totalAmount))}
                         </div>
                       </div>
                     );
@@ -1300,7 +1304,7 @@ export const EventDetailsPage: React.FC = () => {
                 <div>
                   <div className="flex justify-between text-xs font-bold text-slate-700 mb-1">
                     <span>🛍️ Product Sales</span>
-                    <span>₹{summary.productRevenue.toLocaleString('en-IN')}</span>
+                    <span>{revenueLabel(summary.productRevenue)}</span>
                   </div>
                   <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                     <div
@@ -1315,7 +1319,7 @@ export const EventDetailsPage: React.FC = () => {
                 <div>
                   <div className="flex justify-between text-xs font-bold text-slate-700 mb-1">
                     <span>🎮 Game Sessions</span>
-                    <span>₹{summary.gameRevenue.toLocaleString('en-IN')}</span>
+                    <span>{revenueLabel(summary.gameRevenue)}</span>
                   </div>
                   <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                     <div
