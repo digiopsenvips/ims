@@ -64,11 +64,11 @@ router.get(
   }
 );
 
-// POST /api/users: DEVELOPER ONLY (Admin cannot create new login accounts)
+// POST /api/users: Accessible by Developer and Admin (Admin cannot create Developer accounts)
 router.post(
   '/',
   authenticateToken,
-  requireRoles(Role.DEVELOPER),
+  requireRoles(Role.DEVELOPER, Role.ADMIN),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { name, username, email, password, role, permissions } = req.body;
 
@@ -77,9 +77,21 @@ router.post(
       return;
     }
 
+    if (typeof password !== 'string' || password.length < 6) {
+      res.status(400).json({ error: 'Password must be at least 6 characters long' });
+      return;
+    }
+
     const normalizedRole = role.toUpperCase() as Role;
     if (!Object.values(Role).includes(normalizedRole)) {
       res.status(400).json({ error: 'Invalid role specified' });
+      return;
+    }
+
+    // Role hierarchy & privilege escalation guard:
+    // Admin users cannot create Developer accounts
+    if (req.user?.role === Role.ADMIN && normalizedRole === Role.DEVELOPER) {
+      res.status(403).json({ error: 'Admin users are not authorized to create Developer accounts' });
       return;
     }
 
@@ -125,7 +137,21 @@ router.post(
 
       const created = await prisma.user.findUnique({
         where: { id: newUser.id },
-        include: { permissions: true },
+        select: {
+          id: true,
+          name: true,
+          username: true,
+          email: true,
+          role: true,
+          createdAt: true,
+          updatedAt: true,
+          permissions: {
+            select: {
+              permissionKey: true,
+              allowed: true,
+            },
+          },
+        },
       });
 
       res.status(201).json({

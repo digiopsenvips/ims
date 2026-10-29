@@ -93,7 +93,7 @@ const PERMISSION_GROUPS: PermissionGroup[] = [
 const ALL_PERMISSIONS = PERMISSION_GROUPS.flatMap(g => g.items);
 
 export const UserManagementPage: React.FC = () => {
-  const { user: currentUser, isDeveloper } = useAuth();
+  const { user: currentUser, isDeveloper, isAdmin } = useAuth();
 
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -301,12 +301,14 @@ export const UserManagementPage: React.FC = () => {
             <p className="text-xs text-slate-500 mt-0.5">
               {isDeveloper
                 ? 'Developer administration: manage accounts, credentials, and configure granular role-based permissions.'
+                : isAdmin
+                ? 'Admin administration: create and view user accounts across Admin, Head, and Member roles.'
                 : 'User accounts and permission profiles across Member, Head, and Admin roles.'}
             </p>
           </div>
         </div>
 
-        {isDeveloper && (
+        {(isDeveloper || isAdmin) && (
           <button
             onClick={() => setShowCreateModal(true)}
             className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors cursor-pointer self-start sm:self-auto"
@@ -626,6 +628,7 @@ export const UserManagementPage: React.FC = () => {
                 <input
                   type="password"
                   required
+                  minLength={6}
                   placeholder="Minimum 6 characters"
                   value={createPassword}
                   onChange={e => setCreatePassword(e.target.value)}
