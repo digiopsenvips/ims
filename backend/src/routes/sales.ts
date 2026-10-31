@@ -11,7 +11,7 @@ import { broadcast } from '../sockets';
 import { PaymentMethod, Role, Prisma, TransactionType, EventStatus } from '@prisma/client';
 import { computeEventStatus } from '../services/eventLifecycle';
 import { stockTransaction, assertAllocatedStock, StockConflict } from '../services/stock';
-import { paymentAmounts, paymentMethod as normalizePaymentMethod, validateOperation, moneyCents } from '../services/payment';
+import { paymentAmounts, paymentMethod as normalizePaymentMethod, validateOperation, moneyCents, InputError } from '../services/payment';
 import { existingSaleAcknowledgement } from '../services/idempotency';
 import { whatsappService } from '../services/whatsappService';
 

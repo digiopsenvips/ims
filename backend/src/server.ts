@@ -43,6 +43,8 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     app: 'Enactus VIPS-TC Inventory & Sales Management System',
+    version: '1.0.1',
+    hotfix: 'unified-pos-game-fix',
     timestamp: new Date().toISOString(),
   });
 });
