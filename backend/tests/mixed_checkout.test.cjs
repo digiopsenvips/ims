@@ -55,6 +55,7 @@ before(async () => {
   app.use('/api/sales', source('routes/sales.ts').default);
   app.use('/api/combos', source('routes/combos.ts').default);
   app.use('/api/analytics', source('routes/analytics.ts').default);
+  app.use('/api/events', source('routes/events.ts').default);
   server = app.listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -817,4 +818,104 @@ test('Test 31: Sales list, status filtering, and analytics exclude cancelled sal
   assert.equal(analyticsRes.status, 200);
   assert.equal(analyticsRes.data.overview.totalRevenue, 200);
   assert.equal(analyticsRes.data.overview.totalUnitsSold, 1);
+});
+
+test('Test 32: Edit event allocations & pricing when warehouse stock is 0 and items are sold', async () => {
+  const f = await setupShopFixture();
+
+  // Create a product with 0 warehouse stock
+  const tag = randomUUID();
+  const prodTray0 = await prisma.product.create({
+    data: {
+      id: 'tray0_' + tag,
+      name: 'Textured Glass Snack Tray Zero',
+      projectId: f.project.id,
+      basePrice: 600,
+      inventory: { create: { quantityOnHand: 0 } } // 0 in warehouse!
+    }
+  });
+
+  // Allocate 1 unit to event
+  await prisma.eventAllocation.create({
+    data: {
+      eventId: f.event.id,
+      productId: prodTray0.id,
+      allocatedQty: 1,
+      priceAtEvent: 600,
+    }
+  });
+
+  // Record a sale of 1 unit at the event (so soldQty = 1)
+  const saleRes = await request(f, 'POST', '/api/sales', {
+    clientTxId: randomUUID(),
+    eventId: f.event.id,
+    ownerUserId: f.user.id,
+    paymentMethod: 'CASH',
+    totalAmount: 600,
+    lines: [{ type: 'NORMAL_PRODUCT', productId: prodTray0.id, quantity: 1, unitPrice: 600, lineTotal: 600 }]
+  });
+  assert.equal(saleRes.status, 201);
+
+  // 1. Edit event with same allocation (1) and adjusted price (₹550) - warehouse stock is 0
+  // MUST SUCCEED (200), not fail due to 0 warehouse stock!
+  const updateRes1 = await request(f, 'PUT', `/api/events/${f.event.id}`, {
+    name: f.event.name,
+    location: f.event.location,
+    startDatetime: f.event.startDatetime.toISOString(),
+    endDatetime: f.event.endDatetime.toISOString(),
+    status: f.event.status,
+    allocations: [
+      { productId: prodTray0.id, allocatedQty: 1, priceAtEvent: 550 }
+    ]
+  });
+  assert.equal(updateRes1.status, 200, 'Updating event price with 0 warehouse stock should succeed');
+
+  // Verify price updated
+  const updatedAlloc = await prisma.eventAllocation.findFirst({
+    where: { eventId: f.event.id, productId: prodTray0.id }
+  });
+  assert.equal(Number(updatedAlloc.priceAtEvent), 550);
+  assert.equal(updatedAlloc.allocatedQty, 1);
+
+  // 2. Attempt to reduce allocation below soldQty (e.g. 0 when 1 sold) - MUST BE REJECTED
+  const updateRes2 = await request(f, 'PUT', `/api/events/${f.event.id}`, {
+    name: f.event.name,
+    location: f.event.location,
+    startDatetime: f.event.startDatetime.toISOString(),
+    endDatetime: f.event.endDatetime.toISOString(),
+    status: f.event.status,
+    allocations: [
+      { productId: prodTray0.id, allocatedQty: 0, priceAtEvent: 550 }
+    ]
+  });
+  assert.notEqual(updateRes2.status, 200, 'Reducing allocation below sold quantity must be rejected');
+
+  // 3. Put 2 units into warehouse, then increase allocation from 1 to 3
+  await prisma.inventory.update({
+    where: { productId: prodTray0.id },
+    data: { quantityOnHand: 2 }
+  });
+
+  const updateRes3 = await request(f, 'PUT', `/api/events/${f.event.id}`, {
+    name: f.event.name,
+    location: f.event.location,
+    startDatetime: f.event.startDatetime.toISOString(),
+    endDatetime: f.event.endDatetime.toISOString(),
+    status: f.event.status,
+    allocations: [
+      { productId: prodTray0.id, allocatedQty: 3, priceAtEvent: 550 }
+    ]
+  });
+  assert.equal(updateRes3.status, 200, 'Increasing allocation when warehouse stock is available must succeed');
+
+  // Verify warehouse decremented by 2 (2 - 2 = 0)
+  const whAfter = await prisma.inventory.findUnique({ where: { productId: prodTray0.id } });
+  assert.equal(whAfter.quantityOnHand, 0);
+
+  // 4. Void/cancel the sale and verify GET /api/events/:id correctly updates sold counts
+  await request(f, 'POST', `/api/sales/${saleRes.data.sale.id}/cancel`, { reason: 'Test void' });
+  const eventDetails = await request(f, 'GET', `/api/events/${f.event.id}`);
+  assert.equal(eventDetails.status, 200);
+  const prodAllocEnriched = eventDetails.data.allocations.find(a => a.productId === prodTray0.id);
+  assert.equal(prodAllocEnriched.soldQty, 0, 'Cancelled sale must not be counted in event soldQty');
 });

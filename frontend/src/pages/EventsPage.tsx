@@ -276,13 +276,14 @@ export const EventsPage: React.FC = () => {
         : 0;
       const mainInventoryStock = p.inventory ? p.inventory.quantityOnHand : 0;
       const remainingInEvent = Math.max(0, allocatedQty - soldQty);
-      const maxAllocatable = mainInventoryStock + remainingInEvent;
+      // Valid total allocation is bounded below by soldQty and above by current allocation + unallocated warehouse stock
+      const maxAllocatable = Math.max(allocatedQty + mainInventoryStock, soldQty);
 
       return {
         productId: p.id,
         productName: p.name,
         projectName: p.project?.name || '—',
-        availableStock: maxAllocatable,
+        availableStock: mainInventoryStock,
         maxAllocatable,
         initialAllocatedQty: allocatedQty,
         allocatedQty,
@@ -365,7 +366,7 @@ export const EventsPage: React.FC = () => {
       if (row.allocatedQty > row.maxAllocatable) {
         setStatusMessage({
           type: 'error',
-          text: `Maximum available quantity for ${row.productName} is ${row.maxAllocatable}.`,
+          text: `Maximum available quantity for ${row.productName} is ${row.maxAllocatable} (${row.availableStock} in warehouse + ${row.initialAllocatedQty} already allocated).`,
         });
         return;
       }
@@ -851,7 +852,7 @@ export const EventsPage: React.FC = () => {
               </button>
             </div>
 
-            <form onSubmit={handleSaveEvent} className="flex-1 overflow-y-auto py-4 space-y-4">
+            <form onSubmit={handleSaveEvent} noValidate className="flex-1 overflow-y-auto py-4 space-y-4">
               {/* Notice for Finalized Event */}
               {editingEventId && events.find(e => e.id === editingEventId)?.status === 'ENDED' && (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-800 flex items-start gap-2">
@@ -978,7 +979,7 @@ export const EventsPage: React.FC = () => {
                           </td>
                           <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{row.projectName}</td>
                           <td className="px-3 py-2 text-right font-medium text-slate-700 whitespace-nowrap">
-                            {row.maxAllocatable}
+                            {row.availableStock}
                           </td>
                           <td className="px-3 py-1.5 text-right">
                             <div className="flex items-center justify-end gap-1.5">
@@ -999,16 +1000,21 @@ export const EventsPage: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => handleSetMaxAllocation(row.productId)}
-                                disabled={row.maxAllocatable <= 0}
-                                title="Allocate the maximum available quantity"
+                                disabled={row.allocatedQty >= row.maxAllocatable}
+                                title={`Allocate the maximum available quantity (${row.maxAllocatable})`}
                                 className="px-2 py-1 text-[10px] font-bold uppercase rounded border border-slate-300 bg-slate-50 text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors"
                               >
                                 MAX
                               </button>
                             </div>
-                            {editingEventId && row.soldQty > 0 && (
-                              <div className="text-[10px] text-slate-400 mt-0.5">
-                                Min: {row.soldQty} (sold)
+                            {editingEventId ? (
+                              <div className="text-[10px] text-slate-400 mt-0.5 whitespace-nowrap">
+                                {row.soldQty > 0 ? `Min: ${row.soldQty} (sold)` : 'Min: 0'}
+                                {` • Max: ${row.maxAllocatable}`}
+                              </div>
+                            ) : (
+                              <div className="text-[10px] text-slate-400 mt-0.5 whitespace-nowrap">
+                                {`Max: ${row.maxAllocatable}`}
                               </div>
                             )}
                           </td>

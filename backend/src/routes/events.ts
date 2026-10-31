@@ -388,7 +388,7 @@ router.get(
           totalRemaining,
           totalRevenue: totalSalesRevenue,
           totalSalesRevenue,
-          productRevenue: event.sales.filter(sale => sale.transactionType !== 'GAME').reduce((sum, sale) => sum + Number(sale.totalAmount), 0),
+          productRevenue: event.sales.filter(sale => sale.transactionType !== 'GAME' && sale.status !== 'CANCELLED').reduce((sum, sale) => sum + Number(sale.totalAmount), 0),
           gamesCount: enrichedGames.length,
           gamesPlayed,
           gameRevenue,
@@ -570,6 +570,7 @@ router.put(
       // Group sales count by product for this event
       const salesByProduct: Record<string, number> = {};
       for (const s of existingEvent.sales) {
+        if (s.status === 'CANCELLED') continue;
         if (s.items && s.items.length > 0) {
           for (const item of s.items) {
             salesByProduct[item.productId] = (salesByProduct[item.productId] || 0) + item.quantity;
