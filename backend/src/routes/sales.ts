@@ -405,8 +405,11 @@ export const recordSale = async (req: AuthenticatedRequest, res: Response): Prom
       ? await existingSaleAcknowledgement(prisma, req.body, req.user!.id) : null;
     if (existing) { res.status(200).json({ sale: existing }); return; }
     validateOperation(req.body, req.user!.id);
-    if (req.body.gameId || (req.body.transactionType && !['SALE', 'COMBO'].includes(req.body.transactionType))) {
+    if (req.body.gameId || req.body.gameSessionId || req.body.rewardProductId || req.body.transactionType === 'GAME') {
       throw new StockConflict('Game operations must use the game transaction endpoint.');
+    }
+    if (req.body.transactionType && !['SALE', 'COMBO', 'MIXED'].includes(req.body.transactionType)) {
+      throw new InputError('Invalid transaction type for sales checkout.');
     }
   } catch (error: any) {
     res.status(error.status || 400).json({ error: error.message });

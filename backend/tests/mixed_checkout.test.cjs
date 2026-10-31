@@ -97,6 +97,14 @@ async function setupShopFixture() {
     data: { id: 'tray_' + tag, name: 'Textured Glass Snack Tray', projectId: project.id, basePrice: 400,
       inventory: { create: { quantityOnHand: 10 } } }
   });
+  const prodPen = await prisma.product.create({
+    data: { id: 'pen_' + tag, name: 'Seeded Pen', projectId: project.id, basePrice: 30,
+      inventory: { create: { quantityOnHand: 100 } } }
+  });
+  const prodScrunchie = await prisma.product.create({
+    data: { id: 'scrunchie_' + tag, name: 'Zipper Scrunchie', projectId: project.id, basePrice: 80,
+      inventory: { create: { quantityOnHand: 50 } } }
+  });
 
   // Active event stall
   const event = await prisma.event.create({
@@ -111,6 +119,8 @@ async function setupShopFixture() {
           { productId: prodGlass.id, allocatedQty: 10, priceAtEvent: 300 },
           { productId: prodBowl.id, allocatedQty: 5, priceAtEvent: 200 },
           { productId: prodTray.id, allocatedQty: 5, priceAtEvent: 400 },
+          { productId: prodPen.id, allocatedQty: 50, priceAtEvent: 30 },
+          { productId: prodScrunchie.id, allocatedQty: 30, priceAtEvent: 80 },
         ]
       }
     }
@@ -148,7 +158,37 @@ async function setupShopFixture() {
     }
   });
 
-  return { user, project, event, prodGlass, prodBowl, prodTray, comboTexturedSet, comboStarter };
+  // Combo 3: Seeded pen (Pack of 5) configured at ₹120
+  const comboPen = await prisma.combo.create({
+    data: {
+      name: 'Seeded pen (Pack of 5)',
+      price: 120,
+      comboType: 'FIXED_QUANTITY',
+      projectId: project.id,
+      items: {
+        create: [
+          { productId: prodPen.id, quantity: 5 },
+        ]
+      }
+    }
+  });
+
+  // Combo 4: Zipper Scrunchie (Pack of 2) configured at ₹150
+  const comboScrunchie = await prisma.combo.create({
+    data: {
+      name: 'Zipper Scrunchie (Pack of 2)',
+      price: 150,
+      comboType: 'FIXED_QUANTITY',
+      projectId: project.id,
+      items: {
+        create: [
+          { productId: prodScrunchie.id, quantity: 2 },
+        ]
+      }
+    }
+  });
+
+  return { user, project, event, prodGlass, prodBowl, prodTray, prodPen, prodScrunchie, comboTexturedSet, comboStarter, comboPen, comboScrunchie };
 }
 
 test('Test 1-8: Unified POS Checkout with normal products, combos, and multiple combos', async () => {
@@ -375,4 +415,97 @@ test('Test 21-22: Sales History & Analytics correctness without double counting'
     assert.equal(comboStats.totalRevenue, 850);
     assert.equal(comboStats.totalQuantity, 1);
   }
+});
+
+test('Test 23: Exact user reproduction: 2 combos (Seeded pen ₹120 + Zipper Scrunchie ₹150 = ₹270, CASH) must NEVER be rejected as a game', async () => {
+  const f = await setupShopFixture();
+
+  const allocPenBefore = await prisma.eventAllocation.findUnique({
+    where: { eventId_productId: { eventId: f.event.id, productId: f.prodPen.id } }
+  });
+  const allocScrunchieBefore = await prisma.eventAllocation.findUnique({
+    where: { eventId_productId: { eventId: f.event.id, productId: f.prodScrunchie.id } }
+  });
+
+  const tx = randomUUID();
+  const res = await request(f, 'POST', '/api/sales', {
+    clientTxId: tx,
+    eventId: f.event.id,
+    ownerUserId: f.user.id,
+    paymentMethod: 'CASH',
+    totalAmount: 270,
+    transactionType: 'COMBO',
+    lines: [
+      { type: 'COMBO', comboId: f.comboPen.id, name: 'Seeded pen (Pack of 5)', quantity: 1, unitPrice: 120, lineTotal: 120 },
+      { type: 'COMBO', comboId: f.comboScrunchie.id, name: 'Zipper Scrunchie (Pack of 2)', quantity: 1, unitPrice: 150, lineTotal: 150 },
+    ]
+  });
+
+  assert.equal(res.status, 201, 'Response must be 201 Created and NOT 409 Game Conflict');
+  assert.equal(res.data.sale.totalAmount, 270);
+  assert.equal(res.data.sale.paymentMethod, 'CASH');
+  assert.equal(res.data.sale.receiptNumber > 0, true);
+  assert.equal(res.data.sale.transactionType, 'COMBO');
+
+  // Verify physical items fulfilled: 5 pens and 2 scrunchies recorded in sale items
+  const createdSale = await prisma.sale.findUnique({
+    where: { id: res.data.sale.id },
+    include: { items: true }
+  });
+  const penItem = createdSale.items.find(i => i.productId === f.prodPen.id);
+  const scrunchieItem = createdSale.items.find(i => i.productId === f.prodScrunchie.id);
+  assert(penItem, 'Pen component must be fulfilled in physical items');
+  assert.equal(penItem.quantity, 5);
+  assert(scrunchieItem, 'Scrunchie component must be fulfilled in physical items');
+  assert.equal(scrunchieItem.quantity, 2);
+
+  // Test with transactionType: 'MIXED' (as sent when mixed flags trigger)
+  const txMixed = randomUUID();
+  const resMixed = await request(f, 'POST', '/api/sales', {
+    clientTxId: txMixed,
+    eventId: f.event.id,
+    ownerUserId: f.user.id,
+    paymentMethod: 'CASH',
+    totalAmount: 270,
+    transactionType: 'MIXED',
+    lines: [
+      { type: 'COMBO', comboId: f.comboPen.id, name: 'Seeded pen (Pack of 5)', quantity: 1, unitPrice: 120, lineTotal: 120 },
+      { type: 'COMBO', comboId: f.comboScrunchie.id, name: 'Zipper Scrunchie (Pack of 2)', quantity: 1, unitPrice: 150, lineTotal: 150 },
+    ]
+  });
+  assert.equal(resMixed.status, 201, 'MIXED transactionType must also be accepted and NOT rejected as a game');
+});
+
+test('Test 24: Actual game operations with gameId or transactionType GAME sent to /api/sales MUST be rejected', async () => {
+  const f = await setupShopFixture();
+
+  // Sending gameId to /api/sales must throw 409 Game operations must use game transaction endpoint
+  const resWithGameId = await request(f, 'POST', '/api/sales', {
+    clientTxId: randomUUID(),
+    eventId: f.event.id,
+    ownerUserId: f.user.id,
+    gameId: randomUUID(),
+    paymentMethod: 'CASH',
+    totalAmount: 50,
+    lines: [
+      { type: 'NORMAL_PRODUCT', productId: f.prodGlass.id, quantity: 1, unitPrice: 50, lineTotal: 50 }
+    ]
+  });
+  assert.equal(resWithGameId.status, 409);
+  assert.match(resWithGameId.data.error, /Game operations must use the game transaction endpoint/);
+
+  // Sending transactionType: 'GAME' to /api/sales must throw 409 Game operations must use game transaction endpoint
+  const resWithGameType = await request(f, 'POST', '/api/sales', {
+    clientTxId: randomUUID(),
+    eventId: f.event.id,
+    ownerUserId: f.user.id,
+    transactionType: 'GAME',
+    paymentMethod: 'CASH',
+    totalAmount: 50,
+    lines: [
+      { type: 'NORMAL_PRODUCT', productId: f.prodGlass.id, quantity: 1, unitPrice: 50, lineTotal: 50 }
+    ]
+  });
+  assert.equal(resWithGameType.status, 409);
+  assert.match(resWithGameType.data.error, /Game operations must use the game transaction endpoint/);
 });

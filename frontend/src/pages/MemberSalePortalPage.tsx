@@ -72,6 +72,7 @@ export const MemberSalePortalPage: React.FC = () => {
     eventRequestRef.current++;
     setSelectedEventId(eventId);
     selectedEventIdRef.current = eventId;
+    setCart([]);
     try {
       if (eventId) {
         localStorage.setItem(storageKey, eventId);
@@ -940,9 +941,14 @@ export const MemberSalePortalPage: React.FC = () => {
         totalAmount: number;
       }> = [];
 
+      const hasCombos = cart.some(i => i.isCombo);
+      const hasNormal = cart.some(i => !i.isCombo);
       const isSingleComboOrder = cart.length === 1 && Boolean(cart[0].isCombo);
+      const isComboOnlyOrder = hasCombos && !hasNormal;
+      const isMixedOrder = hasCombos && hasNormal;
+
       const targetComboId = isSingleComboOrder ? cart[0].comboId : undefined;
-      const targetComboName = isSingleComboOrder ? cart[0].comboName : undefined;
+      const targetComboName = isSingleComboOrder ? cart[0].comboName : isComboOnlyOrder ? cart.map(c => c.productName).join(' + ') : undefined;
       const targetComboQuantity = isSingleComboOrder ? cart[0].quantity : undefined;
 
       // Build verified commercial purchase lines preserving combos as discrete units
@@ -1010,7 +1016,7 @@ export const MemberSalePortalPage: React.FC = () => {
         comboId: targetComboId,
         comboName: targetComboName,
         comboQuantity: targetComboQuantity,
-        transactionType: isSingleComboOrder ? 'COMBO' : cart.some(i => i.isCombo) ? 'MIXED' : undefined,
+        transactionType: isMixedOrder ? 'MIXED' : isComboOnlyOrder ? 'COMBO' : 'SALE',
         saleTime,
         items: orderItems,
         lines: commercialLines,
