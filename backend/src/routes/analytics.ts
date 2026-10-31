@@ -42,6 +42,7 @@ router.get(
         ];
       }
       if (startDate || endDate) whereClause.saleTime = businessDateRange(startDate, endDate);
+      whereClause.status = { not: 'CANCELLED' };
 
       // Fetch all matched sales with items, product, and event details
       const sales = await prisma.sale.findMany({

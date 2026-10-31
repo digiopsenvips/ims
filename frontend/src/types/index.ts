@@ -191,6 +191,11 @@ export interface Sale {
   customerPhone?: string | null;
   saleTime: string;
   createdAt: string;
+  status?: 'COMPLETED' | 'CANCELLED';
+  cancelledAt?: string | null;
+  cancelledById?: string | null;
+  cancelledByName?: string | null;
+  cancelReason?: string | null;
 }
 
 export interface PaginationInfo {

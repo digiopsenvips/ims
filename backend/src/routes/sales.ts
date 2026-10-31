@@ -32,6 +32,7 @@ router.get(
       paymentMethod,
       transactionType,
       search,
+      status,
       page: rawPage,
       pageSize: rawPageSize,
       all,
@@ -72,6 +73,9 @@ router.get(
       }
       if (transactionType && (transactionType === 'SALE' || transactionType === 'GAME' || transactionType === 'COMBO')) {
         whereClause.transactionType = transactionType as TransactionType;
+      }
+      if (status && typeof status === 'string' && status !== 'ALL') {
+        whereClause.status = status;
       }
       if (startDate || endDate) whereClause.saleTime = businessDateRange(startDate, endDate);
 
@@ -217,7 +221,7 @@ router.get(
           take,
         }),
         prisma.sale.aggregate({
-          where: whereClause,
+          where: { ...whereClause, status: { not: 'CANCELLED' } },
           _sum: {
             totalAmount: true,
             quantity: true,
@@ -225,7 +229,7 @@ router.get(
         }),
         prisma.saleItem.aggregate({
           where: {
-            sale: whereClause,
+            sale: { ...whereClause, status: { not: 'CANCELLED' } },
           },
           _sum: {
             quantity: true,
@@ -358,6 +362,11 @@ router.get(
           customerPhone: s.customerPhone,
           saleTime: s.saleTime,
           createdAt: s.createdAt,
+          status: s.status || 'COMPLETED',
+          cancelledAt: s.cancelledAt,
+          cancelledById: s.cancelledById,
+          cancelledByName: s.cancelledByName,
+          cancelReason: s.cancelReason,
         };
       });
 
@@ -1032,7 +1041,140 @@ router.put(
   preserveRecords
 );
 
-// DELETE /api/sales/:id: Delete a single sale record (DEVELOPER ONLY)
+// POST /api/sales/:id/cancel: Safe Void/Cancel sale with atomic inventory reversal and audit trail
+export const cancelSaleHandler = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const saleId = parseInt(req.params.id, 10);
+  if (isNaN(saleId)) {
+    res.status(400).json({ error: 'Valid sale ID is required.' });
+    return;
+  }
+
+  // Developer and Admin have full cancellation authority; Head requires edit_events or cancel_sales permission
+  const canCancel =
+    req.user?.role === Role.DEVELOPER ||
+    req.user?.role === Role.ADMIN ||
+    (req.user?.role === Role.HEAD && Boolean(req.user.permissions?.['edit_events']));
+
+  if (!canCancel) {
+    res.status(403).json({ error: 'Access denied: insufficient privileges to void/cancel sales.' });
+    return;
+  }
+
+  const rawReason = String(req.body?.reason || '').trim();
+  const reason = rawReason || (req.method === 'DELETE' ? 'Voided via administrative action' : '');
+  if (!reason) {
+    res.status(400).json({ error: 'A valid cancellation reason is required.' });
+    return;
+  }
+
+  try {
+    const outcome = await stockTransaction(async tx => {
+      const sale = await tx.sale.findUnique({
+        where: { id: saleId },
+        include: {
+          items: { include: { product: true } },
+          event: true,
+          gameSession: true,
+        },
+      });
+
+      if (!sale) {
+        throw new StockConflict('Sale record not found.');
+      }
+
+      if (sale.status === 'CANCELLED') {
+        throw new StockConflict(`Sale #${sale.receiptNumber} has already been cancelled.`);
+      }
+
+      // Determine physical items fulfilled
+      const physicalItems = sale.items.length > 0
+        ? sale.items.map(i => ({ productId: i.productId, productName: i.product?.name || 'Product', quantity: i.quantity }))
+        : sale.productId && sale.quantity
+        ? [{ productId: sale.productId, productName: 'Product', quantity: sale.quantity }]
+        : [];
+
+      const restoredLocations: Array<{ productId: string; productName: string; quantity: number; location: string }> = [];
+      const eventReconciled = Boolean(sale.event?.reconciledAt);
+
+      for (const item of physicalItems) {
+        if (eventReconciled || !sale.eventId) {
+          // If the event has ended and reconciled, unsold stock was returned to warehouse.
+          // Restore returned units back to warehouse inventory.
+          await tx.inventory.update({
+            where: { productId: item.productId },
+            data: {
+              quantityOnHand: { increment: item.quantity },
+              notes: `Restored ${item.quantity} units from cancelled sale #${sale.receiptNumber}`,
+              lastUpdated: new Date(),
+            },
+          });
+          restoredLocations.push({
+            productId: item.productId,
+            productName: item.productName,
+            quantity: item.quantity,
+            location: 'Warehouse Inventory',
+          });
+        } else {
+          // Event is still ongoing / not reconciled.
+          // Remaining stall stock is (allocatedQty - nonCancelledConsumed).
+          // Excluding this sale directly restores available units at the active stall.
+          restoredLocations.push({
+            productId: item.productId,
+            productName: item.productName,
+            quantity: item.quantity,
+            location: `${sale.event.name} (Stall Allocation)`,
+          });
+        }
+      }
+
+      // If linked to a game session, update session status to CANCELLED
+      if (sale.gameSession) {
+        await tx.gameSession.update({
+          where: { id: sale.gameSession.id },
+          data: { status: 'CANCELLED' },
+        });
+      }
+
+      const updatedSale = await tx.sale.update({
+        where: { id: sale.id },
+        data: {
+          status: 'CANCELLED',
+          cancelledAt: new Date(),
+          cancelledById: req.user!.id,
+          cancelledByName: req.user!.name || req.user!.username,
+          cancelReason: reason,
+        },
+      });
+
+      return { sale: updatedSale, restoredLocations };
+    });
+
+    broadcast('sale:cancelled', {
+      id: outcome.sale.id,
+      receiptNumber: outcome.sale.receiptNumber,
+      cancelledBy: outcome.sale.cancelledByName,
+      cancelReason: outcome.sale.cancelReason,
+    });
+    broadcast('inventory:updated', {});
+
+    res.status(200).json({
+      message: `Sale #${outcome.sale.receiptNumber} successfully voided and inventory restored.`,
+      sale: outcome.sale,
+      restoredLocations: outcome.restoredLocations,
+    });
+  } catch (error: any) {
+    res.status(error.status || 500).json({ error: error.message || 'Failed to cancel sale.' });
+  }
+};
+
+// POST /api/sales/:id/cancel: Dedicated cancellation endpoint
+router.post(
+  '/:id/cancel',
+  authenticateToken,
+  cancelSaleHandler
+);
+
+// DELETE /api/sales/:id: Hard deletion is permanently blocked to preserve receipts & audit trail; use POST /api/sales/:id/cancel
 router.delete(
   '/:id',
   authenticateToken,

@@ -263,6 +263,12 @@ model Sale {
   saleTime             DateTime        @default(now()) @map("sale_time")
   createdAt            DateTime        @default(now()) @map("created_at")
 
+  status               String          @default("COMPLETED") @map("status")
+  cancelledAt          DateTime?       @map("cancelled_at")
+  cancelledById        String?         @map("cancelled_by_id")
+  cancelledByName      String?         @map("cancelled_by_name")
+  cancelReason         String?         @map("cancel_reason")
+
   comboId              String?         @map("combo_id")
   comboName            String?         @map("combo_name")
   cartSnapshot         Json?           @map("cart_snapshot")
@@ -288,6 +294,7 @@ model Sale {
   @@index([transactionType])
   @@index([gameId])
   @@index([comboId])
+  @@index([status])
   @@map("sales")
 }
 

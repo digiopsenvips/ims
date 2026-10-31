@@ -68,7 +68,7 @@ router.get(
         ? await prisma.saleItem.groupBy({
             by: ['productId'],
             where: {
-              sale: { eventId: { in: activeEventIds } },
+              sale: { eventId: { in: activeEventIds }, status: { not: 'CANCELLED' } },
             },
             _sum: { quantity: true },
           })

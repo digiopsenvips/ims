@@ -52,6 +52,7 @@ router.get(
               quantity: true,
               totalAmount: true,
               transactionType: true,
+              status: true,
               items: {
                 select: {
                   productId: true,
@@ -72,6 +73,7 @@ router.get(
         let totalSold = 0;
 
         for (const s of event.sales) {
+          if (s.status === 'CANCELLED') continue;
           totalRevenue += Number(s.totalAmount);
           if (s.items && s.items.length > 0) {
             for (const item of s.items) {
@@ -221,6 +223,7 @@ router.get(
       let totalSold = 0;
 
       for (const s of event.sales) {
+        if (s.status === 'CANCELLED') continue;
         totalSalesRevenue += Number(s.totalAmount);
         if (s.items && s.items.length > 0) {
           for (const item of s.items) {

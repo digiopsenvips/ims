@@ -509,3 +509,310 @@ test('Test 24: Actual game operations with gameId or transactionType GAME sent t
   assert.equal(resWithGameType.status, 409);
   assert.match(resWithGameType.data.error, /Game operations must use the game transaction endpoint/);
 });
+
+async function getRemainingStallStock(eventId, productId) {
+  const consumed = await source('services/stock.ts').eventConsumption(prisma, eventId);
+  const alloc = await prisma.eventAllocation.findFirst({ where: { eventId, productId } });
+  return (alloc?.allocatedQty || 0) - (consumed.get(productId) || 0);
+}
+
+test('Test 25: Safe void/cancellation of a normal sale restores stall stock and records audit trail', async () => {
+  const f = await setupShopFixture();
+
+  // Create a normal sale of 2 phoenix glasses at active stall
+  const txId = randomUUID();
+  const saleRes = await request(f, 'POST', '/api/sales', {
+    clientTxId: txId,
+    eventId: f.event.id,
+    ownerUserId: f.user.id,
+    paymentMethod: 'UPI',
+    totalAmount: 600,
+    lines: [
+      { type: 'NORMAL_PRODUCT', productId: f.prodGlass.id, quantity: 2, unitPrice: 300, lineTotal: 600 }
+    ]
+  });
+  assert.equal(saleRes.status, 201);
+  const saleId = saleRes.data.sale.id;
+
+  // Verify stock before cancellation: allocated 10, consumed 2, remaining 8
+  const stockBefore = await getRemainingStallStock(f.event.id, f.prodGlass.id);
+  assert.equal(stockBefore, 8);
+
+  // Void/Cancel sale as Developer/Admin
+  const cancelRes = await request(f, 'POST', `/api/sales/${saleId}/cancel`, {
+    reason: 'Customer cancelled transaction before delivery'
+  });
+  assert.equal(cancelRes.status, 200);
+  assert.match(cancelRes.data.message, /successfully voided and inventory restored/);
+  assert.equal(cancelRes.data.sale.status, 'CANCELLED');
+  assert.equal(cancelRes.data.sale.cancelReason, 'Customer cancelled transaction before delivery');
+  assert.equal(cancelRes.data.sale.cancelledByName, f.user.name);
+
+  // Verify stock after cancellation: 2 units restored to stall (remaining 10)
+  const stockAfter = await getRemainingStallStock(f.event.id, f.prodGlass.id);
+  assert.equal(stockAfter, 10);
+});
+
+test('Test 26: Safe void/cancellation of a combo sale restores all component items to stall stock', async () => {
+  const f = await setupShopFixture();
+
+  // Textured Glass Set = 1 Tray + 2 Glasses
+  const txId = randomUUID();
+  const comboSaleRes = await request(f, 'POST', '/api/sales', {
+    clientTxId: txId,
+    eventId: f.event.id,
+    ownerUserId: f.user.id,
+    paymentMethod: 'CASH',
+    totalAmount: 850,
+    lines: [
+      { type: 'COMBO', comboId: f.comboTexturedSet.id, name: 'Textured Glass Set', quantity: 1, unitPrice: 850, lineTotal: 850 }
+    ]
+  });
+  assert.equal(comboSaleRes.status, 201);
+  const saleId = comboSaleRes.data.sale.id;
+
+  // Stock before cancel: Tray (5 - 1 = 4), Glass (10 - 2 = 8)
+  const trayBefore = await getRemainingStallStock(f.event.id, f.prodTray.id);
+  const glassBefore = await getRemainingStallStock(f.event.id, f.prodGlass.id);
+  assert.equal(trayBefore, 4);
+  assert.equal(glassBefore, 8);
+
+  // Void/Cancel the combo sale
+  const cancelRes = await request(f, 'POST', `/api/sales/${saleId}/cancel`, {
+    reason: 'Defective combo item returned'
+  });
+  assert.equal(cancelRes.status, 200);
+
+  // Both components restored to stall
+  const trayAfter = await getRemainingStallStock(f.event.id, f.prodTray.id);
+  const glassAfter = await getRemainingStallStock(f.event.id, f.prodGlass.id);
+  assert.equal(trayAfter, 5);
+  assert.equal(glassAfter, 10);
+});
+
+test('Test 27: Safe void/cancellation of a mixed sale restores both normal and combo components', async () => {
+  const f = await setupShopFixture();
+
+  // Mixed bill: 1 Combo (1 Tray + 2 Glasses) + 1 Normal Dip Bowl
+  const txId = randomUUID();
+  const mixedRes = await request(f, 'POST', '/api/sales', {
+    clientTxId: txId,
+    eventId: f.event.id,
+    ownerUserId: f.user.id,
+    paymentMethod: 'UPI',
+    totalAmount: 1050,
+    lines: [
+      { type: 'COMBO', comboId: f.comboTexturedSet.id, name: 'Textured Glass Set', quantity: 1, unitPrice: 850, lineTotal: 850 },
+      { type: 'NORMAL_PRODUCT', productId: f.prodBowl.id, quantity: 1, unitPrice: 200, lineTotal: 200 },
+    ]
+  });
+  assert.equal(mixedRes.status, 201);
+  const saleId = mixedRes.data.sale.id;
+
+  // Stock before: Tray 4, Glass 8, Bowl 4
+  assert.equal(await getRemainingStallStock(f.event.id, f.prodTray.id), 4);
+  assert.equal(await getRemainingStallStock(f.event.id, f.prodGlass.id), 8);
+  assert.equal(await getRemainingStallStock(f.event.id, f.prodBowl.id), 4);
+
+  // Direct DELETE is rejected with 409 preserveRecords (never purge database rows)
+  const delAttempt = await request(f, 'DELETE', `/api/sales/${saleId}`);
+  assert.equal(delAttempt.status, 409);
+
+  // Safe cancellation via POST /api/sales/:id/cancel
+  const cancelRes = await request(f, 'POST', `/api/sales/${saleId}/cancel`, { reason: 'Mixed order cancellation' });
+  assert.equal(cancelRes.status, 200);
+
+  // All restored
+  assert.equal(await getRemainingStallStock(f.event.id, f.prodTray.id), 5);
+  assert.equal(await getRemainingStallStock(f.event.id, f.prodGlass.id), 10);
+  assert.equal(await getRemainingStallStock(f.event.id, f.prodBowl.id), 5);
+});
+
+test('Test 28: Cancellation permissions enforcement (MEMBER rejected with 403, HEAD without perm rejected, authorized roles accepted)', async () => {
+  const f = await setupShopFixture();
+
+  // Create member user
+  const memberUser = await prisma.user.create({
+    data: { name: 'Member Jane', username: 'member_' + randomUUID(), passwordHash: 'synthetic', role: 'MEMBER' }
+  });
+
+  // Create head user without edit_events
+  const headUserNoPerm = await prisma.user.create({
+    data: { name: 'Head John', username: 'head_noperm_' + randomUUID(), passwordHash: 'synthetic', role: 'HEAD' }
+  });
+
+  // Create head user WITH edit_events permission
+  const headUserWithPerm = await prisma.user.create({
+    data: {
+      name: 'Head Sarah',
+      username: 'head_perm_' + randomUUID(),
+      passwordHash: 'synthetic',
+      role: 'HEAD',
+      permissions: { create: { permissionKey: 'edit_events', allowed: true } }
+    }
+  });
+
+  // Create a sale
+  const saleRes = await request(f, 'POST', '/api/sales', {
+    clientTxId: randomUUID(),
+    eventId: f.event.id,
+    ownerUserId: f.user.id,
+    paymentMethod: 'CASH',
+    totalAmount: 200,
+    lines: [{ type: 'NORMAL_PRODUCT', productId: f.prodBowl.id, quantity: 1, unitPrice: 200, lineTotal: 200 }]
+  });
+  const saleId = saleRes.data.sale.id;
+
+  // 1. Member attempt -> 403 Forbidden
+  const resMember = await request(f, 'POST', `/api/sales/${saleId}/cancel`, { reason: 'Unauthorized cancel' }, memberUser);
+  assert.equal(resMember.status, 403);
+  assert.match(resMember.data.error, /insufficient privileges/);
+
+  // 2. Head without permission attempt -> 403 Forbidden
+  const resHeadNoPerm = await request(f, 'POST', `/api/sales/${saleId}/cancel`, { reason: 'No perm cancel' }, headUserNoPerm);
+  assert.equal(resHeadNoPerm.status, 403);
+
+  // 3. Head with edit_events permission -> 200 OK
+  const resHeadPerm = await request(f, 'POST', `/api/sales/${saleId}/cancel`, { reason: 'Manager approved return' }, headUserWithPerm);
+  assert.equal(resHeadPerm.status, 200);
+});
+
+test('Test 29: Idempotency and validation: missing reason returns 400, duplicate cancel returns 409', async () => {
+  const f = await setupShopFixture();
+
+  const saleRes = await request(f, 'POST', '/api/sales', {
+    clientTxId: randomUUID(),
+    eventId: f.event.id,
+    ownerUserId: f.user.id,
+    paymentMethod: 'CASH',
+    totalAmount: 200,
+    lines: [{ type: 'NORMAL_PRODUCT', productId: f.prodBowl.id, quantity: 1, unitPrice: 200, lineTotal: 200 }]
+  });
+  const saleId = saleRes.data.sale.id;
+
+  // Missing reason on POST /:id/cancel -> 400 Bad Request
+  const resEmptyReason = await request(f, 'POST', `/api/sales/${saleId}/cancel`, { reason: '   ' });
+  assert.equal(resEmptyReason.status, 400);
+  assert.match(resEmptyReason.data.error, /cancellation reason is required/);
+
+  // First cancellation -> 200 OK
+  const resFirst = await request(f, 'POST', `/api/sales/${saleId}/cancel`, { reason: 'Valid initial reason' });
+  assert.equal(resFirst.status, 200);
+
+  // Second duplicate cancellation attempt -> 409 Conflict
+  const resDup = await request(f, 'POST', `/api/sales/${saleId}/cancel`, { reason: 'Trying to cancel again' });
+  assert.equal(resDup.status, 409);
+  assert.match(resDup.data.error, /already been cancelled/);
+});
+
+test('Test 30: Cancellation of sale from ended reconciled event restores warehouse inventory', async () => {
+  const f = await setupShopFixture();
+
+  // Create an active event
+  const closedEvent = await prisma.event.create({
+    data: {
+      name: 'Past Closed Fair ' + randomUUID(),
+      location: 'Old Hall',
+      status: 'ACTIVE',
+      startDatetime: new Date(Date.now() - 7200000),
+      endDatetime: new Date(Date.now() + 3600000),
+      allocations: {
+        create: [{ productId: f.prodBowl.id, allocatedQty: 10, priceAtEvent: 200 }]
+      }
+    }
+  });
+
+  // Create a sale during the event
+  const saleRes = await request(f, 'POST', '/api/sales', {
+    clientTxId: randomUUID(),
+    eventId: closedEvent.id,
+    ownerUserId: f.user.id,
+    paymentMethod: 'CASH',
+    totalAmount: 400,
+    lines: [{ type: 'NORMAL_PRODUCT', productId: f.prodBowl.id, quantity: 2, unitPrice: 200, lineTotal: 400 }]
+  });
+  assert.equal(saleRes.status, 201);
+  const saleId = saleRes.data.sale.id;
+
+  // Now the event finishes and is marked reconciled (all remaining unsold stock returned to warehouse)
+  await prisma.event.update({
+    where: { id: closedEvent.id },
+    data: {
+      status: 'ENDED',
+      endDatetime: new Date(Date.now() - 1000),
+      reconciledAt: new Date(),
+    }
+  });
+
+  // Check warehouse stock before cancel (initial fixture had 10 for bowl)
+  const whBefore = await prisma.inventory.findUnique({ where: { productId: f.prodBowl.id } });
+  assert.equal(whBefore.quantityOnHand, 10);
+
+  // Cancel the sale from the reconciled event
+  const cancelRes = await request(f, 'POST', `/api/sales/${saleId}/cancel`, {
+    reason: 'Customer returned after event closed'
+  });
+  assert.equal(cancelRes.status, 200);
+  assert.equal(cancelRes.data.restoredLocations[0].location, 'Warehouse Inventory');
+
+  // Verify warehouse stock incremented by 2 units (10 + 2 = 12)
+  const whAfter = await prisma.inventory.findUnique({ where: { productId: f.prodBowl.id } });
+  assert.equal(whAfter.quantityOnHand, 12);
+});
+
+test('Test 31: Sales list, status filtering, and analytics exclude cancelled sales from revenue/units', async () => {
+  const f = await setupShopFixture();
+
+  // Sale 1: Completed sale of 1 bowl (₹200)
+  const s1 = await request(f, 'POST', '/api/sales', {
+    clientTxId: randomUUID(),
+    eventId: f.event.id,
+    ownerUserId: f.user.id,
+    paymentMethod: 'CASH',
+    totalAmount: 200,
+    lines: [{ type: 'NORMAL_PRODUCT', productId: f.prodBowl.id, quantity: 1, unitPrice: 200, lineTotal: 200 }]
+  });
+  assert.equal(s1.status, 201);
+
+  // Sale 2: Sale to be cancelled of 1 glass (₹300)
+  const s2 = await request(f, 'POST', '/api/sales', {
+    clientTxId: randomUUID(),
+    eventId: f.event.id,
+    ownerUserId: f.user.id,
+    paymentMethod: 'UPI',
+    totalAmount: 300,
+    lines: [{ type: 'NORMAL_PRODUCT', productId: f.prodGlass.id, quantity: 1, unitPrice: 300, lineTotal: 300 }]
+  });
+  assert.equal(s2.status, 201);
+  const cancelRes = await request(f, 'POST', `/api/sales/${s2.data.sale.id}/cancel`, { reason: 'Test void' });
+  assert.equal(cancelRes.status, 200);
+
+  // 1. GET /api/sales?eventId=... default view
+  const listRes = await request(f, 'GET', `/api/sales?eventId=${f.event.id}`);
+  assert.equal(listRes.status, 200);
+  assert.equal(listRes.data.sales.length, 2); // Both are listed in history for auditability
+  const activeSummaryUnits = listRes.data.summary.totalUnits;
+  const activeSummaryRev = listRes.data.summary.totalRevenue;
+  // Summary revenue and units must ONLY count active (completed) sales (₹200 and 1 unit, NOT ₹500 and 2 units)
+  assert.equal(activeSummaryUnits, 1);
+  assert.equal(activeSummaryRev, 200);
+
+  // 2. Status filter: ?status=CANCELLED returns only the voided sale
+  const voidedRes = await request(f, 'GET', `/api/sales?eventId=${f.event.id}&status=CANCELLED`);
+  assert.equal(voidedRes.status, 200);
+  assert.equal(voidedRes.data.sales.length, 1);
+  assert.equal(voidedRes.data.sales[0].id, s2.data.sale.id);
+  assert.equal(voidedRes.data.sales[0].status, 'CANCELLED');
+
+  // 3. Status filter: ?status=COMPLETED returns only the active sale
+  const compRes = await request(f, 'GET', `/api/sales?eventId=${f.event.id}&status=COMPLETED`);
+  assert.equal(compRes.status, 200);
+  assert.equal(compRes.data.sales.length, 1);
+  assert.equal(compRes.data.sales[0].id, s1.data.sale.id);
+
+  // 4. Analytics: GET /api/analytics/dashboard?eventId=... excludes cancelled sale
+  const analyticsRes = await request(f, 'GET', `/api/analytics/dashboard?eventId=${f.event.id}`);
+  assert.equal(analyticsRes.status, 200);
+  assert.equal(analyticsRes.data.overview.totalRevenue, 200);
+  assert.equal(analyticsRes.data.overview.totalUnitsSold, 1);
+});

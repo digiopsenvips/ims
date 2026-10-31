@@ -17,11 +17,11 @@ export function stockTransaction<T>(work: (tx: Prisma.TransactionClient) => Prom
 
 export async function eventConsumption(tx: Prisma.TransactionClient, eventId: string) {
   const items = await tx.saleItem.groupBy({
-    by: ['productId'], where: { sale: { eventId } }, _sum: { quantity: true },
+    by: ['productId'], where: { sale: { eventId, status: { not: 'CANCELLED' } } }, _sum: { quantity: true },
   });
   // Older header-only sales count once; never count a modern sale twice.
   const legacy = await tx.sale.findMany({
-    where: { eventId, items: { none: {} }, productId: { not: null } },
+    where: { eventId, items: { none: {} }, productId: { not: null }, status: { not: 'CANCELLED' } },
     select: { productId: true, quantity: true },
   });
   const consumed = new Map<string, number>();

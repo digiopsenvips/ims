@@ -29,6 +29,7 @@ import {
   Lock,
   Clock,
   Info,
+  Ban,
 } from 'lucide-react';
 
 function getPageNumbers(current: number, total: number): (number | string)[] {
@@ -57,6 +58,7 @@ export const SalesManagementPage: React.FC = () => {
   const selectedEventId = searchParams.get('eventId') || '';
   const paymentFilter = ((searchParams.get('payment') as 'ALL' | 'UPI' | 'CASH' | 'CASH_UPI') || 'ALL');
   const transactionFilter = ((searchParams.get('txType') as 'ALL' | 'SALES' | 'COMBOS' | 'GAMES') || 'ALL');
+  const statusFilter = ((searchParams.get('status') as 'ALL' | 'COMPLETED' | 'CANCELLED') || 'ALL');
   const searchFromUrl = searchParams.get('search') || '';
 
   // Local state
@@ -90,9 +92,16 @@ export const SalesManagementPage: React.FC = () => {
   const [editSaleTime, setEditSaleTime] = useState<string>('');
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
 
+  // Sale Cancellation / Voiding State
+  const [saleToCancel, setSaleToCancel] = useState<Sale | null>(null);
+  const [cancelReason, setCancelReason] = useState<string>('');
+  const [isCancelling, setIsCancelling] = useState<boolean>(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
   const canViewRevenue = isDeveloper || isAdmin || hasPermission('view_revenue');
   const canViewPII = isDeveloper || isAdmin || hasPermission('view_customer_pii');
   const canExport = isDeveloper || isAdmin || hasPermission('export_data');
+  const canCancelSale = isDeveloper || isAdmin || hasPermission('edit_events');
 
   // Synchronize URL search params helper
   const updateUrlState = useCallback(
@@ -103,6 +112,7 @@ export const SalesManagementPage: React.FC = () => {
       eventId?: string;
       payment?: 'ALL' | 'UPI' | 'CASH' | 'CASH_UPI';
       txType?: 'ALL' | 'SALES' | 'COMBOS' | 'GAMES';
+      status?: 'ALL' | 'COMPLETED' | 'CANCELLED';
       search?: string;
     }) => {
       const newParams = new URLSearchParams(searchParams);
@@ -113,6 +123,7 @@ export const SalesManagementPage: React.FC = () => {
       const targetEventId = updates.eventId !== undefined ? updates.eventId : selectedEventId;
       const targetPayment = updates.payment !== undefined ? updates.payment : paymentFilter;
       const targetTxType = updates.txType !== undefined ? updates.txType : transactionFilter;
+      const targetStatus = updates.status !== undefined ? updates.status : statusFilter;
       const targetSearch = updates.search !== undefined ? updates.search : searchFromUrl;
 
       if (targetPage > 1) newParams.set('page', String(targetPage));
@@ -133,12 +144,15 @@ export const SalesManagementPage: React.FC = () => {
       if (targetTxType !== 'ALL') newParams.set('txType', targetTxType);
       else newParams.delete('txType');
 
+      if (targetStatus !== 'ALL') newParams.set('status', targetStatus);
+      else newParams.delete('status');
+
       if (targetSearch.trim()) newParams.set('search', targetSearch.trim());
       else newParams.delete('search');
 
       setSearchParams(newParams, { replace: true });
     },
-    [searchParams, currentPage, pageSize, activeTab, selectedEventId, paymentFilter, transactionFilter, searchFromUrl, setSearchParams]
+    [searchParams, currentPage, pageSize, activeTab, selectedEventId, paymentFilter, transactionFilter, statusFilter, searchFromUrl, setSearchParams]
   );
 
   // Debounced search input handler
@@ -179,6 +193,9 @@ export const SalesManagementPage: React.FC = () => {
         query.set('transactionType', 'COMBO');
       } else if (transactionFilter === 'GAMES') {
         query.set('transactionType', 'GAME');
+      }
+      if (statusFilter !== 'ALL') {
+        query.set('status', statusFilter);
       }
       if (searchFromUrl.trim()) {
         query.set('search', searchFromUrl.trim());
@@ -362,23 +379,45 @@ export const SalesManagementPage: React.FC = () => {
     }
   };
 
-  const handleDeleteSale = async (sale: Sale) => {
-    const receiptLabel = sale.receiptNumber ? `#${sale.receiptNumber}` : `ID-${sale.id}`;
-    if (!window.confirm(`Developer Action:\n\nAre you sure you want to permanently delete Sale (${receiptLabel})?\n\nThis will remove this transaction and linked items from the database.`)) {
+  const handleOpenCancelModal = (sale: Sale) => {
+    if (sale.status === 'CANCELLED') {
+      alert(`Sale #${sale.receiptNumber} is already cancelled.`);
       return;
     }
+    setSaleToCancel(sale);
+    setCancelReason('');
+    setCancelError(null);
+  };
+
+  const handleConfirmCancel = async () => {
+    if (!saleToCancel) return;
+    const reason = cancelReason.trim();
+    if (!reason) {
+      setCancelError('Please enter a cancellation reason.');
+      return;
+    }
+
+    const receiptLabel = saleToCancel.receiptNumber ? `#${saleToCancel.receiptNumber}` : `ID-${saleToCancel.id}`;
+    setIsCancelling(true);
+    setCancelError(null);
+
     try {
-      await api.delete(`/sales/${sale.id}`);
-      setActionMessage(`Sale (${receiptLabel}) deleted successfully!`);
-      if (selectedSaleForDetails && selectedSaleForDetails.id === sale.id) {
+      await api.post(`/sales/${saleToCancel.id}/cancel`, { reason });
+      setActionMessage(`Sale ${receiptLabel} voided successfully! Stock restored.`);
+      if (selectedSaleForDetails && selectedSaleForDetails.id === saleToCancel.id) {
         setSelectedSaleForDetails(null);
       }
+      setSaleToCancel(null);
       await fetchSalesData();
-      setTimeout(() => setActionMessage(null), 3500);
+      setTimeout(() => setActionMessage(null), 4000);
     } catch (err: any) {
-      alert(err.message || 'Failed to delete sale record');
+      setCancelError(err.message || 'Failed to cancel sale record.');
+    } finally {
+      setIsCancelling(false);
     }
   };
+
+  const handleDeleteSale = handleOpenCancelModal;
 
   // Receipt Text Formatter for WhatsApp / Copy
   const getReceiptSummaryText = (sale: Sale) => {
@@ -484,6 +523,8 @@ export const SalesManagementPage: React.FC = () => {
         'Receipt ID',
         'S.No.',
         'Transaction Type',
+        'Status',
+        'Cancel Reason',
         'Sale ID (DB)',
         'Event ID',
         'Event Name',
@@ -503,6 +544,8 @@ export const SalesManagementPage: React.FC = () => {
         s.receiptNumber ? `#${s.receiptNumber}` : '—',
         s.serialNumber ?? (exportList.length - idx),
         s.transactionType || 'SALE',
+        s.status || 'COMPLETED',
+        `"${(s.cancelReason || '').replace(/"/g, '""')}"`,
         s.id,
         s.eventId,
         `"${(s.eventName || '').replace(/"/g, '""')}"`,
@@ -686,6 +729,24 @@ export const SalesManagementPage: React.FC = () => {
                 ))}
               </div>
             </div>
+
+            {/* Status Filter */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-semibold text-slate-500 shrink-0">Status:</span>
+              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs">
+                {(['ALL', 'COMPLETED', 'CANCELLED'] as const).map(s => (
+                  <button
+                    key={s}
+                    onClick={() => updateUrlState({ page: 1, status: s })}
+                    className={`px-2 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer whitespace-nowrap ${
+                      statusFilter === s ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    {s === 'CANCELLED' ? 'VOIDED' : s === 'COMPLETED' ? 'COMPLETED' : 'ALL'}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -784,7 +845,11 @@ export const SalesManagementPage: React.FC = () => {
                         {displaySNo}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        {sale.transactionType === 'GAME' ? (
+                        {sale.status === 'CANCELLED' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-200" title={`Voided: ${sale.cancelReason || 'Cancelled'}`}>
+                            🚫 VOIDED
+                          </span>
+                        ) : sale.transactionType === 'GAME' ? (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                             🎮 GAME
                           </span>
@@ -996,24 +1061,32 @@ export const SalesManagementPage: React.FC = () => {
                             <span>Details</span>
                           </button>
 
-                          {isDeveloper && (
+                          {canCancelSale && (
                             <>
-                              <button
-                                type="button"
-                                onClick={() => handleOpenEdit(sale)}
-                                className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 hover:border-blue-200 rounded-md transition-colors cursor-pointer"
-                                title="Edit sale record (Developer)"
-                              >
-                                <Pencil className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteSale(sale)}
-                                className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-md transition-colors cursor-pointer"
-                                title="Delete sale record (Developer)"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              {isDeveloper && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEdit(sale)}
+                                  className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 hover:border-blue-200 rounded-md transition-colors cursor-pointer"
+                                  title="Edit sale record (Developer)"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              {sale.status === 'CANCELLED' ? (
+                                <span className="px-2 py-0.5 text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded-md" title={`Voided: ${sale.cancelReason || 'Cancelled'}`}>
+                                  Voided
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenCancelModal(sale)}
+                                  className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-md transition-colors cursor-pointer"
+                                  title="Void / Cancel sale (Restores inventory)"
+                                >
+                                  <Ban className="w-3.5 h-3.5 text-rose-600" />
+                                </button>
+                              )}
                             </>
                           )}
                         </div>
@@ -1217,24 +1290,32 @@ export const SalesManagementPage: React.FC = () => {
                         <span>Details</span>
                       </button>
 
-                      {isDeveloper && (
+                      {canCancelSale && (
                         <>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEdit(sale)}
-                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
-                            title="Edit sale (Developer)"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteSale(sale)}
-                            className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
-                            title="Delete sale (Developer)"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {isDeveloper && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEdit(sale)}
+                              className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+                              title="Edit sale (Developer)"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {sale.status === 'CANCELLED' ? (
+                            <span className="px-2 py-0.5 text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg">
+                              Voided
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenCancelModal(sale)}
+                              className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+                              title="Void / Cancel sale (Restores inventory)"
+                            >
+                              <Ban className="w-3.5 h-3.5 text-rose-600" />
+                            </button>
+                          )}
                         </>
                       )}
                     </div>
@@ -1365,6 +1446,24 @@ export const SalesManagementPage: React.FC = () => {
 
             {/* Modal Body - Scrollable */}
             <div className="p-5 space-y-4 overflow-y-auto flex-1 text-xs">
+              {selectedSaleForDetails.status === 'CANCELLED' && (
+                <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl mb-4 text-xs">
+                  <div className="font-bold text-rose-900 flex items-center gap-1.5 mb-1">
+                    <Ban className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>Transaction Voided / Cancelled</span>
+                  </div>
+                  <p className="text-rose-700 text-[11px] mb-1.5">
+                    Voided by <strong>{selectedSaleForDetails.cancelledByName || 'Admin'}</strong> on{' '}
+                    {selectedSaleForDetails.cancelledAt ? new Date(selectedSaleForDetails.cancelledAt).toLocaleString('en-IN') : 'N/A'}
+                  </p>
+                  {selectedSaleForDetails.cancelReason && (
+                    <div className="text-rose-900 text-[11px] bg-rose-100/70 p-2 rounded-lg font-mono">
+                      Reason: &quot;{selectedSaleForDetails.cancelReason}&quot;
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Data Preservation / Audit Protection Notice */}
               <div className="p-3.5 bg-amber-50 border border-amber-200/80 rounded-xl flex items-start gap-3 text-amber-900">
                 <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
@@ -1670,24 +1769,33 @@ export const SalesManagementPage: React.FC = () => {
                   )}
                 </button>
 
-                {isDeveloper && (
+                {canCancelSale && (
                   <>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenEdit(selectedSaleForDetails)}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors cursor-pointer shadow-2xs"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                      <span>Edit</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteSale(selectedSaleForDetails)}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors cursor-pointer shadow-2xs"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Delete</span>
-                    </button>
+                    {isDeveloper && selectedSaleForDetails.status !== 'CANCELLED' && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEdit(selectedSaleForDetails)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors cursor-pointer shadow-2xs"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                        <span>Edit</span>
+                      </button>
+                    )}
+                    {selectedSaleForDetails.status === 'CANCELLED' ? (
+                      <span className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg bg-rose-100 text-rose-800 border border-rose-200">
+                        <Ban className="w-3.5 h-3.5" />
+                        <span>Voided</span>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenCancelModal(selectedSaleForDetails)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors cursor-pointer shadow-2xs"
+                      >
+                        <Ban className="w-3.5 h-3.5" />
+                        <span>Void Sale</span>
+                      </button>
+                    )}
                   </>
                 )}
               </div>
@@ -1901,6 +2009,129 @@ export const SalesManagementPage: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Void / Cancel Sale Modal */}
+      {saleToCancel && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-2xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-lg overflow-hidden animate-in fade-in duration-200">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-rose-50/50">
+              <div className="flex items-center gap-2 text-rose-900">
+                <Ban className="w-5 h-5 text-rose-600" />
+                <h3 className="font-bold text-base">
+                  Void Sale Receipt #{saleToCancel.receiptNumber || saleToCancel.id}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSaleToCancel(null)}
+                disabled={isCancelling}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 space-y-4">
+              {/* Warning Notice */}
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <strong>Official Financial Action:</strong> Voiding will mark this sale as <strong>CANCELLED</strong> in the ledger, reverse its revenue from net analytics, and restore the physical items back to stock. The receipt remains permanently archived for compliance.
+                </div>
+              </div>
+
+              {cancelError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{cancelError}</span>
+                </div>
+              )}
+
+              {/* Transaction Summary Card */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 text-xs">
+                <div className="flex justify-between items-center text-slate-600">
+                  <span>Event / Stall:</span>
+                  <span className="font-bold text-slate-900">{saleToCancel.eventName}</span>
+                </div>
+                <div className="flex justify-between items-center text-slate-600">
+                  <span>Total Amount:</span>
+                  <span className="font-black text-slate-900 text-sm">
+                    ₹{saleToCancel.totalAmount != null ? Number(saleToCancel.totalAmount).toFixed(2) : '0.00'} ({saleToCancel.paymentMethod})
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-slate-600">
+                  <span>Seller:</span>
+                  <span className="font-medium text-slate-800">{saleToCancel.memberName} (@{saleToCancel.memberUsername})</span>
+                </div>
+                <div className="flex justify-between items-center text-slate-600">
+                  <span>Date & Time:</span>
+                  <span className="text-slate-700">{new Date(saleToCancel.saleTime).toLocaleString('en-IN')}</span>
+                </div>
+                {saleToCancel.items && saleToCancel.items.length > 0 && (
+                  <div className="pt-2 border-t border-slate-200 text-slate-600">
+                    <span className="font-semibold block mb-1">Items to restore to stock:</span>
+                    <ul className="space-y-0.5 text-[11px] text-slate-700">
+                      {saleToCancel.items.map((it: any, idx: number) => (
+                        <li key={idx} className="flex justify-between">
+                          <span>• {it.productName || it.product?.name || 'Product'} × {it.quantity}</span>
+                          <span className="text-slate-400">₹{it.lineTotal ? Number(it.lineTotal).toFixed(0) : '—'}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              {/* Reason Input */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-800">
+                  Cancellation Reason <span className="text-rose-500">*</span>
+                </label>
+                <textarea
+                  value={cancelReason}
+                  onChange={e => setCancelReason(e.target.value)}
+                  disabled={isCancelling}
+                  rows={3}
+                  className="w-full text-xs p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-none placeholder:text-slate-400"
+                  placeholder="Explain why this transaction is being voided (e.g. Customer returned product, cashier entered wrong bill, test entry...)"
+                />
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setSaleToCancel(null)}
+                disabled={isCancelling}
+                className="px-4 py-2 border border-slate-300 text-slate-700 font-semibold text-xs rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                Keep Sale
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCancel}
+                disabled={isCancelling || !cancelReason.trim()}
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+              >
+                {isCancelling ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Voiding...</span>
+                  </>
+                ) : (
+                  <>
+                    <Ban className="w-4 h-4" />
+                    <span>Confirm & Void Sale</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

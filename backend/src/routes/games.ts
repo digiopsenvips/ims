@@ -119,7 +119,7 @@ router.get(
         }
 
         const saleItems = await prisma.saleItem.findMany({
-          where: { sale: { eventId: { in: relevantEventIds } } },
+          where: { sale: { eventId: { in: relevantEventIds }, status: { not: 'CANCELLED' } } },
           select: {
             productId: true,
             quantity: true,
@@ -612,7 +612,7 @@ router.get(
         }
 
         const saleItems = await prisma.saleItem.findMany({
-          where: { sale: { eventId: { in: activeEventIds } } },
+          where: { sale: { eventId: { in: activeEventIds }, status: { not: 'CANCELLED' } } },
           select: {
             productId: true,
             quantity: true,
@@ -1162,7 +1162,7 @@ router.post(
           const salesAgg = await prisma.saleItem.aggregate({
             where: {
               productId: rewardProductId,
-              sale: { eventId },
+              sale: { eventId, status: { not: 'CANCELLED' } },
             },
             _sum: { quantity: true },
           });
@@ -1359,7 +1359,7 @@ router.post(
       let finalRemainingRewardStock = 0;
       if (isEventAllocationReward) {
         const finalSalesAgg = await prisma.saleItem.aggregate({
-          where: { productId: rewardProductId, sale: { eventId } },
+          where: { productId: rewardProductId, sale: { eventId, status: { not: 'CANCELLED' } } },
           _sum: { quantity: true },
         });
         const finalAlloc = await prisma.eventAllocation.findFirst({
