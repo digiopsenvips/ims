@@ -269,8 +269,16 @@ router.get(
 
         const isGame = s.transactionType === 'GAME';
         const isCombo = s.transactionType === 'COMBO' || Boolean(s.comboId);
+        const rawCartSnapshot = Array.isArray(s.cartSnapshot) ? (s.cartSnapshot as any[]) : null;
+        const commercialUnits = rawCartSnapshot
+          ? rawCartSnapshot.reduce((sum, l) => sum + (Number(l.quantity) || 0), 0)
+          : totalUnits;
+        const physicalUnits = rawItems.reduce((sum, item) => sum + item.quantity, 0);
+
         const displayProductName = isGame
           ? (s.game?.name || 'Stall Game')
+          : rawCartSnapshot && rawCartSnapshot.length > 0
+          ? rawCartSnapshot.map(l => `${l.name} × ${l.quantity}`).join(', ')
           : isCombo
           ? (s.comboName || s.combo?.name || 'Combo Bundle')
           : productSummary;
@@ -286,9 +294,13 @@ router.get(
           id: s.id, // Internal database ID
           receiptNumber: canonicalReceiptNumber, // Canonical sequential receipt number (#1, #2, #3...)
           serialNumber: canonicalReceiptNumber, // Backward compatibility alias
-          transactionType: s.transactionType || (s.comboId ? 'COMBO' : 'SALE'),
+          transactionType: (Array.isArray(rawCartSnapshot) && rawCartSnapshot.some(l => l.type === 'COMBO' || l.comboId) && rawCartSnapshot.some(l => l.type === 'NORMAL_PRODUCT' || (!l.type && !l.comboId)))
+            ? 'MIXED'
+            : s.transactionType || (s.comboId ? 'COMBO' : 'SALE'),
           comboId: s.comboId || null,
           comboName: s.comboName || s.combo?.name || null,
+          cartSnapshot: rawCartSnapshot,
+          lines: rawCartSnapshot,
           combo: s.combo
             ? {
                 id: s.combo.id,
@@ -325,8 +337,10 @@ router.get(
           sellerUsernameAtSale: s.sellerUsernameAtSale || s.member?.username || undefined,
           sellerNameAtSale: s.sellerNameAtSale || s.member?.name || undefined,
           items: rawItems,
-          totalUnits,
-          quantity: totalUnits, // alias for totalUnits
+          totalUnits: commercialUnits,
+          commercialUnits,
+          physicalUnits,
+          quantity: commercialUnits, // alias for totalUnits
           unitPrice: Number(firstItem.unitPrice ?? s.unitPrice ?? 0),
           totalAmount: Number(s.totalAmount),
           paymentMethod: s.paymentMethod,
@@ -386,445 +400,119 @@ router.get(
 
 // Shared online/offline operation handler. Authentication is applied by both routes.
 export const recordSale = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      const existing = typeof req.body?.clientTxId === 'string'
-        ? await existingSaleAcknowledgement(prisma, req.body, req.user!.id) : null;
-      if (existing) { res.status(200).json({ sale: existing }); return; }
-      validateOperation(req.body, req.user!.id);
-      if (req.body.gameId || (req.body.transactionType && !['SALE', 'COMBO'].includes(req.body.transactionType))) throw new StockConflict('Game operations must use the game transaction endpoint.');
-    } catch (error: any) { res.status(error.status || 400).json({ error: error.message }); return; }
+  try {
+    const existing = typeof req.body?.clientTxId === 'string'
+      ? await existingSaleAcknowledgement(prisma, req.body, req.user!.id) : null;
+    if (existing) { res.status(200).json({ sale: existing }); return; }
+    validateOperation(req.body, req.user!.id);
+    if (req.body.gameId || (req.body.transactionType && !['SALE', 'COMBO'].includes(req.body.transactionType))) {
+      throw new StockConflict('Game operations must use the game transaction endpoint.');
+    }
+  } catch (error: any) {
+    res.status(error.status || 400).json({ error: error.message });
+    return;
+  }
 
-    const {
-      eventId,
-      productId,
-      quantity,
-      items,
-      comboId,
-      comboQuantity,
-      selectedItems,
-      transactionType,
-      paymentMethod,
-      cashAmount,
-      upiAmount,
-      customerName,
-      customerPhone,
-      clientTxId,
-      saleTime,
-    } = req.body;
+  const {
+    eventId,
+    lines,
+    productId,
+    quantity,
+    items,
+    comboId,
+    comboQuantity,
+    selectedItems,
+    transactionType: requestedTxType,
+    paymentMethod,
+    cashAmount,
+    upiAmount,
+    customerName,
+    customerPhone,
+    clientTxId,
+    saleTime,
+    totalAmount,
+  } = req.body;
 
-    // Handle combo sales atomically
-    if (comboId || transactionType === 'COMBO') {
+  try {
+    // 1. Normalize commercial line items into a unified list
+    interface NormalizedLine {
+      type: 'NORMAL_PRODUCT' | 'COMBO';
+      productId?: string;
+      comboId?: string;
+      quantity: number;
+      unitPrice?: number;
+      selectedItems?: any[];
+    }
+
+    const inputLines: NormalizedLine[] = [];
+
+    if (Array.isArray(lines) && lines.length > 0) {
+      for (const line of lines) {
+        const q = Math.max(1, parseInt(String(line.quantity || 1), 10) || 1);
+        if (line.type === 'COMBO' || line.isCombo || line.comboId) {
+          inputLines.push({
+            type: 'COMBO',
+            comboId: String(line.comboId || line.productId || ''),
+            quantity: q,
+            selectedItems: line.selectedItems || line.components,
+          });
+        } else {
+          inputLines.push({
+            type: 'NORMAL_PRODUCT',
+            productId: String(line.productId || ''),
+            quantity: q,
+            unitPrice: line.unitPrice !== undefined ? Number(line.unitPrice) : undefined,
+          });
+        }
+      }
+    } else if (comboId || requestedTxType === 'COMBO') {
       const targetComboId = String(comboId || '');
       if (!targetComboId) {
         res.status(400).json({ error: 'comboId is required for COMBO transaction' });
         return;
       }
-      if (!eventId || !paymentMethod) {
-        res.status(400).json({ error: 'eventId and paymentMethod are required' });
-        return;
-      }
-
       const comboQty = Math.max(1, parseInt(String(comboQuantity || 1), 10) || 1);
-
-      try {
-        // 1. Fetch combo with items & project
-        const combo = await prisma.combo.findUnique({
-          where: { id: targetComboId },
-          include: {
-            items: {
-              include: {
-                product: {
-                  include: { project: true },
-                },
-              },
-            },
-            project: true,
-          },
-        });
-
-        if (!combo || combo.isArchived || combo.status !== 'ACTIVE') {
-          res.status(404).json({ error: 'Combo not found, archived, or inactive' });
-          return;
-        }
-
-        if (combo.eventId && combo.eventId !== eventId) {
-          res.status(400).json({ error: 'This combo offer is not valid for the selected event' });
-          return;
-        }
-
-        // 2. Validate event
-        const event = await prisma.event.findUnique({
-          where: { id: eventId },
-          include: {
-            allocations: {
-              include: { product: { include: { project: true } } },
-            },
-          },
-        });
-
-        if (!event || event.isDeleted) {
-          res.status(404).json({ error: 'Event not found or inactive' });
-          return;
-        }
-
-        const eventStatus = computeEventStatus(event.startDatetime, event.endDatetime, event.status);
-        const isPastEnd = new Date().getTime() >= new Date(event.endDatetime).getTime();
-
-        if (eventStatus === 'ENDED' || event.status === 'ENDED' || isPastEnd) {
-          res.status(400).json({ error: 'This event has ended and is no longer accepting sales.' });
-          return;
-        }
-
-        if (eventStatus === 'UPCOMING' || new Date().getTime() < new Date(event.startDatetime).getTime()) {
-          res.status(400).json({ error: 'This event has not started yet.' });
-          return;
-        }
-
-        // 3. Resolve required components
-        interface ResolvedComp {
-          productId: string;
-          productName: string;
-          projectName: string;
-          quantity: number;
-          allocationPrice: number;
-        }
-
-        const resolvedComponents: ResolvedComp[] = [];
-
-        if (combo.comboType === 'PICK_ANY') {
-          const rawSelected = Array.isArray(selectedItems) ? selectedItems : (Array.isArray(items) ? items : []);
-          const mergedSelected = new Map<string, number>();
-          for (const item of rawSelected) {
-            const pId = String(item.productId || '');
-            const q = parseInt(String(item.quantity || 0), 10);
-            if (pId && !isNaN(q) && q > 0) {
-              mergedSelected.set(pId, (mergedSelected.get(pId) || 0) + q);
-            }
-          }
-
-          const totalSelected = Array.from(mergedSelected.values()).reduce((sum, q) => sum + q, 0);
-          const minItemsPerCombo = combo.minItems || 1;
-          const requiredTotal = minItemsPerCombo * comboQty;
-          if (totalSelected !== requiredTotal) {
-            res.status(400).json({
-              error: `For this combo, you must select exactly ${requiredTotal} items (${minItemsPerCombo} per combo bundle). Selected: ${totalSelected}`,
-            });
-            return;
-          }
-
-          const allowedProductIds = combo.items.length > 0 ? new Set(combo.items.map(ci => ci.productId)) : null;
-
-          for (const [pId, qty] of mergedSelected.entries()) {
-            if (allowedProductIds && !allowedProductIds.has(pId)) {
-              res.status(400).json({ error: `Product ${pId} is not in the allowed items for this combo offer.` });
-              return;
-            }
-            const alloc = event.allocations.find(a => a.productId === pId);
-            if (!alloc) {
-              const prod = await prisma.product.findUnique({ where: { id: pId }, include: { project: true } });
-              if (!prod || prod.isArchived || prod.isDeleted) {
-                res.status(400).json({ error: `Product ${pId} is not available.` });
-                return;
-              }
-              if (combo.projectId && prod.projectId !== combo.projectId) throw new StockConflict('Selected product is outside this offer project.');
-              resolvedComponents.push({
-                productId: pId,
-                productName: prod.name,
-                projectName: prod.project.name,
-                quantity: qty,
-                allocationPrice: Number(prod.basePrice || 0),
-              });
-            } else {
-              if (combo.projectId && alloc.product.projectId !== combo.projectId) throw new StockConflict('Selected product is outside this offer project.');
-              resolvedComponents.push({
-                productId: pId,
-                productName: alloc.product.name,
-                projectName: alloc.product.project.name,
-                quantity: qty,
-                allocationPrice: Number(alloc.priceAtEvent),
-              });
-            }
-          }
-        } else {
-          // FIXED_QUANTITY, MULTI_PRODUCT, BUY_X_GET_Y
-          for (const ci of combo.items) {
-            const neededQty = ci.quantity * comboQty;
-            const alloc = event.allocations.find(a => a.productId === ci.productId);
-            resolvedComponents.push({
-              productId: ci.productId,
-              productName: ci.product.name,
-              projectName: ci.product.project.name,
-              quantity: neededQty,
-              allocationPrice: alloc ? Number(alloc.priceAtEvent) : Number(ci.product.basePrice || 0),
-            });
+      inputLines.push({
+        type: 'COMBO',
+        comboId: targetComboId,
+        quantity: comboQty,
+        selectedItems: selectedItems || items,
+      });
+    } else {
+      const mergedMap = new Map<string, { quantity: number; unitPrice?: number }>();
+      if (Array.isArray(items) && items.length > 0) {
+        for (const item of items) {
+          const pId = String(item.productId || '');
+          const q = parseInt(String(item.quantity || 0), 10);
+          if (pId && !isNaN(q) && q > 0) {
+            const cur = mergedMap.get(pId) || { quantity: 0, unitPrice: item.unitPrice };
+            cur.quantity += q;
+            mergedMap.set(pId, cur);
           }
         }
-
-        if (resolvedComponents.length === 0) throw new StockConflict('The offer has no eligible components.');
-
-        // 4. Validate stock for each component considering stall allocation and eligible warehouse stock
-        for (const comp of resolvedComponents) {
-          const salesAgg = await prisma.saleItem.aggregate({
-            where: {
-              productId: comp.productId,
-              sale: { eventId },
-            },
-            _sum: { quantity: true },
-          });
-          const soldSoFar = salesAgg._sum.quantity || 0;
-          const allocation = event.allocations.find(a => a.productId === comp.productId);
-          const remainingAllocated = allocation ? Math.max(0, allocation.allocatedQty - soldSoFar) : 0;
-          const inv = await prisma.inventory.findUnique({ where: { productId: comp.productId } });
-          const warehouseStock = Math.max(0, inv?.quantityOnHand || 0);
-          const totalUsable = remainingAllocated + warehouseStock;
-
-          if (comp.quantity > totalUsable) {
-            res.status(400).json({
-              error: `Insufficient stock for combo component ${comp.productName}. Needed ${comp.quantity}, available: ${remainingAllocated} at stall + ${warehouseStock} in warehouse.`,
-              productId: comp.productId,
-              remainingAllocated,
-              warehouseStock,
-            });
-            return;
-          }
-        }
-
-        // 5. Calculate bundle pricing and line totals
-        const comboPriceTotal = Number(combo.price) * comboQty;
-        const totalUnits = resolvedComponents.reduce((sum, c) => sum + c.quantity, 0);
-
-        // Distribute comboPriceTotal across component items proportionally based on normal value
-        const totalNormalValue = resolvedComponents.reduce((sum, c) => sum + (c.allocationPrice * c.quantity), 0);
-
-        let allocatedCents = 0;
-        const totalCents = Math.round(comboPriceTotal * 100);
-
-        const validatedItems = resolvedComponents.map((comp, idx) => {
-          let lineTotalCents: number;
-          if (idx === resolvedComponents.length - 1) {
-            lineTotalCents = totalCents - allocatedCents;
-          } else {
-            const ratio = totalNormalValue > 0 ? (comp.allocationPrice * comp.quantity) / totalNormalValue : comp.quantity / totalUnits;
-            lineTotalCents = Math.round(totalCents * ratio);
-            allocatedCents += lineTotalCents;
-          }
-          const lineTotal = lineTotalCents / 100;
-          const unitPrice = Math.round((lineTotal / comp.quantity) * 100) / 100;
-          return {
-            productId: comp.productId,
-            productName: comp.productName,
-            projectName: comp.projectName,
-            quantity: comp.quantity,
-            unitPrice,
-            lineTotal,
-          };
-        });
-
-        // 6. Payment method normalization
-        let normMethod: PaymentMethod;
-        const rawMethod = String(paymentMethod || '').toUpperCase().replace(/[\s\+]/g, '_');
-        if (rawMethod === 'CASH') {
-          normMethod = PaymentMethod.CASH;
-        } else if (rawMethod === 'UPI') {
-          normMethod = PaymentMethod.UPI;
-        } else if (rawMethod === 'CASH_UPI' || rawMethod === 'CASH_AND_UPI' || rawMethod === 'SPLIT') {
-          normMethod = PaymentMethod.CASH_UPI;
-        } else {
-          res.status(400).json({ error: 'Payment method must be CASH, UPI, or CASH + UPI' });
-          return;
-        }
-
-        const payment = paymentAmounts(normMethod, cashAmount, upiAmount, comboPriceTotal);
-        const resolvedCashAmount = payment.cash, resolvedUpiAmount = payment.upi;
-        if (req.body.totalAmount !== undefined && moneyCents(req.body.totalAmount) !== moneyCents(comboPriceTotal.toFixed(2))) {
-          throw new StockConflict('Offer price changed. Preserve this transaction for review.');
-        }
-
-        // 7. Atomic transaction: allocate receipt number and record sale
-        let concurrentAcknowledgement: Awaited<ReturnType<typeof existingSaleAcknowledgement>> = null;
-        const newSale = await stockTransaction(async tx => {
-          if (clientTxId) {
-            const existing = await existingSaleAcknowledgement(tx, req.body, req.user!.id);
-            if (existing) { concurrentAcknowledgement = existing; return null; }
-          }
-
-          const currentCombo = await tx.combo.findUnique({ where: { id: combo.id } });
-          if (!currentCombo || currentCombo.isArchived || currentCombo.status !== 'ACTIVE' ||
-              currentCombo.updatedAt.getTime() !== combo.updatedAt.getTime()) {
-            throw new StockConflict('Offer changed. Preserve this transaction for review.');
-          }
-          await assertAllocatedStock(tx, eventId, validatedItems, false, true);
-          const [{ nextVal }] = await tx.$queryRaw<[{ nextVal: bigint | number }]>`
-            SELECT nextval('receipt_number_seq')::bigint as "nextVal"
-          `;
-          const receiptNumber = Number(nextVal);
-
-          return await tx.sale.create({
-            data: {
-              receiptNumber,
-              clientTxId: clientTxId ? String(clientTxId) : null,
-              eventId,
-              memberId: req.user!.id,
-              sellerUserIdAtSale: req.user!.id,
-              sellerUsernameAtSale: req.user!.username,
-              sellerNameAtSale: req.user!.name,
-              transactionType: TransactionType.COMBO,
-              comboId: combo.id,
-              comboName: combo.name,
-              totalAmount: comboPriceTotal,
-              paymentMethod: normMethod,
-              cashAmount: resolvedCashAmount,
-              upiAmount: resolvedUpiAmount,
-              customerName: customerName ? String(customerName).trim() : null,
-              customerPhone: customerPhone ? String(customerPhone).trim() : null,
-              saleTime: saleTime ? new Date(saleTime) : new Date(),
-              items: {
-                create: validatedItems.map(item => ({
-                  productId: item.productId,
-                  quantity: item.quantity,
-                  unitPrice: item.unitPrice,
-                  lineTotal: item.lineTotal,
-                })),
-              },
-            },
-            include: {
-              event: true,
-              member: true,
-              combo: true,
-              items: {
-                include: { product: { include: { project: true } } },
-              },
-            },
-          });
-        });
-        if (!newSale) { res.status(200).json({ sale: concurrentAcknowledgement }); return; }
-
-        // 8. WebSocket broadcasts
-        broadcast('sale:created', {
-          id: newSale.id,
-          receiptNumber: newSale.receiptNumber,
-          serialNumber: newSale.receiptNumber,
-          eventId: newSale.eventId,
-          eventName: newSale.event.name,
-          totalAmount: Number(newSale.totalAmount),
-          paymentMethod: newSale.paymentMethod,
-          cashAmount: Number(newSale.cashAmount ?? resolvedCashAmount),
-          upiAmount: Number(newSale.upiAmount ?? resolvedUpiAmount),
-          memberName: newSale.sellerNameAtSale || newSale.member?.name || req.user!.name,
-          memberUsername: newSale.sellerUsernameAtSale || newSale.member?.username || req.user!.username,
-          saleTime: newSale.saleTime,
-          itemsCount: newSale.items.length,
-          totalUnits,
-          transactionType: 'COMBO',
-          comboName: newSale.comboName,
-        });
-
-        broadcast('inventory:updated', {
-          action: 'sales_recorded',
-          eventId,
-          saleId: newSale.id,
-        });
-
-        broadcast('combo:sold', {
-          comboId: combo.id,
-          eventId,
-          receiptNumber: newSale.receiptNumber,
-        });
-
-        // Automatically dispatch WhatsApp bill if customer phone is provided
-        if (newSale.customerPhone && newSale.customerPhone.trim()) {
-          whatsappService.sendSaleReceipt({
-            phone: newSale.customerPhone.trim(),
-            customerName: newSale.customerName ? String(newSale.customerName).trim() : 'Valued Supporter',
-            receiptNumber: newSale.receiptNumber,
-            eventName: newSale.event.name,
-            eventLocation: newSale.event.location,
-            items: validatedItems.map(item => ({
-              productName: item.productName,
-              quantity: item.quantity,
-              unitPrice: item.unitPrice,
-              lineTotal: item.lineTotal,
-            })),
-            totalAmount: Number(newSale.totalAmount),
-            paymentMethod: newSale.paymentMethod,
-            cashAmount: Number(newSale.cashAmount ?? resolvedCashAmount),
-            upiAmount: Number(newSale.upiAmount ?? resolvedUpiAmount),
-            sellerName: newSale.sellerNameAtSale || req.user?.name,
-            saleTime: newSale.saleTime,
-          }).catch(err => console.error('[WhatsApp] Auto-dispatch combo receipt error:', err));
-        }
-
-        const formatted = {
-          id: newSale.id,
-          receiptNumber: newSale.receiptNumber,
-          serialNumber: newSale.receiptNumber,
-          clientTxId: newSale.clientTxId,
-          eventId: newSale.eventId,
-          eventName: newSale.event.name,
-          transactionType: 'COMBO',
-          comboId: newSale.comboId,
-          comboName: newSale.comboName,
-          productName: newSale.comboName || 'Combo Offer',
-          description: newSale.comboName || 'Combo Offer',
-          projectName: newSale.combo?.projectId ? combo.project?.name : 'Multiple',
-          totalAmount: Number(newSale.totalAmount),
-          paymentMethod: newSale.paymentMethod,
-          cashAmount: Number(newSale.cashAmount ?? resolvedCashAmount),
-          upiAmount: Number(newSale.upiAmount ?? resolvedUpiAmount),
-          customerName: newSale.customerName,
-          customerPhone: newSale.customerPhone,
-          saleTime: newSale.saleTime,
-          createdAt: newSale.createdAt,
-          items: newSale.items.map(item => ({
-            id: item.id,
-            productId: item.productId,
-            productName: item.product.name,
-            projectName: item.product.project.name,
-            quantity: item.quantity,
-            unitPrice: Number(item.unitPrice),
-            lineTotal: Number(item.lineTotal),
-          })),
-          totalUnits,
-          totalOrderAmount: comboPriceTotal,
-        };
-
-        res.status(201).json({
-          message: 'Combo transaction recorded successfully',
-          sale: sanitizeSaleForUser(formatted, req.user),
-          totalItems: totalUnits,
-          totalOrderAmount: comboPriceTotal,
-        });
-        return;
-      } catch (err) {
-        console.error('Combo sale error:', err);
-        res.status((err as any).status || 500).json({ error: (err as any).status ? (err as Error).message : 'Failed to record combo transaction. Retry the same operation key.' });
-        return;
-      }
-    }
-
-    // Normalize and merge duplicate items if selected multiple times
-    const mergedItemsMap = new Map<string, number>();
-    if (Array.isArray(items) && items.length > 0) {
-      for (const item of items) {
-        const pId = String(item.productId || '');
-        const q = parseInt(String(item.quantity || 0), 10);
+      } else if (productId && quantity) {
+        const pId = String(productId);
+        const q = parseInt(String(quantity), 10);
         if (pId && !isNaN(q) && q > 0) {
-          mergedItemsMap.set(pId, (mergedItemsMap.get(pId) || 0) + q);
+          mergedMap.set(pId, { quantity: q, unitPrice: req.body.unitPrice });
         }
       }
-    } else if (productId && quantity) {
-      const pId = String(productId);
-      const q = parseInt(String(quantity), 10);
-      if (pId && !isNaN(q) && q > 0) {
-        mergedItemsMap.set(pId, q);
+      for (const [pId, info] of mergedMap.entries()) {
+        inputLines.push({
+          type: 'NORMAL_PRODUCT',
+          productId: pId,
+          quantity: info.quantity,
+          unitPrice: info.unitPrice,
+        });
       }
     }
 
-    if (!eventId || mergedItemsMap.size === 0 || !paymentMethod) {
-      res.status(400).json({ error: 'Event, at least one valid product with quantity, and payment method are required' });
+    if (!eventId || inputLines.length === 0 || !paymentMethod) {
+      res.status(400).json({ error: 'Event, at least one product or combo, and payment method are required' });
       return;
     }
 
+    // 2. Validate Payment Method format
     let normMethod: PaymentMethod;
     const rawMethod = String(paymentMethod || '').toUpperCase().replace(/[\s\+]/g, '_');
     if (rawMethod === 'CASH') {
@@ -838,242 +526,450 @@ export const recordSale = async (req: AuthenticatedRequest, res: Response): Prom
       return;
     }
 
-    try {
-      // Check event and product allocations
-      const event = await prisma.event.findUnique({
-        where: { id: eventId },
-        include: {
-          allocations: {
-            include: { product: { include: { project: true } } },
-          },
+    // 3. Fetch Event and verify open lifecycle
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        allocations: {
+          include: { product: { include: { project: true } } },
         },
-      });
+      },
+    });
 
-      if (!event || event.isDeleted) {
-        res.status(404).json({ error: 'Event not found or inactive' });
-        return;
-      }
+    if (!event || event.isDeleted) {
+      res.status(404).json({ error: 'Event not found or inactive' });
+      return;
+    }
 
-      const eventStatus = computeEventStatus(event.startDatetime, event.endDatetime, event.status);
-      const isPastEnd = new Date().getTime() >= new Date(event.endDatetime).getTime();
+    const eventStatus = computeEventStatus(event.startDatetime, event.endDatetime, event.status);
+    const isPastEnd = new Date().getTime() >= new Date(event.endDatetime).getTime();
 
-      if (eventStatus === 'ENDED' || event.status === 'ENDED' || isPastEnd) {
-        res.status(400).json({ error: 'This event has ended and is no longer accepting sales.' });
-        return;
-      }
+    if (eventStatus === 'ENDED' || event.status === 'ENDED' || isPastEnd) {
+      res.status(400).json({ error: 'This event has ended and is no longer accepting sales.' });
+      return;
+    }
 
-      if (eventStatus === 'UPCOMING' || new Date().getTime() < new Date(event.startDatetime).getTime()) {
-        res.status(400).json({ error: 'This event has not started yet.' });
-        return;
-      }
+    if (eventStatus === 'UPCOMING' || new Date().getTime() < new Date(event.startDatetime).getTime()) {
+      res.status(400).json({ error: 'This event has not started yet.' });
+      return;
+    }
 
-      // Pre-validate all items against remaining allocations
-      const validatedItems: Array<{
+    // 4. Resolve commercial lines and physical product requirements
+    const commercialSnapshots: Array<{
+      lineId: string;
+      type: 'NORMAL_PRODUCT' | 'COMBO';
+      productId?: string;
+      comboId?: string;
+      name: string;
+      quantity: number;
+      unitPrice: number;
+      lineTotal: number;
+      savings?: number;
+      normalValue?: number;
+      comboType?: string;
+      components?: Array<{
         productId: string;
         productName: string;
-        projectName: string;
         quantity: number;
-        unitPrice: number;
-        lineTotal: number;
-      }> = [];
+        totalQuantity: number;
+      }>;
+    }> = [];
 
-      for (const [pId, requestedQty] of mergedItemsMap.entries()) {
-        const allocation = event.allocations.find(a => a.productId === pId);
-        if (!allocation) {
-          res.status(400).json({ error: `Product ${pId} is not allocated to this event` });
-          return;
-        }
+    const physicalItemsToFulfill: Array<{
+      productId: string;
+      productName: string;
+      projectName: string;
+      quantity: number;
+      unitPrice: number;
+      lineTotal: number;
+      allowWarehouseFulfill: boolean;
+    }> = [];
 
-        // Calculate sold quantity from sale_items
-        const salesAgg = await prisma.saleItem.aggregate({
-          where: {
-            productId: pId,
-            sale: { eventId },
+    for (const line of inputLines) {
+      if (line.type === 'COMBO') {
+        const combo = await prisma.combo.findUnique({
+          where: { id: line.comboId },
+          include: {
+            items: {
+              include: {
+                product: {
+                  include: { project: true },
+                },
+              },
+            },
+            project: true,
           },
-          _sum: { quantity: true },
         });
 
-        const soldSoFar = salesAgg._sum.quantity || 0;
-        const remainingAllocated = allocation.allocatedQty - soldSoFar;
-
-        if (requestedQty > remainingAllocated) {
-          res.status(400).json({
-            error: `Sale quantity (${requestedQty}) exceeds remaining stock allocated for ${allocation.product.name} (${remainingAllocated} remaining).`,
-            productId: pId,
-            remainingAllocated,
-          });
+        if (!combo || combo.isArchived || combo.status !== 'ACTIVE') {
+          res.status(404).json({ error: `Combo offer ${line.comboId} not found, archived, or inactive` });
           return;
         }
 
-        const unitPrice = Number(allocation.priceAtEvent);
-        const quoted = Array.isArray(items) ? items.find((item: any) => item.productId === pId) : undefined;
-        if (quoted?.unitPrice !== undefined && moneyCents(quoted.unitPrice) !== moneyCents(unitPrice.toFixed(2))) {
-          throw new StockConflict(`Price changed for ${pId}. Review the preserved transaction.`);
+        if (combo.eventId && combo.eventId !== eventId) {
+          res.status(400).json({ error: `Combo offer "${combo.name}" is not valid for the selected event` });
+          return;
         }
-        const lineTotal = unitPrice * requestedQty;
 
-        validatedItems.push({
-          productId: pId,
-          productName: allocation.product.name,
-          projectName: allocation.product.project.name,
-          quantity: requestedQty,
+        interface ResolvedComp {
+          productId: string;
+          productName: string;
+          projectName: string;
+          quantity: number;
+          allocationPrice: number;
+        }
+        const resolvedComponents: ResolvedComp[] = [];
+
+        if (combo.comboType === 'PICK_ANY') {
+          const rawSelected = Array.isArray(line.selectedItems) ? line.selectedItems : [];
+          const mergedSelected = new Map<string, number>();
+          for (const item of rawSelected) {
+            const pId = String(item.productId || '');
+            const q = parseInt(String(item.quantity || 0), 10);
+            if (pId && !isNaN(q) && q > 0) {
+              mergedSelected.set(pId, (mergedSelected.get(pId) || 0) + q);
+            }
+          }
+          const totalSelected = Array.from(mergedSelected.values()).reduce((sum, q) => sum + q, 0);
+          const minItemsPerCombo = combo.minItems || 1;
+          const requiredTotal = minItemsPerCombo * line.quantity;
+          if (totalSelected !== requiredTotal) {
+            res.status(400).json({
+              error: `For combo "${combo.name}", you must select exactly ${requiredTotal} items (${minItemsPerCombo} per combo bundle). Selected: ${totalSelected}`,
+            });
+            return;
+          }
+          const allowedProductIds = combo.items.length > 0 ? new Set(combo.items.map(ci => ci.productId)) : null;
+
+          for (const [pId, qty] of mergedSelected.entries()) {
+            if (allowedProductIds && !allowedProductIds.has(pId)) {
+              res.status(400).json({ error: `Product ${pId} is not in the allowed items for combo "${combo.name}".` });
+              return;
+            }
+            const alloc = event.allocations.find(a => a.productId === pId);
+            if (!alloc) {
+              res.status(400).json({ error: `Product ${pId} is not allocated to this event.` });
+              return;
+            }
+            if (combo.projectId && alloc.product.projectId !== combo.projectId) {
+              throw new StockConflict('Selected product is outside this offer project.');
+            }
+            resolvedComponents.push({
+              productId: pId,
+              productName: alloc.product.name,
+              projectName: alloc.product.project.name,
+              quantity: qty,
+              allocationPrice: Number(alloc.priceAtEvent),
+            });
+          }
+        } else {
+          // FIXED_QUANTITY, MULTI_PRODUCT, BUY_X_GET_Y
+          for (const ci of combo.items) {
+            const neededQty = ci.quantity * line.quantity;
+            const alloc = event.allocations.find(a => a.productId === ci.productId);
+            if (!alloc) {
+              res.status(400).json({ error: `Combo component product ${ci.product.name} (${ci.productId}) is not allocated to this event.` });
+              return;
+            }
+            resolvedComponents.push({
+              productId: ci.productId,
+              productName: ci.product.name,
+              projectName: ci.product.project.name,
+              quantity: neededQty,
+              allocationPrice: Number(alloc.priceAtEvent),
+            });
+          }
+        }
+
+        if (resolvedComponents.length === 0) {
+          throw new StockConflict(`The offer "${combo.name}" has no eligible components.`);
+        }
+
+        // Proportional price distribution down to the exact cent
+        const comboPriceTotal = Number(combo.price) * line.quantity;
+        const totalUnits = resolvedComponents.reduce((sum, c) => sum + c.quantity, 0);
+        const totalNormalValue = resolvedComponents.reduce((sum, c) => sum + (c.allocationPrice * c.quantity), 0);
+
+        let allocatedCents = 0;
+        const totalCents = Math.round(comboPriceTotal * 100);
+
+        for (let idx = 0; idx < resolvedComponents.length; idx++) {
+          const comp = resolvedComponents[idx];
+          let lineTotalCents: number;
+          if (idx === resolvedComponents.length - 1) {
+            lineTotalCents = totalCents - allocatedCents;
+          } else {
+            const ratio = totalNormalValue > 0 ? (comp.allocationPrice * comp.quantity) / totalNormalValue : comp.quantity / totalUnits;
+            lineTotalCents = Math.round(totalCents * ratio);
+            allocatedCents += lineTotalCents;
+          }
+          const lineTotal = lineTotalCents / 100;
+          const unitPrice = Math.round((lineTotal / comp.quantity) * 100) / 100;
+          physicalItemsToFulfill.push({
+            productId: comp.productId,
+            productName: comp.productName,
+            projectName: comp.projectName,
+            quantity: comp.quantity,
+            unitPrice,
+            lineTotal,
+            allowWarehouseFulfill: true,
+          });
+        }
+
+        commercialSnapshots.push({
+          lineId: `combo-${combo.id}-${commercialSnapshots.length}`,
+          type: 'COMBO',
+          comboId: combo.id,
+          name: combo.name,
+          quantity: line.quantity,
+          unitPrice: Number(combo.price),
+          lineTotal: comboPriceTotal,
+          savings: totalNormalValue > comboPriceTotal ? Math.round((totalNormalValue - comboPriceTotal) * 100) / 100 : undefined,
+          normalValue: totalNormalValue,
+          comboType: combo.comboType,
+          components: resolvedComponents.map(c => ({
+            productId: c.productId,
+            productName: c.productName,
+            quantity: Math.round(c.quantity / line.quantity),
+            totalQuantity: c.quantity,
+          })),
+        });
+      } else {
+        // NORMAL_PRODUCT
+        const alloc = event.allocations.find(a => a.productId === line.productId);
+        if (!alloc) {
+          res.status(400).json({ error: `Product ${line.productId} is not allocated to this event` });
+          return;
+        }
+        const unitPrice = Number(alloc.priceAtEvent);
+        if (line.unitPrice !== undefined && moneyCents(line.unitPrice) !== moneyCents(unitPrice.toFixed(2))) {
+          throw new StockConflict(`Price changed for ${line.productId}. Review the transaction before retrying.`);
+        }
+        const lineTotal = Math.round(unitPrice * line.quantity * 100) / 100;
+
+        physicalItemsToFulfill.push({
+          productId: alloc.productId,
+          productName: alloc.product.name,
+          projectName: alloc.product.project.name,
+          quantity: line.quantity,
+          unitPrice,
+          lineTotal,
+          allowWarehouseFulfill: false,
+        });
+
+        commercialSnapshots.push({
+          lineId: alloc.productId,
+          type: 'NORMAL_PRODUCT',
+          productId: alloc.productId,
+          name: alloc.product.name,
+          quantity: line.quantity,
           unitPrice,
           lineTotal,
         });
       }
-
-      const grandTotal = validatedItems.reduce((sum, item) => sum + item.lineTotal, 0);
-
-      // Validate payment method amounts
-      const payment = paymentAmounts(normMethod, cashAmount, upiAmount, grandTotal);
-      const resolvedCashAmount = payment.cash, resolvedUpiAmount = payment.upi;
-      if (req.body.totalAmount !== undefined && moneyCents(req.body.totalAmount) !== moneyCents(grandTotal.toFixed(2))) {
-        throw new StockConflict('Event prices changed. Preserve this transaction for review.');
-      }
-
-      // Create single customer transaction in atomic database transaction
-      let concurrentAcknowledgement: Awaited<ReturnType<typeof existingSaleAcknowledgement>> = null;
-        const newSale = await stockTransaction(async tx => {
-        // Idempotency check if clientTxId supplied
-        if (clientTxId) {
-            const existing = await existingSaleAcknowledgement(tx, req.body, req.user!.id);
-            if (existing) { concurrentAcknowledgement = existing; return null; }
-        }
-
-        // Atomically allocate next canonical sequential receipt number from Postgres sequence
-        await assertAllocatedStock(tx, eventId, validatedItems, !comboId);
-          const [{ nextVal }] = await tx.$queryRaw<[{ nextVal: bigint | number }]>`
-          SELECT nextval('receipt_number_seq')::bigint as "nextVal"
-        `;
-        const receiptNumber = Number(nextVal);
-
-        return await tx.sale.create({
-          data: {
-            receiptNumber,
-            clientTxId: clientTxId ? String(clientTxId) : null,
-            eventId,
-            memberId: req.user!.id,
-            sellerUserIdAtSale: req.user!.id,
-            sellerUsernameAtSale: req.user!.username,
-            sellerNameAtSale: req.user!.name,
-            totalAmount: grandTotal,
-            paymentMethod: normMethod,
-            cashAmount: resolvedCashAmount,
-            upiAmount: resolvedUpiAmount,
-            customerName: customerName ? String(customerName).trim() : null,
-            customerPhone: customerPhone ? String(customerPhone).trim() : null,
-            saleTime: saleTime ? new Date(saleTime) : new Date(),
-            items: {
-              create: validatedItems.map(item => ({
-                productId: item.productId,
-                quantity: item.quantity,
-                unitPrice: item.unitPrice,
-                lineTotal: item.lineTotal,
-              })),
-            },
-          },
-          include: {
-            event: true,
-            member: true,
-            items: {
-              include: {
-                product: { include: { project: true } },
-              },
-            },
-          },
-        });
-      });
-
-      if (!newSale) { res.status(200).json({ sale: concurrentAcknowledgement }); return; }
-
-      const totalUnits = validatedItems.reduce((sum, i) => sum + i.quantity, 0);
-
-      // WebSocket broadcasts
-      broadcast('sale:created', {
-        id: newSale.id,
-        receiptNumber: newSale.receiptNumber,
-        serialNumber: newSale.receiptNumber,
-        eventId: newSale.eventId,
-        eventName: newSale.event.name,
-        totalAmount: Number(newSale.totalAmount),
-        paymentMethod: newSale.paymentMethod,
-        cashAmount: Number(newSale.cashAmount ?? resolvedCashAmount),
-        upiAmount: Number(newSale.upiAmount ?? resolvedUpiAmount),
-        memberName: newSale.sellerNameAtSale || newSale.member?.name || req.user!.name,
-        memberUsername: newSale.sellerUsernameAtSale || newSale.member?.username || req.user!.username,
-        saleTime: newSale.saleTime,
-        itemsCount: newSale.items.length,
-        totalUnits,
-      });
-
-      broadcast('inventory:updated', {
-        action: 'sales_recorded',
-        eventId,
-        saleId: newSale.id,
-      });
-
-      // Automatically dispatch WhatsApp bill if customer phone is provided
-      if (newSale.customerPhone && newSale.customerPhone.trim()) {
-        whatsappService.sendSaleReceipt({
-          phone: newSale.customerPhone.trim(),
-          customerName: newSale.customerName ? String(newSale.customerName).trim() : 'Valued Supporter',
-          receiptNumber: newSale.receiptNumber,
-          eventName: newSale.event.name,
-          eventLocation: newSale.event.location,
-          items: validatedItems.map(item => ({
-            productName: item.productName,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            lineTotal: item.lineTotal,
-          })),
-          totalAmount: Number(newSale.totalAmount),
-          paymentMethod: newSale.paymentMethod,
-          cashAmount: Number(newSale.cashAmount ?? resolvedCashAmount),
-          upiAmount: Number(newSale.upiAmount ?? resolvedUpiAmount),
-          sellerName: newSale.sellerNameAtSale || req.user!.name,
-          saleTime: newSale.saleTime,
-        }).catch(err => console.error('[WhatsApp] Auto-dispatch receipt error:', err));
-      }
-
-      const formatted = {
-        id: newSale.id,
-        receiptNumber: newSale.receiptNumber,
-        serialNumber: newSale.receiptNumber,
-        clientTxId: newSale.clientTxId,
-        eventId: newSale.eventId,
-        eventName: newSale.event.name,
-        totalAmount: Number(newSale.totalAmount),
-        paymentMethod: newSale.paymentMethod,
-        cashAmount: Number(newSale.cashAmount ?? resolvedCashAmount),
-        upiAmount: Number(newSale.upiAmount ?? resolvedUpiAmount),
-        customerName: newSale.customerName,
-        customerPhone: newSale.customerPhone,
-        saleTime: newSale.saleTime,
-        createdAt: newSale.createdAt,
-        items: newSale.items.map(item => ({
-          id: item.id,
-          productId: item.productId,
-          productName: item.product.name,
-          projectName: item.product.project.name,
-          quantity: item.quantity,
-          unitPrice: Number(item.unitPrice),
-          lineTotal: Number(item.lineTotal),
-        })),
-        totalUnits,
-        totalOrderAmount: grandTotal,
-      };
-
-      res.status(201).json({
-        message: 'Customer transaction recorded successfully',
-        sale: sanitizeSaleForUser(formatted, req.user),
-        totalItems: totalUnits,
-        totalOrderAmount: grandTotal,
-      });
-    } catch (error) {
-      console.error('Record sale error:', error);
-      res.status((error as any).status || 500).json({ error: (error as any).status ? (error as Error).message : 'Failed to record sale. Retry the same operation key.' });
     }
-  };
+
+    // 5. Calculate Grand Total & Commercial Units
+    const grandTotal = Math.round(commercialSnapshots.reduce((sum, l) => sum + l.lineTotal, 0) * 100) / 100;
+    const commercialUnits = commercialSnapshots.reduce((sum, l) => sum + l.quantity, 0);
+    const physicalUnits = physicalItemsToFulfill.reduce((sum, i) => sum + i.quantity, 0);
+
+    const payment = paymentAmounts(normMethod, cashAmount, upiAmount, grandTotal);
+    const resolvedCashAmount = payment.cash, resolvedUpiAmount = payment.upi;
+
+    if (totalAmount !== undefined && moneyCents(totalAmount) !== moneyCents(grandTotal.toFixed(2))) {
+      throw new StockConflict('Bill prices changed. Preserve this transaction for review.');
+    }
+
+    // 6. Atomic database transaction with global inventory lock
+    let concurrentAcknowledgement: Awaited<ReturnType<typeof existingSaleAcknowledgement>> = null;
+    const newSale = await stockTransaction(async tx => {
+      if (clientTxId) {
+        const existing = await existingSaleAcknowledgement(tx, req.body, req.user!.id);
+        if (existing) {
+          concurrentAcknowledgement = existing;
+          return null;
+        }
+      }
+
+      // Assert event stock and auto-source combo shortfall from warehouse
+      await assertAllocatedStock(tx, eventId, physicalItemsToFulfill, true);
+
+      const [{ nextVal }] = await tx.$queryRaw<[{ nextVal: bigint | number }]>`
+        SELECT nextval('receipt_number_seq')::bigint as "nextVal"
+      `;
+      const receiptNumber = Number(nextVal);
+
+      const comboLines = commercialSnapshots.filter(l => l.type === 'COMBO');
+      const normalLines = commercialSnapshots.filter(l => l.type === 'NORMAL_PRODUCT');
+      const transactionType = normalLines.length === 0 && comboLines.length > 0 ? TransactionType.COMBO : TransactionType.SALE;
+      const targetComboId = comboLines.length === 1 ? comboLines[0].comboId : null;
+      const targetComboName = comboLines.length === 1 ? comboLines[0].name : comboLines.length > 1 ? comboLines.map(c => c.name).join(' + ') : null;
+
+      return await tx.sale.create({
+        data: {
+          receiptNumber,
+          clientTxId: clientTxId ? String(clientTxId) : null,
+          eventId,
+          memberId: req.user!.id,
+          sellerUserIdAtSale: req.user!.id,
+          sellerUsernameAtSale: req.user!.username,
+          sellerNameAtSale: req.user!.name,
+          transactionType,
+          comboId: targetComboId,
+          comboName: targetComboName,
+          cartSnapshot: commercialSnapshots,
+          totalAmount: grandTotal,
+          paymentMethod: normMethod,
+          cashAmount: resolvedCashAmount,
+          upiAmount: resolvedUpiAmount,
+          customerName: customerName ? String(customerName).trim() : null,
+          customerPhone: customerPhone ? String(customerPhone).trim() : null,
+          saleTime: saleTime ? new Date(saleTime) : new Date(),
+          items: {
+            create: physicalItemsToFulfill.map(item => ({
+              productId: item.productId,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              lineTotal: item.lineTotal,
+            })),
+          },
+        },
+        include: {
+          event: true,
+          member: true,
+          combo: true,
+          items: {
+            include: { product: { include: { project: true } } },
+          },
+        },
+      });
+    });
+
+    if (!newSale) {
+      res.status(200).json({ sale: concurrentAcknowledgement });
+      return;
+    }
+
+    // 7. WebSocket Realtime Broadcasts
+    const isMixedOrder = commercialSnapshots.some(l => l.type === 'COMBO') && commercialSnapshots.some(l => l.type === 'NORMAL_PRODUCT');
+    const effectiveTxType = isMixedOrder ? 'MIXED' : newSale.transactionType;
+
+    broadcast('sale:created', {
+      id: newSale.id,
+      receiptNumber: newSale.receiptNumber,
+      serialNumber: newSale.receiptNumber,
+      eventId: newSale.eventId,
+      eventName: newSale.event.name,
+      totalAmount: Number(newSale.totalAmount),
+      paymentMethod: newSale.paymentMethod,
+      cashAmount: Number(newSale.cashAmount ?? resolvedCashAmount),
+      upiAmount: Number(newSale.upiAmount ?? resolvedUpiAmount),
+      memberName: newSale.sellerNameAtSale || newSale.member?.name || req.user!.name,
+      memberUsername: newSale.sellerUsernameAtSale || newSale.member?.username || req.user!.username,
+      saleTime: newSale.saleTime,
+      itemsCount: commercialSnapshots.length,
+      totalUnits: commercialUnits,
+      commercialUnits,
+      physicalUnits,
+      transactionType: effectiveTxType,
+      comboName: newSale.comboName,
+      cartSnapshot: commercialSnapshots,
+    });
+
+    broadcast('inventory:updated', {
+      action: 'sales_recorded',
+      eventId,
+      saleId: newSale.id,
+    });
+
+    for (const c of commercialSnapshots.filter(l => l.type === 'COMBO')) {
+      broadcast('combo:sold', {
+        comboId: c.comboId,
+        eventId,
+        receiptNumber: newSale.receiptNumber,
+      });
+    }
+
+    // 8. Auto-dispatch Digital WhatsApp Bill if customer phone provided
+    if (newSale.customerPhone && newSale.customerPhone.trim()) {
+      whatsappService.sendSaleReceipt({
+        phone: newSale.customerPhone.trim(),
+        customerName: newSale.customerName ? String(newSale.customerName).trim() : 'Valued Supporter',
+        receiptNumber: newSale.receiptNumber,
+        eventName: newSale.event.name,
+        eventLocation: newSale.event.location,
+        items: commercialSnapshots.map(item => ({
+          productName: item.type === 'COMBO' ? `[Combo] ${item.name}` : item.name,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          lineTotal: item.lineTotal,
+        })),
+        totalAmount: Number(newSale.totalAmount),
+        paymentMethod: newSale.paymentMethod,
+        cashAmount: Number(newSale.cashAmount ?? resolvedCashAmount),
+        upiAmount: Number(newSale.upiAmount ?? resolvedUpiAmount),
+        sellerName: newSale.sellerNameAtSale || req.user?.name,
+        saleTime: newSale.saleTime,
+      }).catch(err => console.error('[WhatsApp] Auto-dispatch receipt error:', err));
+    }
+
+    // 9. Format response payload
+    const displayProductName = commercialSnapshots.map(l => `${l.name} × ${l.quantity}`).join(', ') || newSale.comboName || 'Products';
+    const uniqueProjects = Array.from(new Set(newSale.items.map(item => item.product?.project?.name).filter(Boolean)));
+    const primaryProject = uniqueProjects.length > 0 ? uniqueProjects.join(' + ') : 'Multiple';
+
+    const formatted = {
+      id: newSale.id,
+      receiptNumber: newSale.receiptNumber,
+      serialNumber: newSale.receiptNumber,
+      clientTxId: newSale.clientTxId,
+      eventId: newSale.eventId,
+      eventName: newSale.event.name,
+      transactionType: effectiveTxType,
+      comboId: newSale.comboId,
+      comboName: newSale.comboName,
+      productName: displayProductName,
+      description: displayProductName,
+      projectName: primaryProject,
+      totalAmount: Number(newSale.totalAmount),
+      paymentMethod: newSale.paymentMethod,
+      cashAmount: Number(newSale.cashAmount ?? resolvedCashAmount),
+      upiAmount: Number(newSale.upiAmount ?? resolvedUpiAmount),
+      customerName: newSale.customerName,
+      customerPhone: newSale.customerPhone,
+      saleTime: newSale.saleTime,
+      createdAt: newSale.createdAt,
+      cartSnapshot: commercialSnapshots,
+      lines: commercialSnapshots,
+      items: newSale.items.map(item => ({
+        id: item.id,
+        productId: item.productId,
+        productName: item.product.name,
+        projectName: item.product.project.name,
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPrice),
+        lineTotal: Number(item.lineTotal),
+      })),
+      totalUnits: commercialUnits,
+      commercialUnits,
+      physicalUnits,
+      totalOrderAmount: grandTotal,
+    };
+
+    res.status(201).json({
+      message: 'Sale recorded successfully',
+      sale: sanitizeSaleForUser(formatted, req.user),
+      totalItems: commercialUnits,
+      totalOrderAmount: grandTotal,
+    });
+  } catch (error) {
+    console.error('Record sale error:', error);
+    res.status((error as any).status || 500).json({
+      error: (error as any).status ? (error as Error).message : 'Failed to record sale. Retry the same operation key.',
+    });
+  }
+};
 
 // POST /api/sales: Record a single customer transaction (real-time entry)
 router.post(
@@ -1130,202 +1026,7 @@ router.put(
   '/:id',
   authenticateToken,
   requireRoles(Role.DEVELOPER),
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) {
-      res.status(400).json({ error: 'Invalid sale ID' });
-      return;
-    }
-
-    const {
-      quantity,
-      unitPrice,
-      paymentMethod,
-      cashAmount,
-      upiAmount,
-      customerName,
-      customerPhone,
-      saleTime,
-    } = req.body;
-
-    try {
-      const existing = await prisma.sale.findUnique({
-        where: { id },
-        include: {
-          product: { include: { project: true } },
-          event: true,
-          member: true,
-          items: {
-            include: {
-              product: { include: { project: true } },
-            },
-          },
-        },
-      });
-
-      if (!existing) {
-        res.status(404).json({ error: 'Sale record not found' });
-        return;
-      }
-
-      const updateData: any = {};
-
-      if (quantity !== undefined) {
-        const newQty = parseInt(quantity, 10);
-        if (isNaN(newQty) || newQty <= 0) {
-          res.status(400).json({ error: 'Quantity must be a positive integer' });
-          return;
-        }
-        updateData.quantity = newQty;
-      }
-
-      if (unitPrice !== undefined) {
-        const newPrice = parseFloat(unitPrice);
-        if (isNaN(newPrice) || newPrice < 0) {
-          res.status(400).json({ error: 'Unit price must be a non-negative number' });
-          return;
-        }
-        updateData.unitPrice = newPrice;
-      }
-
-      const effectiveQty = updateData.quantity !== undefined ? updateData.quantity : (existing.quantity || 1);
-      const effectivePrice = updateData.unitPrice !== undefined ? updateData.unitPrice : Number(existing.unitPrice || 0);
-      if (updateData.quantity !== undefined || updateData.unitPrice !== undefined) {
-        updateData.totalAmount = effectiveQty * effectivePrice;
-      }
-
-      if (paymentMethod !== undefined) {
-        const rawMethod = String(paymentMethod).toUpperCase().replace(/[\s\+]/g, '_');
-        if (rawMethod === 'CASH') {
-          updateData.paymentMethod = PaymentMethod.CASH;
-          updateData.cashAmount = updateData.totalAmount !== undefined ? updateData.totalAmount : existing.totalAmount;
-          updateData.upiAmount = 0;
-        } else if (rawMethod === 'UPI') {
-          updateData.paymentMethod = PaymentMethod.UPI;
-          updateData.cashAmount = 0;
-          updateData.upiAmount = updateData.totalAmount !== undefined ? updateData.totalAmount : existing.totalAmount;
-        } else if (rawMethod === 'CASH_UPI' || rawMethod === 'CASH_AND_UPI' || rawMethod === 'SPLIT') {
-          updateData.paymentMethod = PaymentMethod.CASH_UPI;
-          if (cashAmount !== undefined && upiAmount !== undefined) {
-            updateData.cashAmount = parseFloat(cashAmount);
-            updateData.upiAmount = parseFloat(upiAmount);
-          }
-        } else {
-          res.status(400).json({ error: 'Payment method must be CASH, UPI, or CASH + UPI' });
-          return;
-        }
-      }
-
-      if (customerName !== undefined) {
-        updateData.customerName = customerName ? String(customerName).trim() : null;
-      }
-
-      if (customerPhone !== undefined) {
-        updateData.customerPhone = customerPhone ? String(customerPhone).trim() : null;
-      }
-
-      if (saleTime !== undefined) {
-        updateData.saleTime = new Date(saleTime);
-      }
-
-      const updated = await prisma.sale.update({
-        where: { id },
-        data: updateData,
-        include: {
-          product: { include: { project: true } },
-          event: true,
-          member: true,
-          items: {
-            include: {
-              product: { include: { project: true } },
-            },
-          },
-        },
-      });
-
-      broadcast('inventory:updated', { action: 'sale_updated', id });
-
-      const rawItems = (updated.items && updated.items.length > 0)
-        ? updated.items.map(item => ({
-            id: item.id,
-            productId: item.productId,
-            productName: item.product?.name || item.productId,
-            projectId: item.product?.project?.id || '',
-            projectName: item.product?.project?.name || '',
-            quantity: item.quantity,
-            unitPrice: Number(item.unitPrice),
-            lineTotal: Number(item.lineTotal),
-          }))
-        : updated.productId
-        ? [{
-            id: updated.id,
-            productId: updated.productId,
-            productName: updated.product?.name || updated.productId,
-            projectId: updated.product?.project?.id || '',
-            projectName: updated.product?.project?.name || '',
-            quantity: updated.quantity || 1,
-            unitPrice: Number(updated.unitPrice || 0),
-            lineTotal: Number(updated.totalAmount || 0),
-          }]
-        : [];
-
-      const totalUnits = rawItems.reduce((sum, item) => sum + item.quantity, 0) || updated.quantity || 0;
-      const uniqueProjects = Array.from(new Set(rawItems.map(item => item.projectName).filter(Boolean)));
-      const primaryProject = uniqueProjects.length > 0 ? uniqueProjects.join(' + ') : (updated.product?.project?.name || 'Multiple');
-      const productSummary = rawItems.map(item => `${item.productName} × ${item.quantity}`).join(', ') || updated.product?.name || 'No Products';
-
-      const firstItem = rawItems[0] || {};
-
-      const formatted = {
-        id: updated.id,
-        receiptNumber: updated.receiptNumber,
-        serialNumber: updated.receiptNumber,
-        clientTxId: updated.clientTxId,
-        eventId: updated.eventId,
-        eventName: updated.event.name,
-        productId: firstItem.productId || updated.productId || '',
-        productName: productSummary,
-        projectId: firstItem.projectId || updated.product?.project?.id || '',
-        projectName: primaryProject,
-        projectNames: uniqueProjects,
-        memberId: updated.sellerUserIdAtSale || updated.memberId || '',
-        memberName: updated.sellerNameAtSale || updated.member?.name || 'Unknown Member',
-        memberUsername: updated.sellerUsernameAtSale || updated.member?.username || '',
-        memberDepartment: updated.member?.department || null,
-        sellerUserIdAtSale: updated.sellerUserIdAtSale || updated.memberId || undefined,
-        sellerUsernameAtSale: updated.sellerUsernameAtSale || updated.member?.username || undefined,
-        sellerNameAtSale: updated.sellerNameAtSale || updated.member?.name || undefined,
-        items: rawItems,
-        totalUnits,
-        quantity: totalUnits,
-        unitPrice: Number(firstItem.unitPrice ?? updated.unitPrice ?? 0),
-        totalAmount: Number(updated.totalAmount),
-        paymentMethod: updated.paymentMethod,
-        cashAmount: updated.cashAmount !== null && updated.cashAmount !== undefined
-          ? Number(updated.cashAmount)
-          : updated.paymentMethod === 'CASH'
-          ? Number(updated.totalAmount)
-          : 0,
-        upiAmount: updated.upiAmount !== null && updated.upiAmount !== undefined
-          ? Number(updated.upiAmount)
-          : updated.paymentMethod === 'UPI'
-          ? Number(updated.totalAmount)
-          : 0,
-        customerName: updated.customerName,
-        customerPhone: updated.customerPhone,
-        saleTime: updated.saleTime,
-        createdAt: updated.createdAt,
-      };
-
-      res.json({
-        message: 'Sale updated successfully',
-        sale: sanitizeSaleForUser(formatted, req.user),
-      });
-    } catch (error) {
-      console.error('Update sale error:', error);
-      res.status(500).json({ error: 'Failed to update sale' });
-    }
-  }
+  preserveRecords
 );
 
 // DELETE /api/sales/:id: Delete a single sale record (DEVELOPER ONLY)
@@ -1333,37 +1034,7 @@ router.delete(
   '/:id',
   authenticateToken,
   requireRoles(Role.DEVELOPER),
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) {
-      res.status(400).json({ error: 'Invalid sale ID' });
-      return;
-    }
-
-    try {
-      const existing = await prisma.sale.findUnique({
-        where: { id },
-      });
-
-      if (!existing) {
-        res.status(404).json({ error: 'Sale record not found' });
-        return;
-      }
-
-      await prisma.$transaction([
-        prisma.gameSession.deleteMany({ where: { saleId: id } }),
-        prisma.sale.delete({ where: { id } }),
-      ]);
-      broadcast('inventory:updated', { action: 'sale_deleted', id });
-      broadcast('sale:deleted', { id, receiptNumber: existing.receiptNumber });
-
-      res.json({ message: `Sale #${id} deleted successfully`, id });
-    } catch (error) {
-      console.error('Delete sale error:', error);
-      res.status(500).json({ error: 'Failed to delete sale' });
-    }
-  }
+  preserveRecords
 );
 
 export default router;
-

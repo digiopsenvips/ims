@@ -107,7 +107,7 @@ export const App: React.FC = () => {
         <Route
           path="events"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={['DEVELOPER', 'ADMIN', 'HEAD']}>
               <EventsPage />
             </ProtectedRoute>
           }
@@ -116,7 +116,7 @@ export const App: React.FC = () => {
         <Route
           path="events/:eventId"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={['DEVELOPER', 'ADMIN', 'HEAD']}>
               <EventDetailsPage />
             </ProtectedRoute>
           }

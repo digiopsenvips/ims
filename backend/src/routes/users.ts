@@ -209,43 +209,7 @@ router.delete(
   '/:id',
   authenticateToken,
   requireRoles(Role.DEVELOPER),
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const { id } = req.params;
-
-    if (req.user?.id === id) {
-      res.status(400).json({ error: 'You cannot delete your own active account' });
-      return;
-    }
-
-    try {
-      const user = await prisma.user.findUnique({ where: { id } });
-      if (!user) {
-        res.status(404).json({ error: 'User not found' });
-        return;
-      }
-
-      // Ensure historical identity snapshots are populated for all sales recorded by this user
-      await prisma.sale.updateMany({
-        where: {
-          memberId: id,
-          sellerNameAtSale: null,
-        },
-        data: {
-          sellerUserIdAtSale: user.id,
-          sellerUsernameAtSale: user.username,
-          sellerNameAtSale: user.name,
-        },
-      });
-
-      await prisma.headPermission.deleteMany({ where: { userId: id } });
-      await prisma.user.delete({ where: { id } });
-
-      res.json({ message: 'User deleted successfully. Historical sales records have been preserved.' });
-    } catch (error) {
-      console.error('Delete user error:', error);
-      res.status(500).json({ error: 'Failed to delete user' });
-    }
-  }
+  preserveRecords
 );
 
 // POST /api/users/:id/reset-password: DEVELOPER ONLY

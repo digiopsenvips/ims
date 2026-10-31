@@ -21,7 +21,11 @@ export function moneyCents(value: unknown): number {
   if (value === null || value === undefined || value === '') {
     throw new InputError('Amount is required.');
   }
-  const num = typeof value === 'number' ? value : parseFloat(String(value).trim());
+  const str = String(value).trim();
+  if (!/^-?\d+(\.\d+)?$/.test(str)) {
+    throw new InputError('Amounts must be non-negative numbers.');
+  }
+  const num = Number(str);
   if (typeof num !== 'number' || isNaN(num) || !Number.isFinite(num) || num < 0) {
     throw new InputError('Amounts must be non-negative numbers.');
   }
@@ -59,9 +63,21 @@ export function validateOperation(body: any, userId: string) {
   if (body.quantity !== undefined) positiveInteger(body.quantity, 'Quantity');
   if (body.saleTime && !Number.isFinite(new Date(body.saleTime).getTime())) throw new InputError('Invalid sale timestamp.');
   if (body.items !== undefined && (!Array.isArray(body.items) || body.items.length > 200)) throw new InputError('Invalid item list.');
+  if (body.lines !== undefined && (!Array.isArray(body.lines) || body.lines.length > 200)) throw new InputError('Invalid line list.');
   if (body.selectedItems !== undefined && !Array.isArray(body.selectedItems)) throw new InputError('Invalid selected item list.');
   for (const item of [...(body.items || []), ...(body.selectedItems || [])]) {
     if (!item || typeof item.productId !== 'string' || !item.productId) throw new InputError('Product ID is required.');
     positiveInteger(item.quantity, 'Quantity');
+  }
+  if (body.lines) {
+    for (const line of body.lines) {
+      if (!line || typeof line !== 'object') throw new InputError('Invalid line item.');
+      positiveInteger(line.quantity, 'Quantity');
+      if (line.type === 'COMBO' || line.isCombo || line.comboId) {
+        if (typeof line.comboId !== 'string' || !line.comboId) throw new InputError('Combo ID is required for combo line.');
+      } else {
+        if (typeof line.productId !== 'string' || !line.productId) throw new InputError('Product ID is required for product line.');
+      }
+    }
   }
 }

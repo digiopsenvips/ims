@@ -90,7 +90,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           label: 'Events',
           to: '/events',
           icon: Calendar,
-          show: isDeveloper || isAdmin || hasPermission('view_event_breakdown') || hasPermission('edit_events') || isHead || isMember,
+          show: !isMember && (isDeveloper || isAdmin || hasPermission('view_event_breakdown') || hasPermission('edit_events') || isHead),
         },
         {
           label: 'Combos & Offers',

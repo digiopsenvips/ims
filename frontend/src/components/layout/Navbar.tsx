@@ -112,46 +112,63 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
       <div className="flex flex-1 min-w-0 flex-wrap sm:flex-nowrap justify-end items-center gap-1 sm:gap-3">
         {activeEvent ? (
           <div className="flex items-center gap-2 px-2.5 sm:px-3 py-1 bg-emerald-50 border border-emerald-200 rounded-full text-xs text-emerald-900 shadow-2xs">
-            <button
-              type="button"
-              onClick={() => {
-                setModalTargetEventId(activeEvent.id);
-                setShowStallModal(true);
-              }}
-              className="flex items-center gap-1.5 hover:opacity-85 transition-opacity cursor-pointer text-left focus:outline-none"
-              title="Open Live Stall Management"
-            >
-              <span className="relative flex h-2 w-2 shrink-0">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <span className="font-black text-[11px] uppercase tracking-wide text-emerald-800 hidden sm:inline">
-                Live Stall:
-              </span>
-              <span className="font-bold text-slate-800 text-xs max-w-[90px] sm:max-w-[160px] truncate" title={activeEvent.name}>
-                {activeEvent.name}
-              </span>
-              {activeEvents.length > 1 && (
-                <span className="hidden sm:inline-block px-1.5 py-0.5 bg-emerald-200/80 text-emerald-900 text-[9px] font-black rounded uppercase tracking-wider shrink-0" title={`${activeEvents.length} stalls running simultaneously`}>
-                  {activeEvents.length} Live
+            {isMember ? (
+              <div className="flex items-center gap-1.5 text-left select-none">
+                <span className="relative flex h-2 w-2 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                 </span>
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setModalTargetEventId(activeEvent.id);
-                setShowStallModal(true);
-              }}
-              className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] uppercase rounded tracking-wider transition-colors shrink-0 cursor-pointer shadow-2xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-              title="Manage live stall operations, stock, and games"
-              aria-label="Manage live stall"
-              aria-haspopup="dialog"
-            >
-              Manage
-            </button>
+                <span className="font-black text-[11px] uppercase tracking-wide text-emerald-800 hidden sm:inline">
+                  Stall:
+                </span>
+                <span className="font-bold text-slate-800 text-xs max-w-[120px] sm:max-w-[200px] truncate" title={activeEvent.name}>
+                  {activeEvent.name}
+                </span>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setModalTargetEventId(activeEvent.id);
+                    setShowStallModal(true);
+                  }}
+                  className="flex items-center gap-1.5 hover:opacity-85 transition-opacity cursor-pointer text-left focus:outline-none"
+                  title="Open Live Stall Management"
+                >
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <span className="font-black text-[11px] uppercase tracking-wide text-emerald-800 hidden sm:inline">
+                    Live Stall:
+                  </span>
+                  <span className="font-bold text-slate-800 text-xs max-w-[90px] sm:max-w-[160px] truncate" title={activeEvent.name}>
+                    {activeEvent.name}
+                  </span>
+                  {activeEvents.length > 1 && (
+                    <span className="hidden sm:inline-block px-1.5 py-0.5 bg-emerald-200/80 text-emerald-900 text-[9px] font-black rounded uppercase tracking-wider shrink-0" title={`${activeEvents.length} stalls running simultaneously`}>
+                      {activeEvents.length} Live
+                    </span>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setModalTargetEventId(activeEvent.id);
+                    setShowStallModal(true);
+                  }}
+                  className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] uppercase rounded tracking-wider transition-colors shrink-0 cursor-pointer shadow-2xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  title="Manage live stall operations, stock, and games"
+                  aria-label="Manage live stall"
+                  aria-haspopup="dialog"
+                >
+                  Manage
+                </button>
+              </>
+            )}
           </div>
-        ) : (
+        ) : !isMember ? (
           <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-full text-xs text-slate-500">
             <Store className="w-3.5 h-3.5 text-slate-400" />
             <span className="text-[11px] font-medium text-slate-600">No Live Stall</span>
@@ -166,7 +183,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
               Open Stall
             </button>
           </div>
-        )}
+        ) : null}
 
         <WhatsAppIndicator showTextAlways={false} />
         <SyncIndicator />

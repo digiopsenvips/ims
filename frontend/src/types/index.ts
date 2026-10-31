@@ -136,6 +136,8 @@ export interface Sale {
   transactionType?: TransactionType; // 'SALE' | 'GAME' | 'COMBO'
   comboId?: string | null;
   comboName?: string | null;
+  cartSnapshot?: any[] | null;
+  lines?: any[] | null;
   combo?: {
     id: string;
     name: string;
@@ -245,6 +247,8 @@ export interface QueuedTransaction {
   comboName?: string;
   comboQuantity?: number;
   transactionType?: TransactionType;
+  lines?: any[];
+  cartSnapshot?: any[];
   saleTime: string;
   queuedAt: number;
   syncStatus: 'pending' | 'processing' | 'committed' | 'rejected' | 'conflict' | 'syncing' | 'failed';

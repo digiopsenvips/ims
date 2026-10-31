@@ -9,8 +9,9 @@ export async function existingSaleAcknowledgement(
     where: { clientTxId: body.clientTxId },
     select: {
       id: true, receiptNumber: true, clientTxId: true, eventId: true,
-      memberId: true, sellerUserIdAtSale: true, comboId: true, gameId: true,
+      memberId: true, sellerUserIdAtSale: true, comboId: true, comboName: true, gameId: true,
       customerName: true, customerPhone: true, saleTime: true, paymentMethod: true, cashAmount: true, upiAmount: true, totalAmount: true,
+      cartSnapshot: true,
       items: { select: { productId: true, quantity: true } },
       gameSession: { select: {
         sessionCode: true, result: true, rewardQuantity: true, entryFee: true,
@@ -21,7 +22,8 @@ export async function existingSaleAcknowledgement(
   });
   if (!sale) return null;
   const owner = sale.sellerUserIdAtSale || sale.memberId;
-  if (owner !== sellerId || sale.eventId !== body.eventId || (sale.comboId || null) !== (body.comboId || null) ||
+  const bodyComboId = body.comboId || (Array.isArray(body.lines) && body.lines.filter((l: any) => l.type === 'COMBO' || l.isCombo).length === 1 ? (body.lines.find((l: any) => l.type === 'COMBO' || l.isCombo)?.comboId || null) : null) || null;
+  if (owner !== sellerId || sale.eventId !== body.eventId || (sale.comboId || null) !== bodyComboId ||
       (sale.gameId || null) !== (body.gameId || null) || sale.paymentMethod !== paymentMethod(body.paymentMethod)) {
     throw new StockConflict('Operation key belongs to a different seller, event or transaction. Preserve the original payload.');
   }
@@ -55,6 +57,8 @@ export async function existingSaleAcknowledgement(
   return {
     id: sale.id, receiptNumber: sale.receiptNumber, clientTxId: sale.clientTxId,
     eventId: sale.eventId, totalAmount: Number(sale.totalAmount), paymentMethod: sale.paymentMethod,
+    comboId: sale.comboId || null, comboName: sale.comboName || null,
+    cartSnapshot: (sale as any).cartSnapshot || null,
     receipt: sale.gameSession ? {
       receiptNumber: sale.receiptNumber, receiptId: `#${sale.receiptNumber}`,
       sessionCode: sale.gameSession.sessionCode, gameName: sale.game?.name,

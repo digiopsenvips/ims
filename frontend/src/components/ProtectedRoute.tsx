@@ -43,12 +43,10 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return <Navigate to="/sales-entry" replace />;
   }
 
-  // Member allowed paths (POS, member check-in, stall events, combos, game play)
+  // Member allowed paths (POS, member check-in, combos, game play)
   const isMemberPathAllowed =
     location.pathname === '/sales-entry' ||
     location.pathname === '/member-confirm' ||
-    location.pathname === '/events' ||
-    location.pathname.startsWith('/events/') ||
     location.pathname === '/combos' ||
     location.pathname === '/games/play' ||
     location.pathname === '/play-game';

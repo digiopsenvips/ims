@@ -135,8 +135,9 @@ router.get(
           }
 
           const isEligible = !product.isArchived && !product.isDeleted;
-          const warehouseStock = isEligible ? Math.max(0, product.inventory?.quantityOnHand ?? 0) : 0;
-          const stallStock = isEligible
+          const isAllocatedToContext = !contextId || (context ? context.has(item.productId) : true);
+          const warehouseStock = (isEligible && isAllocatedToContext) ? Math.max(0, product.inventory?.quantityOnHand ?? 0) : 0;
+          const stallStock = (isEligible && isAllocatedToContext)
             ? (contextId ? (context?.get(item.productId)?.stallStock ?? 0) : (globalStallStocks.get(item.productId) ?? 0))
             : 0;
           const usableStock = stallStock + warehouseStock;
@@ -299,8 +300,9 @@ router.get(
         }
 
         const isEligible = !product.isArchived && !product.isDeleted;
-        const warehouseStock = isEligible ? Math.max(0, product.inventory?.quantityOnHand ?? 0) : 0;
-        const stallStock = isEligible
+        const isAllocatedToContext = !contextId || (context ? context.has(item.productId) : true);
+        const warehouseStock = (isEligible && isAllocatedToContext) ? Math.max(0, product.inventory?.quantityOnHand ?? 0) : 0;
+        const stallStock = (isEligible && isAllocatedToContext)
           ? (contextId ? (context?.get(item.productId)?.stallStock ?? 0) : (globalStallStocks.get(item.productId) ?? 0))
           : 0;
         const usableStock = stallStock + warehouseStock;

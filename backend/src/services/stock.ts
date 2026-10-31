@@ -44,38 +44,60 @@ export async function assertEventOpen(tx: Prisma.TransactionClient, eventId: str
 
 export async function assertAllocatedStock(
   tx: Prisma.TransactionClient, eventId: string,
-  items: Array<{ productId: string; quantity: number; unitPrice?: number }>,
+  items: Array<{ productId: string; quantity: number; unitPrice?: number; allowWarehouseFulfill?: boolean }>,
   checkPrice = false,
   allowWarehouseFulfill = false,
 ) {
   await assertEventOpen(tx, eventId);
   const allocations = await tx.eventAllocation.findMany({ where: { eventId }, include: { product: true } });
   const consumed = await eventConsumption(tx, eventId);
-  const requested = new Map<string, number>();
+  const requestedNormal = new Map<string, number>();
+  const requestedCombo = new Map<string, number>();
+
   for (const item of items) {
     if (!Number.isSafeInteger(item.quantity) || item.quantity <= 0) throw new StockConflict('Invalid item quantity.');
-    requested.set(item.productId, (requested.get(item.productId) || 0) + item.quantity);
+    const canFulfillWh = item.allowWarehouseFulfill !== undefined ? item.allowWarehouseFulfill : allowWarehouseFulfill;
+    if (canFulfillWh) {
+      requestedCombo.set(item.productId, (requestedCombo.get(item.productId) || 0) + item.quantity);
+    } else {
+      requestedNormal.set(item.productId, (requestedNormal.get(item.productId) || 0) + item.quantity);
+    }
   }
-  for (const [productId, quantity] of requested) {
+
+  const allProductIds = new Set([...requestedNormal.keys(), ...requestedCombo.keys()]);
+
+  for (const productId of allProductIds) {
     let allocation = allocations.find(a => a.productId === productId);
     const consumedQty = consumed.get(productId) || 0;
     const currentAllocated = allocation ? allocation.allocatedQty : 0;
     const currentRemaining = Math.max(0, currentAllocated - consumedQty);
+    const normalQty = requestedNormal.get(productId) || 0;
+    const comboQty = requestedCombo.get(productId) || 0;
+    const totalRequired = normalQty + comboQty;
 
-    if (currentRemaining < quantity) {
-      if (!allowWarehouseFulfill) {
-        throw new StockConflict(`Insufficient eligible event stock for ${productId}.`);
-      }
-      const shortfall = quantity - currentRemaining;
+    // Normal products must have sufficient eligible event stock allocated at the stall
+    if (currentRemaining < normalQty) {
+      const prodName = allocation?.product?.name || productId;
+      throw new StockConflict(
+        `Insufficient eligible event stock for ${prodName}. Needed ${normalQty}, available: ${currentRemaining} at stall.`
+      );
+    }
+
+    // Remaining stall stock after satisfying normal product requirement
+    const remainingForCombo = currentRemaining - normalQty;
+
+    // If combo requirement exceeds remaining stall stock, auto-source the exact shortfall from warehouse
+    if (remainingForCombo < comboQty) {
+      const shortfall = comboQty - remainingForCombo;
       const inv = await tx.inventory.findUnique({
         where: { productId },
         include: { product: true },
       });
       if (!inv || inv.product.isArchived || inv.product.isDeleted || inv.quantityOnHand < shortfall) {
         const availableWh = inv?.quantityOnHand || 0;
-        const prodName = inv?.product?.name || productId;
+        const prodName = inv?.product?.name || allocation?.product?.name || productId;
         throw new StockConflict(
-          `Insufficient stock for ${prodName}. Needed ${quantity}, available: ${currentRemaining} at stall + ${availableWh} in warehouse.`
+          `Insufficient stock for ${prodName}. Needed ${totalRequired}, available: ${currentRemaining} at stall + ${availableWh} in warehouse.`
         );
       }
 
@@ -112,7 +134,7 @@ export async function assertAllocatedStock(
       }
     }
 
-    if (checkPrice && items.some(i => i.productId === productId && i.unitPrice !== Number(allocation!.priceAtEvent))) {
+    if (checkPrice && items.some(i => i.productId === productId && i.allowWarehouseFulfill !== true && i.unitPrice !== undefined && i.unitPrice !== Number(allocation!.priceAtEvent))) {
       throw new StockConflict(`Event price changed for ${productId}. Review the transaction before retrying.`);
     }
   }

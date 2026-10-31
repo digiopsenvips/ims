@@ -391,6 +391,10 @@ export const SalesManagementPage: React.FC = () => {
       `Seller: ${sale.memberName} (@${sale.memberUsername})`,
       `--------------------------------`,
     ];
+    const commercialLines = (sale.lines && sale.lines.length > 0)
+      ? sale.lines
+      : (Array.isArray(sale.cartSnapshot) && sale.cartSnapshot.length > 0 ? (sale.cartSnapshot as any[]) : null);
+
     if (sale.transactionType === 'GAME') {
       lines.push(`Type: Game Session`);
       lines.push(`Game: ${sale.game?.name || sale.productName || 'Stall Game'}`);
@@ -400,6 +404,19 @@ export const SalesManagementPage: React.FC = () => {
           lines.push(`Reward: ${sale.gameSession.rewardProductName} × ${sale.gameSession.rewardQuantity}`);
         }
       }
+    } else if (commercialLines && commercialLines.length > 0) {
+      const hasCombo = commercialLines.some((l: any) => l.type === 'COMBO' || Boolean(l.comboId));
+      const hasNormal = commercialLines.some((l: any) => l.type === 'NORMAL_PRODUCT' || (!l.type && !l.comboId));
+      lines.push(`Type: ${hasCombo && hasNormal ? 'Mixed Combo & Products' : hasCombo ? 'Combo Bundle' : 'Products Bill'}`);
+      commercialLines.forEach((l: any) => {
+        const isCombo = l.type === 'COMBO' || Boolean(l.comboId);
+        lines.push(`• ${isCombo ? '[Combo] ' : ''}${l.name || l.productName} × ${l.quantity} @ ₹${l.unitPrice || 0} = ₹${(l.lineTotal || ((l.unitPrice || 0) * l.quantity)).toFixed(2)}`);
+        if (isCombo && l.components && l.components.length > 0) {
+          l.components.forEach((c: any) => {
+            lines.push(`    - ${c.quantity * l.quantity}× ${c.productName}`);
+          });
+        }
+      });
     } else if (sale.transactionType === 'COMBO' || sale.comboId) {
       lines.push(`Type: Combo Offer`);
       lines.push(`Combo: ${sale.comboName || sale.productName}`);
@@ -771,15 +788,30 @@ export const SalesManagementPage: React.FC = () => {
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                             🎮 GAME
                           </span>
-                        ) : sale.transactionType === 'COMBO' || sale.comboId ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                            🎁 COMBO
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
-                            SALE
-                          </span>
-                        )}
+                        ) : (() => {
+                          const cLines = (sale.lines && sale.lines.length > 0) ? sale.lines : (Array.isArray(sale.cartSnapshot) ? (sale.cartSnapshot as any[]) : null);
+                          const hasCombo = cLines ? cLines.some((l: any) => l.type === 'COMBO' || Boolean(l.comboId)) : (sale.transactionType === 'COMBO' || Boolean(sale.comboId));
+                          const hasNormal = cLines ? cLines.some((l: any) => l.type === 'NORMAL_PRODUCT' || (!l.type && !l.comboId)) : false;
+                          if (hasCombo && hasNormal) {
+                            return (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                                🛍️ MIXED
+                              </span>
+                            );
+                          }
+                          if (hasCombo) {
+                            return (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                🎁 COMBO
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                              SALE
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-slate-700 whitespace-nowrap">
                         <div className="flex flex-wrap gap-1">
@@ -822,7 +854,40 @@ export const SalesManagementPage: React.FC = () => {
                               </div>
                             ) : null}
                           </div>
-                        ) : (sale.transactionType === 'COMBO' || sale.comboId) ? (
+                        ) : (() => {
+                          const cLines = (sale.lines && sale.lines.length > 0) ? sale.lines : (Array.isArray(sale.cartSnapshot) && sale.cartSnapshot.length > 0 ? (sale.cartSnapshot as any[]) : null);
+                          if (cLines && cLines.length > 0) {
+                            return (
+                              <div className="space-y-1">
+                                {cLines.map((line: any, lIdx: number) => {
+                                  const isCombo = line.type === 'COMBO' || Boolean(line.comboId);
+                                  return (
+                                    <div key={lIdx} className="text-xs">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        {isCombo && (
+                                          <span className="px-1 py-0.2 bg-emerald-50 text-emerald-800 text-[9px] font-bold rounded border border-emerald-200 shrink-0">
+                                            COMBO
+                                          </span>
+                                        )}
+                                        <span className="font-semibold text-slate-900">{line.name}</span>
+                                        <span className="font-bold text-slate-700 whitespace-nowrap">× {line.quantity}</span>
+                                        {canViewRevenue && line.unitPrice ? (
+                                          <span className="text-[10px] text-slate-400 whitespace-nowrap">(@ ₹{line.unitPrice})</span>
+                                        ) : null}
+                                      </div>
+                                      {isCombo && line.components && line.components.length > 0 && (
+                                        <div className="text-[10px] text-slate-500 pl-3 mt-0.5">
+                                          {line.components.map((c: any) => `${c.quantity * line.quantity}× ${c.productName}`).join(', ')}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          }
+                          return null;
+                        })() || ((sale.transactionType === 'COMBO' || sale.comboId) ? (
                           <div>
                             <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
                               <span>🎁 {sale.comboName || sale.productName || 'Combo Offer'}</span>
@@ -859,7 +924,7 @@ export const SalesManagementPage: React.FC = () => {
                               </span>
                             )}
                           </div>
-                        )}
+                        ))}
                       </td>
                       <td className="px-4 py-3 font-medium text-slate-800 whitespace-nowrap">
                         {sale.memberName}
@@ -992,15 +1057,30 @@ export const SalesManagementPage: React.FC = () => {
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
                           🎮 GAME
                         </span>
-                      ) : sale.transactionType === 'COMBO' || sale.comboId ? (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                          🎁 COMBO
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
-                          SALE
-                        </span>
-                      )}
+                      ) : (() => {
+                        const cLines = (sale.lines && sale.lines.length > 0) ? sale.lines : (Array.isArray(sale.cartSnapshot) ? (sale.cartSnapshot as any[]) : null);
+                        const hasCombo = cLines ? cLines.some((l: any) => l.type === 'COMBO' || Boolean(l.comboId)) : (sale.transactionType === 'COMBO' || Boolean(sale.comboId));
+                        const hasNormal = cLines ? cLines.some((l: any) => l.type === 'NORMAL_PRODUCT' || (!l.type && !l.comboId)) : false;
+                        if (hasCombo && hasNormal) {
+                          return (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                              🛍️ MIXED
+                            </span>
+                          );
+                        }
+                        if (hasCombo) {
+                          return (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                              🎁 COMBO
+                            </span>
+                          );
+                        }
+                        return (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                            SALE
+                          </span>
+                        );
+                      })()}
                     </div>
 
                     <div className="text-[11px] text-slate-500 flex items-center gap-1">
@@ -1034,7 +1114,39 @@ export const SalesManagementPage: React.FC = () => {
                           </div>
                         )}
                       </div>
-                    ) : (sale.transactionType === 'COMBO' || sale.comboId) ? (
+                    ) : (() => {
+                      const cLines = (sale.lines && sale.lines.length > 0) ? sale.lines : (Array.isArray(sale.cartSnapshot) && sale.cartSnapshot.length > 0 ? (sale.cartSnapshot as any[]) : null);
+                      if (cLines && cLines.length > 0) {
+                        return (
+                          <div className="space-y-1">
+                            {cLines.map((line: any, lIdx: number) => {
+                              const isCombo = line.type === 'COMBO' || Boolean(line.comboId);
+                              return (
+                                <div key={lIdx} className="space-y-0.5">
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="font-semibold text-slate-900 truncate mr-2 flex items-center gap-1">
+                                      {isCombo && (
+                                        <span className="px-1 py-0.2 bg-emerald-50 text-emerald-800 text-[9px] font-bold rounded border border-emerald-200 shrink-0">
+                                          COMBO
+                                        </span>
+                                      )}
+                                      <span className="truncate">{line.name}</span>
+                                    </span>
+                                    <span className="font-bold text-slate-700 shrink-0">× {line.quantity}</span>
+                                  </div>
+                                  {isCombo && line.components && line.components.length > 0 && (
+                                    <div className="text-[10px] text-slate-500 pl-2">
+                                      {line.components.map((c: any) => `${c.quantity * line.quantity}× ${c.productName}`).join(', ')}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      }
+                      return null;
+                    })() || ((sale.transactionType === 'COMBO' || sale.comboId) ? (
                       <div>
                         <div className="font-bold text-slate-900">
                           🎁 {sale.comboName || sale.productName || 'Combo Offer'}
@@ -1064,7 +1176,7 @@ export const SalesManagementPage: React.FC = () => {
                         <span className="font-semibold text-slate-900 truncate mr-2">{sale.productName}</span>
                         <span className="font-bold text-slate-700 shrink-0">× {sale.quantity}</span>
                       </div>
-                    )}
+                    ))}
                   </div>
 
                   {/* Card Meta: Stall & Seller */}
@@ -1301,88 +1413,175 @@ export const SalesManagementPage: React.FC = () => {
                   <span>Total: {selectedSaleForDetails.totalUnits ?? selectedSaleForDetails.quantity} units</span>
                 </div>
                 <div className="divide-y divide-slate-100 p-3 space-y-2">
-                  {selectedSaleForDetails.transactionType === 'GAME' ? (
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between font-bold text-slate-900">
-                        <span>🎮 {selectedSaleForDetails.game?.name || selectedSaleForDetails.productName || 'Stall Game'}</span>
-                        {canViewRevenue && <span>₹{selectedSaleForDetails.totalAmount}</span>}
-                      </div>
-                      {selectedSaleForDetails.gameSession && (
-                        <div className="p-2.5 bg-indigo-50/50 rounded-lg border border-indigo-100 space-y-1 text-[11px]">
-                          <div className="flex justify-between">
-                            <span className="text-slate-600">Session Code:</span>
-                            <span className="font-mono font-bold text-indigo-900">{selectedSaleForDetails.gameSession.sessionCode}</span>
+                  {(() => {
+                    if (selectedSaleForDetails.transactionType === 'GAME') {
+                      return (
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between font-bold text-slate-900">
+                            <span>🎮 {selectedSaleForDetails.game?.name || selectedSaleForDetails.productName || 'Stall Game'}</span>
+                            {canViewRevenue && <span>₹{selectedSaleForDetails.totalAmount}</span>}
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-600">Result:</span>
-                            <span className={`font-bold ${selectedSaleForDetails.gameSession.result === 'WIN' ? 'text-emerald-700' : 'text-slate-600'}`}>
-                              {selectedSaleForDetails.gameSession.result === 'WIN' ? '🏆 Winner' : 'Participation'}
-                            </span>
-                          </div>
-                          {selectedSaleForDetails.gameSession.rewardProductName && (
-                            <div className="flex justify-between">
-                              <span className="text-slate-600">Reward Product:</span>
-                              <span className="font-bold text-slate-800">
-                                {selectedSaleForDetails.gameSession.rewardProductName} × {selectedSaleForDetails.gameSession.rewardQuantity}
-                              </span>
+                          {selectedSaleForDetails.gameSession && (
+                            <div className="p-2.5 bg-indigo-50/50 rounded-lg border border-indigo-100 space-y-1 text-[11px]">
+                              <div className="flex justify-between">
+                                <span className="text-slate-600">Session Code:</span>
+                                <span className="font-mono font-bold text-indigo-900">{selectedSaleForDetails.gameSession.sessionCode}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-slate-600">Result:</span>
+                                <span className={`font-bold ${selectedSaleForDetails.gameSession.result === 'WIN' ? 'text-emerald-700' : 'text-slate-600'}`}>
+                                  {selectedSaleForDetails.gameSession.result === 'WIN' ? '🏆 Winner' : 'Participation'}
+                                </span>
+                              </div>
+                              {selectedSaleForDetails.gameSession.rewardProductName && (
+                                <div className="flex justify-between">
+                                  <span className="text-slate-600">Reward Product:</span>
+                                  <span className="font-bold text-slate-800">
+                                    {selectedSaleForDetails.gameSession.rewardProductName} × {selectedSaleForDetails.gameSession.rewardQuantity}
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
-                      )}
-                    </div>
-                  ) : (selectedSaleForDetails.transactionType === 'COMBO' || selectedSaleForDetails.comboId) ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between font-bold text-slate-900">
-                        <span>🎁 {selectedSaleForDetails.comboName || selectedSaleForDetails.productName}</span>
-                        {canViewRevenue && <span>₹{selectedSaleForDetails.totalAmount}</span>}
-                      </div>
-                      {selectedSaleForDetails.items && selectedSaleForDetails.items.length > 0 && (
-                        <div className="p-2.5 bg-emerald-50/40 rounded-lg border border-emerald-100 space-y-1 text-[11px]">
-                          <span className="font-bold text-emerald-950 block">Combo Contents:</span>
+                      );
+                    }
+
+                    const commercialLines = (selectedSaleForDetails.lines && selectedSaleForDetails.lines.length > 0)
+                      ? selectedSaleForDetails.lines
+                      : (Array.isArray(selectedSaleForDetails.cartSnapshot) && selectedSaleForDetails.cartSnapshot.length > 0
+                        ? (selectedSaleForDetails.cartSnapshot as any[])
+                        : null);
+
+                    if (commercialLines && commercialLines.length > 0) {
+                      return (
+                        <div className="space-y-3">
+                          <div className="divide-y divide-slate-100">
+                            {commercialLines.map((line: any, idx: number) => {
+                              const isCombo = line.type === 'COMBO' || Boolean(line.comboId);
+                              return (
+                                <div key={idx} className="py-2 space-y-1">
+                                  <div className="flex items-center justify-between text-xs">
+                                    <div>
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        {isCombo && (
+                                          <span className="px-1.5 py-0.2 bg-emerald-50 text-emerald-800 text-[10px] font-bold rounded border border-emerald-200">
+                                            🎁 COMBO
+                                          </span>
+                                        )}
+                                        <span className="font-bold text-slate-900">{line.name}</span>
+                                      </div>
+                                      {line.unitPrice != null && (
+                                        <span className="text-slate-400 text-[10px] block">
+                                          ₹{line.unitPrice} each
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-right">
+                                      <span className="font-bold text-slate-700">× {line.quantity}</span>
+                                      {canViewRevenue && (
+                                        <span className="block font-bold text-slate-900">
+                                          ₹{(line.lineTotal != null ? Number(line.lineTotal) : Number(line.unitPrice || 0) * line.quantity).toFixed(2)}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {isCombo && line.components && line.components.length > 0 && (
+                                    <div className="p-2 bg-emerald-50/40 rounded border border-emerald-100 text-[10px] space-y-0.5">
+                                      <span className="font-bold text-emerald-950 block">Bundle Includes:</span>
+                                      {line.components.map((c: any, cIdx: number) => (
+                                        <div key={cIdx} className="flex justify-between text-slate-600">
+                                          <span>{c.productName}</span>
+                                          <span className="font-semibold">× {c.quantity * line.quantity}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {selectedSaleForDetails.items && selectedSaleForDetails.items.length > 0 && (
+                            <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-[11px] space-y-1">
+                              <span className="font-bold text-slate-600 block uppercase tracking-wider text-[10px]">
+                                📦 Physical Inventory Consumed
+                              </span>
+                              {selectedSaleForDetails.items.map((it, idx) => (
+                                <div key={idx} className="flex justify-between text-slate-600">
+                                  <span>{it.productName}</span>
+                                  <span className="font-bold text-slate-800">× {it.quantity}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    if (selectedSaleForDetails.transactionType === 'COMBO' || selectedSaleForDetails.comboId) {
+                      return (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between font-bold text-slate-900">
+                            <span>🎁 {selectedSaleForDetails.comboName || selectedSaleForDetails.productName}</span>
+                            {canViewRevenue && <span>₹{selectedSaleForDetails.totalAmount}</span>}
+                          </div>
+                          {selectedSaleForDetails.items && selectedSaleForDetails.items.length > 0 && (
+                            <div className="p-2.5 bg-emerald-50/40 rounded-lg border border-emerald-100 space-y-1 text-[11px]">
+                              <span className="font-bold text-emerald-950 block">Combo Contents:</span>
+                              {selectedSaleForDetails.items.map((it, idx) => (
+                                <div key={idx} className="flex justify-between text-slate-700">
+                                  <span>{it.productName}</span>
+                                  <span className="font-bold">× {it.quantity}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    if (selectedSaleForDetails.items && selectedSaleForDetails.items.length > 0) {
+                      return (
+                        <>
                           {selectedSaleForDetails.items.map((it, idx) => (
-                            <div key={idx} className="flex justify-between text-slate-700">
-                              <span>{it.productName}</span>
-                              <span className="font-bold">× {it.quantity}</span>
+                            <div key={idx} className="flex items-center justify-between text-xs py-1">
+                              <div>
+                                <span className="font-bold text-slate-900">{it.productName}</span>
+                                {it.unitPrice && (
+                                  <span className="text-slate-400 text-[10px] block">
+                                    ₹{it.unitPrice} each
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-right">
+                                <span className="font-bold text-slate-700">× {it.quantity}</span>
+                                {canViewRevenue && it.lineTotal != null && (
+                                  <span className="block font-bold text-slate-900">₹{it.lineTotal.toFixed(2)}</span>
+                                )}
+                              </div>
                             </div>
                           ))}
-                        </div>
-                      )}
-                    </div>
-                  ) : selectedSaleForDetails.items && selectedSaleForDetails.items.length > 0 ? (
-                    selectedSaleForDetails.items.map((it, idx) => (
-                      <div key={idx} className="flex items-center justify-between text-xs py-1">
+                        </>
+                      );
+                    }
+
+                    return (
+                      <div className="flex items-center justify-between text-xs py-1">
                         <div>
-                          <span className="font-bold text-slate-900">{it.productName}</span>
-                          {it.unitPrice && (
-                            <span className="text-slate-400 text-[10px] block">
-                              ₹{it.unitPrice} each
-                            </span>
+                          <span className="font-bold text-slate-900">{selectedSaleForDetails.productName}</span>
+                          {selectedSaleForDetails.unitPrice && (
+                            <span className="text-slate-400 text-[10px] block">₹{selectedSaleForDetails.unitPrice} each</span>
                           )}
                         </div>
                         <div className="text-right">
-                          <span className="font-bold text-slate-700">× {it.quantity}</span>
-                          {canViewRevenue && it.lineTotal != null && (
-                            <span className="block font-bold text-slate-900">₹{it.lineTotal.toFixed(2)}</span>
+                          <span className="font-bold text-slate-700">× {selectedSaleForDetails.quantity}</span>
+                          {canViewRevenue && selectedSaleForDetails.totalAmount != null && (
+                            <span className="block font-bold text-slate-900">₹{Number(selectedSaleForDetails.totalAmount).toFixed(2)}</span>
                           )}
                         </div>
                       </div>
-                    ))
-                  ) : (
-                    <div className="flex items-center justify-between text-xs py-1">
-                      <div>
-                        <span className="font-bold text-slate-900">{selectedSaleForDetails.productName}</span>
-                        {selectedSaleForDetails.unitPrice && (
-                          <span className="text-slate-400 text-[10px] block">₹{selectedSaleForDetails.unitPrice} each</span>
-                        )}
-                      </div>
-                      <div className="text-right">
-                        <span className="font-bold text-slate-700">× {selectedSaleForDetails.quantity}</span>
-                        {canViewRevenue && selectedSaleForDetails.totalAmount != null && (
-                          <span className="block font-bold text-slate-900">₹{Number(selectedSaleForDetails.totalAmount).toFixed(2)}</span>
-                        )}
-                      </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
 

@@ -83,11 +83,16 @@ class SyncManager {
   async recordOrder(order: {
     eventId: string; eventName?: string; paymentMethod: any; cashAmount?: number; upiAmount?: number;
     customerName?: string; customerPhone?: string; saleTime: string; comboId?: string; comboName?: string;
-    comboQuantity?: number; transactionType?: any;
+    comboQuantity?: number; transactionType?: any; lines?: any[]; cartSnapshot?: any[];
     items: Array<{ productId: string; productName: string; quantity: number; unitPrice: number; totalAmount: number }>;
   }) {
-    return this.save({ ...order, totalUnits: order.items.reduce((sum, item) => sum + item.quantity, 0),
-      totalAmount: Number(order.items.reduce((sum, item) => sum + item.totalAmount, 0).toFixed(2)),
+    const commercialUnits = order.lines
+      ? order.lines.reduce((sum, l) => sum + (Number(l.quantity) || 0), 0)
+      : order.items.reduce((sum, item) => sum + item.quantity, 0);
+    const orderTotal = order.lines
+      ? Number(order.lines.reduce((sum, l) => sum + (Number(l.lineTotal) || 0), 0).toFixed(2))
+      : Number(order.items.reduce((sum, item) => sum + item.totalAmount, 0).toFixed(2));
+    return this.save({ ...order, totalUnits: commercialUnits, totalAmount: orderTotal,
       items: order.items.map(item => ({ productId: item.productId, productName: item.productName,
         quantity: item.quantity, unitPrice: item.unitPrice, lineTotal: item.totalAmount })) });
   }

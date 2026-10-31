@@ -265,6 +265,7 @@ model Sale {
 
   comboId              String?         @map("combo_id")
   comboName            String?         @map("combo_name")
+  cartSnapshot         Json?           @map("cart_snapshot")
 
   // Legacy fields for backward compatibility
   productId            String?         @map("product_id")

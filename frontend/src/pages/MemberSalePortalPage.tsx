@@ -561,14 +561,32 @@ export const MemberSalePortalPage: React.FC = () => {
 
     setCart(prevCart => {
       const existing = prevCart.find(item => item.productId === alloc.productId);
-      if (existing) {
-        if (existing.quantity >= alloc.remainingQty) {
-          setErrorMessage(`Cannot add more. Only ${alloc.remainingQty} unit(s) available for ${alloc.productName}.`);
-          return prevCart;
+      const currentQty = existing ? existing.quantity : 0;
+      const nextQty = currentQty + 1;
+
+      if (nextQty > alloc.remainingQty) {
+        setErrorMessage(`Cannot add more. Only ${alloc.remainingQty} unit(s) available for ${alloc.productName}.`);
+        return prevCart;
+      }
+
+      // Check combined availability with any combos in cart sharing this component
+      let comboUnitsInCart = 0;
+      prevCart.forEach(c => {
+        if (c.isCombo && c.components) {
+          const m = c.components.find(ci => ci.productId === alloc.productId);
+          if (m) comboUnitsInCart += m.quantity * c.quantity;
         }
+      });
+      const whAvail = (alloc as any)?.availableStock ?? 0;
+      if (nextQty + comboUnitsInCart > alloc.remainingQty + whAvail) {
+        setErrorMessage(`Combined stock limit reached for ${alloc.productName} (${alloc.remainingQty} at stall + ${whAvail} in warehouse).`);
+        return prevCart;
+      }
+
+      if (existing) {
         return prevCart.map(item =>
           item.productId === alloc.productId
-            ? { ...item, quantity: item.quantity + 1, remainingStock: alloc.remainingQty }
+            ? { ...item, quantity: nextQty, remainingStock: alloc.remainingQty }
             : item
         );
       }
@@ -698,9 +716,25 @@ export const MemberSalePortalPage: React.FC = () => {
                 return item;
               }
             }
-          } else if (!item.isCombo && nextQty > item.remainingStock) {
-            setErrorMessage(`Stock limit reached for ${item.productName} (${item.remainingStock} available).`);
-            return item;
+          } else if (!item.isCombo) {
+            if (nextQty > item.remainingStock) {
+              setErrorMessage(`Stock limit reached for ${item.productName} (${item.remainingStock} available at stall).`);
+              return item;
+            }
+            let comboUnitsInCart = 0;
+            prevCart.forEach(c => {
+              if (c.productId === productId) return;
+              if (c.isCombo && c.components) {
+                const m = c.components.find(ci => ci.productId === item.productId);
+                if (m) comboUnitsInCart += m.quantity * c.quantity;
+              }
+            });
+            const alloc = allocations.find(a => a.productId === item.productId);
+            const wh = (alloc as any)?.availableStock ?? 0;
+            if (nextQty + comboUnitsInCart > item.remainingStock + wh) {
+              setErrorMessage(`Combined stock limit reached for ${item.productName} (${item.remainingStock} at stall + ${wh} in warehouse).`);
+              return item;
+            }
           }
           return { ...item, quantity: nextQty };
         })
@@ -841,32 +875,54 @@ export const MemberSalePortalPage: React.FC = () => {
       }
     }
 
-    // Validate quantities against current stock
+    // Validate quantities against current stock & aggregated physical demand
+    const normalReqMap: Record<string, number> = {};
+    const comboReqMap: Record<string, number> = {};
+    const productNameMap: Record<string, string> = {};
+
     for (const item of cart) {
       if (item.quantity <= 0) {
         setErrorMessage(`Invalid quantity for ${item.productName}`);
         return;
       }
-      if (item.isCombo && item.components) {
+      if (item.isCombo && item.components && item.components.length > 0) {
         for (const comp of item.components) {
-          const alloc = allocations.find(a => a.productId === comp.productId);
-          const req = comp.quantity * item.quantity;
-          if (!alloc || req > alloc.remainingQty) {
-            setErrorMessage(`Insufficient stock for component ${comp.productName} in combo ${item.productName}`);
-            return;
-          }
+          comboReqMap[comp.productId] = (comboReqMap[comp.productId] || 0) + comp.quantity * item.quantity;
+          productNameMap[comp.productId] = comp.productName;
         }
-      } else if (!item.isCombo && item.quantity > item.remainingStock) {
+      } else if (!item.isCombo) {
+        normalReqMap[item.productId] = (normalReqMap[item.productId] || 0) + item.quantity;
+        productNameMap[item.productId] = item.productName;
+      }
+    }
+
+    // Check normal product requirements against stall allocation
+    for (const [prodId, reqQty] of Object.entries(normalReqMap)) {
+      const alloc = allocations.find(a => a.productId === prodId);
+      const remainingStall = alloc ? alloc.remainingQty : 0;
+      if (reqQty > remainingStall) {
         setErrorMessage(
-          `Insufficient stock for ${item.productName}. Only ${item.remainingStock} unit(s) remaining.`
+          `Insufficient stall stock for ${productNameMap[prodId] || 'product'}. Requested ${reqQty}, but only ${remainingStall} allocated at stall.`
         );
         return;
       }
     }
 
-    if (cart.length > 1 && cart.some(item => item.isCombo)) {
-      setErrorMessage('Please record each combo bundle as a separate bill. Mixed combo bills need a verified pricing/history workflow before they can be submitted safely.');
-      return;
+    // Check combo component requirements against remaining stall stock + warehouse stock
+    for (const [prodId, comboReq] of Object.entries(comboReqMap)) {
+      const alloc = allocations.find(a => a.productId === prodId);
+      const remainingStall = alloc ? alloc.remainingQty : 0;
+      const normalReq = normalReqMap[prodId] || 0;
+      const stallLeftForCombo = Math.max(0, remainingStall - normalReq);
+      const comboShortfall = Math.max(0, comboReq - stallLeftForCombo);
+      const whAvail = (alloc as any)?.availableStock ?? 0;
+
+      if (comboShortfall > whAvail) {
+        setErrorMessage(
+          `Insufficient stock for combo component ${productNameMap[prodId] || 'product'}. Need ${comboReq} units (${stallLeftForCombo} available at stall, but warehouse has only ${whAvail}).`
+        );
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -888,6 +944,22 @@ export const MemberSalePortalPage: React.FC = () => {
       const targetComboId = isSingleComboOrder ? cart[0].comboId : undefined;
       const targetComboName = isSingleComboOrder ? cart[0].comboName : undefined;
       const targetComboQuantity = isSingleComboOrder ? cart[0].quantity : undefined;
+
+      // Build verified commercial purchase lines preserving combos as discrete units
+      const commercialLines = cart.map(item => ({
+        type: (item.isCombo ? 'COMBO' : 'NORMAL_PRODUCT') as 'NORMAL_PRODUCT' | 'COMBO',
+        productId: item.isCombo ? undefined : item.productId,
+        comboId: item.isCombo ? item.comboId : undefined,
+        name: item.productName,
+        quantity: item.quantity,
+        unitPrice: item.priceAtEvent,
+        lineTotal: Math.round(item.priceAtEvent * item.quantity * 100) / 100,
+        components: item.isCombo && item.components ? item.components.map(c => ({
+          productId: c.productId,
+          productName: c.productName,
+          quantity: c.quantity,
+        })) : undefined,
+      }));
 
       for (const item of cart) {
         if (item.isCombo && item.components && item.components.length > 0) {
@@ -938,9 +1010,10 @@ export const MemberSalePortalPage: React.FC = () => {
         comboId: targetComboId,
         comboName: targetComboName,
         comboQuantity: targetComboQuantity,
-        transactionType: isSingleComboOrder ? 'COMBO' : undefined,
+        transactionType: isSingleComboOrder ? 'COMBO' : cart.some(i => i.isCombo) ? 'MIXED' : undefined,
         saleTime,
         items: orderItems,
+        lines: commercialLines,
       };
 
       let resolvedReceiptNumber: number | undefined;
@@ -1231,14 +1304,14 @@ export const MemberSalePortalPage: React.FC = () => {
                 >
                   Switch to {eligibleActiveEvent.name} →
                 </button>
-              ) : (
+              ) : (isDeveloper || isAdmin) ? (
                 <Link
                   to="/events"
                   className="px-3.5 py-1.5 bg-white hover:bg-slate-50 border border-rose-300 text-rose-800 font-bold rounded-lg shrink-0 cursor-pointer text-xs transition-colors flex items-center gap-1 self-start sm:self-auto shadow-2xs"
                 >
                   <span>Manage Events →</span>
                 </Link>
-              )}
+              ) : null}
             </div>
           )}
 
@@ -2120,13 +2193,25 @@ export const MemberSalePortalPage: React.FC = () => {
                   Purchased Items
                 </div>
                 {lastCompletedBill.items.map(i => (
-                  <div key={i.productId} className="flex justify-between text-slate-700">
-                    <span className="truncate mr-2">
-                      {i.quantity}x {i.productName}
-                    </span>
-                    <span className="font-bold text-slate-900 shrink-0">
-                      ₹{(i.priceAtEvent * i.quantity).toFixed(2)}
-                    </span>
+                  <div key={i.productId} className="py-1 border-b border-slate-100 last:border-b-0">
+                    <div className="flex justify-between text-slate-700">
+                      <span className="truncate mr-2 flex items-center gap-1.5">
+                        {i.isCombo && (
+                          <span className="px-1.5 py-0.2 bg-emerald-50 text-emerald-800 text-[9px] font-bold rounded border border-emerald-200 shrink-0">
+                            COMBO
+                          </span>
+                        )}
+                        <span className="font-semibold text-slate-800">{i.quantity}x {i.productName}</span>
+                      </span>
+                      <span className="font-bold text-slate-900 shrink-0">
+                        ₹{(i.priceAtEvent * i.quantity).toFixed(2)}
+                      </span>
+                    </div>
+                    {i.isCombo && i.components && i.components.length > 0 && (
+                      <div className="text-[10px] text-slate-400 pl-2 mt-0.5">
+                        Includes: {i.components.map(c => `${c.quantity * i.quantity}× ${c.productName}`).join(', ')}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

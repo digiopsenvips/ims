@@ -266,33 +266,64 @@ router.get(
       }));
 
       // Combos analytics
-      const comboSales = sales.filter(s => s.transactionType === 'COMBO' || Boolean(s.comboId));
-      let totalCombosSold = comboSales.length;
+      let totalCombosSold = 0;
       let totalComboRevenue = 0;
       let totalComboUnits = 0;
       const comboBreakdownMap: Record<string, any> = {};
 
-      for (const cs of comboSales) {
-        const cRev = Number(cs.totalAmount);
-        totalComboRevenue += cRev;
-        const cUnits = (cs.items || []).reduce((sum, item) => sum + item.quantity, 0) || cs.quantity || 1;
-        totalComboUnits += cUnits;
+      for (const s of sales) {
+        const cartSnapshot = Array.isArray(s.cartSnapshot) ? (s.cartSnapshot as any[]) : null;
+        if (cartSnapshot && cartSnapshot.length > 0) {
+          const comboLines = cartSnapshot.filter(l => l.type === 'COMBO');
+          for (const line of comboLines) {
+            const cRev = Number(line.lineTotal || 0);
+            const cUnits = Number(line.quantity || 1);
+            totalCombosSold += cUnits;
+            totalComboRevenue += cRev;
+            const compUnits = Array.isArray(line.components)
+              ? line.components.reduce((sum: number, c: any) => sum + (Number(c.totalQuantity) || Number(c.quantity) * cUnits || 0), 0)
+              : cUnits;
+            totalComboUnits += compUnits;
 
-        const cId = cs.comboId || cs.comboName || 'unknown';
-        const cName = cs.comboName || (cs.comboId ? `Combo ${cs.comboId}` : 'Special Combo');
+            const cId = line.comboId || line.name || 'unknown';
+            const cName = line.name || 'Special Combo';
 
-        if (!comboBreakdownMap[cId]) {
-          comboBreakdownMap[cId] = {
-            comboId: cs.comboId || cId,
-            comboName: cName,
-            salesCount: 0,
-            revenue: 0,
-            unitsSold: 0,
-          };
+            if (!comboBreakdownMap[cId]) {
+              comboBreakdownMap[cId] = {
+                comboId: line.comboId || cId,
+                comboName: cName,
+                salesCount: 0,
+                revenue: 0,
+                unitsSold: 0,
+              };
+            }
+            comboBreakdownMap[cId].salesCount += 1;
+            comboBreakdownMap[cId].revenue += cRev;
+            comboBreakdownMap[cId].unitsSold += cUnits;
+          }
+        } else if (s.transactionType === 'COMBO' || Boolean(s.comboId)) {
+          const cRev = Number(s.totalAmount);
+          totalCombosSold += 1;
+          totalComboRevenue += cRev;
+          const cUnits = (s.items || []).reduce((sum, item) => sum + item.quantity, 0) || s.quantity || 1;
+          totalComboUnits += cUnits;
+
+          const cId = s.comboId || s.comboName || 'unknown';
+          const cName = s.comboName || (s.comboId ? `Combo ${s.comboId}` : 'Special Combo');
+
+          if (!comboBreakdownMap[cId]) {
+            comboBreakdownMap[cId] = {
+              comboId: s.comboId || cId,
+              comboName: cName,
+              salesCount: 0,
+              revenue: 0,
+              unitsSold: 0,
+            };
+          }
+          comboBreakdownMap[cId].salesCount++;
+          comboBreakdownMap[cId].revenue += cRev;
+          comboBreakdownMap[cId].unitsSold += cUnits;
         }
-        comboBreakdownMap[cId].salesCount++;
-        comboBreakdownMap[cId].revenue += cRev;
-        comboBreakdownMap[cId].unitsSold += cUnits;
       }
 
       const comboBreakdown = Object.values(comboBreakdownMap).map((c: any) => ({
