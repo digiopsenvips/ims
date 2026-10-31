@@ -30,6 +30,7 @@ import {
   Clock,
   Info,
   Ban,
+  Archive,
 } from 'lucide-react';
 
 function getPageNumbers(current: number, total: number): (number | string)[] {
@@ -58,7 +59,7 @@ export const SalesManagementPage: React.FC = () => {
   const selectedEventId = searchParams.get('eventId') || '';
   const paymentFilter = ((searchParams.get('payment') as 'ALL' | 'UPI' | 'CASH' | 'CASH_UPI') || 'ALL');
   const transactionFilter = ((searchParams.get('txType') as 'ALL' | 'SALES' | 'COMBOS' | 'GAMES') || 'ALL');
-  const statusFilter = ((searchParams.get('status') as 'ALL' | 'COMPLETED' | 'CANCELLED') || 'ALL');
+  const statusFilter = searchParams.get('status') || '';
   const searchFromUrl = searchParams.get('search') || '';
 
   // Local state
@@ -112,7 +113,7 @@ export const SalesManagementPage: React.FC = () => {
       eventId?: string;
       payment?: 'ALL' | 'UPI' | 'CASH' | 'CASH_UPI';
       txType?: 'ALL' | 'SALES' | 'COMBOS' | 'GAMES';
-      status?: 'ALL' | 'COMPLETED' | 'CANCELLED';
+      status?: string;
       search?: string;
     }) => {
       const newParams = new URLSearchParams(searchParams);
@@ -144,7 +145,7 @@ export const SalesManagementPage: React.FC = () => {
       if (targetTxType !== 'ALL') newParams.set('txType', targetTxType);
       else newParams.delete('txType');
 
-      if (targetStatus !== 'ALL') newParams.set('status', targetStatus);
+      if (targetStatus && targetStatus !== 'ALL') newParams.set('status', targetStatus);
       else newParams.delete('status');
 
       if (targetSearch.trim()) newParams.set('search', targetSearch.trim());
@@ -194,7 +195,7 @@ export const SalesManagementPage: React.FC = () => {
       } else if (transactionFilter === 'GAMES') {
         query.set('transactionType', 'GAME');
       }
-      if (statusFilter !== 'ALL') {
+      if (statusFilter && statusFilter !== 'ALL') {
         query.set('status', statusFilter);
       }
       if (searchFromUrl.trim()) {
@@ -403,7 +404,7 @@ export const SalesManagementPage: React.FC = () => {
 
     try {
       await api.post(`/sales/${saleToCancel.id}/cancel`, { reason });
-      setActionMessage(`Sale ${receiptLabel} voided successfully! Stock restored.`);
+      setActionMessage(`Sale ${receiptLabel} deleted successfully! Stock restored.`);
       if (selectedSaleForDetails && selectedSaleForDetails.id === saleToCancel.id) {
         setSelectedSaleForDetails(null);
       }
@@ -629,13 +630,37 @@ export const SalesManagementPage: React.FC = () => {
         </div>
       )}
 
+      {/* Deleted Sales Archive Banner */}
+      {statusFilter === 'CANCELLED' && (
+        <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-900 text-xs flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Archive className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>
+              <strong>Deleted Sales Archive (Audit Trail):</strong> Showing transactions that have been voided and reversed. These records are excluded from normal Sales History and net revenue.
+            </span>
+          </div>
+          <button
+            onClick={() => updateUrlState({ page: 1, status: 'ALL' })}
+            className="text-xs font-bold text-rose-700 hover:text-rose-900 underline whitespace-nowrap cursor-pointer"
+          >
+            Back to Active Sales
+          </button>
+        </div>
+      )}
+
       {/* Tabs: All-Time Sales vs Per-Event Sales */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
         <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
           <button
-            onClick={() => handleTabChange('all-time')}
+            onClick={() => {
+              if (statusFilter === 'CANCELLED') {
+                updateUrlState({ page: 1, tab: 'all-time', status: 'ALL' });
+              } else {
+                handleTabChange('all-time');
+              }
+            }}
             className={`px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === 'all-time'
+              activeTab === 'all-time' && statusFilter !== 'CANCELLED'
                 ? 'bg-slate-900 text-white shadow-xs'
                 : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
             }`}
@@ -643,15 +668,41 @@ export const SalesManagementPage: React.FC = () => {
             All-Time Sales
           </button>
           <button
-            onClick={() => handleTabChange('per-event')}
+            onClick={() => {
+              if (statusFilter === 'CANCELLED') {
+                updateUrlState({ page: 1, tab: 'per-event', status: 'ALL' });
+              } else {
+                handleTabChange('per-event');
+              }
+            }}
             className={`px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === 'per-event'
+              activeTab === 'per-event' && statusFilter !== 'CANCELLED'
                 ? 'bg-slate-900 text-white shadow-xs'
                 : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
             }`}
           >
             Per-Event Sales
           </button>
+          {canCancelSale && (
+            <button
+              onClick={() => {
+                if (statusFilter === 'CANCELLED') {
+                  updateUrlState({ page: 1, status: 'ALL' });
+                } else {
+                  updateUrlState({ page: 1, status: 'CANCELLED' });
+                }
+              }}
+              className={`px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs font-bold rounded-lg transition-all cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 ${
+                statusFilter === 'CANCELLED'
+                  ? 'bg-rose-900 text-white shadow-xs'
+                  : 'bg-white text-rose-700 border border-rose-200 hover:bg-rose-50'
+              }`}
+              title="Audit Archive: View deleted and voided transactions"
+            >
+              <Archive className="w-3.5 h-3.5" />
+              <span>Deleted Sales Archive</span>
+            </button>
+          )}
         </div>
 
         {/* Per-Event Selector Dropdown */}
@@ -725,24 +776,6 @@ export const SalesManagementPage: React.FC = () => {
                     }`}
                   >
                     {t}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Status Filter */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-semibold text-slate-500 shrink-0">Status:</span>
-              <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs">
-                {(['ALL', 'COMPLETED', 'CANCELLED'] as const).map(s => (
-                  <button
-                    key={s}
-                    onClick={() => updateUrlState({ page: 1, status: s })}
-                    className={`px-2 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer whitespace-nowrap ${
-                      statusFilter === s ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-900'
-                    }`}
-                  >
-                    {s === 'CANCELLED' ? 'VOIDED' : s === 'COMPLETED' ? 'COMPLETED' : 'ALL'}
                   </button>
                 ))}
               </div>
@@ -1082,9 +1115,9 @@ export const SalesManagementPage: React.FC = () => {
                                   type="button"
                                   onClick={() => handleOpenCancelModal(sale)}
                                   className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-md transition-colors cursor-pointer"
-                                  title="Void / Cancel sale (Restores inventory)"
+                                  title="Delete sale (Restores inventory)"
                                 >
-                                  <Ban className="w-3.5 h-3.5 text-rose-600" />
+                                  <Trash2 className="w-3.5 h-3.5 text-rose-600" />
                                 </button>
                               )}
                             </>
@@ -1311,9 +1344,9 @@ export const SalesManagementPage: React.FC = () => {
                               type="button"
                               onClick={() => handleOpenCancelModal(sale)}
                               className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
-                              title="Void / Cancel sale (Restores inventory)"
+                              title="Delete sale (Restores inventory)"
                             >
-                              <Ban className="w-3.5 h-3.5 text-rose-600" />
+                              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
                             </button>
                           )}
                         </>
@@ -2013,16 +2046,16 @@ export const SalesManagementPage: React.FC = () => {
         </div>
       )}
 
-      {/* Void / Cancel Sale Modal */}
+      {/* Delete / Cancel Sale Modal */}
       {saleToCancel && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-2xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-lg overflow-hidden animate-in fade-in duration-200">
             {/* Header */}
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-rose-50/50">
               <div className="flex items-center gap-2 text-rose-900">
-                <Ban className="w-5 h-5 text-rose-600" />
+                <Trash2 className="w-5 h-5 text-rose-600" />
                 <h3 className="font-bold text-base">
-                  Void Sale Receipt #{saleToCancel.receiptNumber || saleToCancel.id}
+                  Delete Sale Receipt #{saleToCancel.receiptNumber || saleToCancel.id}
                 </h3>
               </div>
               <button
@@ -2041,7 +2074,7 @@ export const SalesManagementPage: React.FC = () => {
               <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs flex items-start gap-2.5">
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                 <div className="leading-relaxed">
-                  <strong>Official Financial Action:</strong> Voiding will mark this sale as <strong>CANCELLED</strong> in the ledger, reverse its revenue from net analytics, and restore the physical items back to stock. The receipt remains permanently archived for compliance.
+                  <strong>Financial Accounting Action:</strong> Deleting this sale removes it from the Sales History sheet, restores all fulfilled items back to inventory, and updates net analytics. An internal audit record is retained for accounting reconciliation.
                 </div>
               </div>
 
@@ -2090,7 +2123,7 @@ export const SalesManagementPage: React.FC = () => {
               {/* Reason Input */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-bold text-slate-800">
-                  Cancellation Reason <span className="text-rose-500">*</span>
+                  Reason for Deletion <span className="text-rose-500">*</span>
                 </label>
                 <textarea
                   value={cancelReason}
@@ -2098,7 +2131,7 @@ export const SalesManagementPage: React.FC = () => {
                   disabled={isCancelling}
                   rows={3}
                   className="w-full text-xs p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-none placeholder:text-slate-400"
-                  placeholder="Explain why this transaction is being voided (e.g. Customer returned product, cashier entered wrong bill, test entry...)"
+                  placeholder="Explain why this transaction is being deleted (e.g. Customer returned product, cashier entered wrong bill, test entry...)"
                 />
               </div>
             </div>
@@ -2122,12 +2155,12 @@ export const SalesManagementPage: React.FC = () => {
                 {isCancelling ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Voiding...</span>
+                    <span>Deleting...</span>
                   </>
                 ) : (
                   <>
-                    <Ban className="w-4 h-4" />
-                    <span>Confirm & Void Sale</span>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Confirm & Delete Sale</span>
                   </>
                 )}
               </button>

@@ -74,8 +74,24 @@ router.get(
       if (transactionType && (transactionType === 'SALE' || transactionType === 'GAME' || transactionType === 'COMBO')) {
         whereClause.transactionType = transactionType as TransactionType;
       }
-      if (status && typeof status === 'string' && status !== 'ALL') {
-        whereClause.status = status;
+
+      // Exclusion of deleted / cancelled sales from normal Sales History, table counts, and pagination
+      const canViewAudit =
+        req.user?.role === Role.DEVELOPER ||
+        req.user?.role === Role.ADMIN ||
+        Boolean(req.user?.permissions?.['edit_events']);
+
+      if (status === 'CANCELLED' || status === 'VOIDED') {
+        if (!canViewAudit) {
+          res.status(403).json({ error: 'Access denied: insufficient privileges to view deleted sales archive.' });
+          return;
+        }
+        whereClause.status = 'CANCELLED';
+      } else if (status === 'ALL' && canViewAudit) {
+        // Explicit ALL view for authorized auditors only
+      } else {
+        // DEFAULT: Normal Sales History strictly excludes cancelled/deleted transactions
+        whereClause.status = { not: 'CANCELLED' };
       }
       if (startDate || endDate) whereClause.saleTime = businessDateRange(startDate, endDate);
 
@@ -221,7 +237,7 @@ router.get(
           take,
         }),
         prisma.sale.aggregate({
-          where: { ...whereClause, status: { not: 'CANCELLED' } },
+          where: whereClause,
           _sum: {
             totalAmount: true,
             quantity: true,
@@ -229,7 +245,7 @@ router.get(
         }),
         prisma.saleItem.aggregate({
           where: {
-            sale: { ...whereClause, status: { not: 'CANCELLED' } },
+            sale: whereClause,
           },
           _sum: {
             quantity: true,
@@ -1097,14 +1113,20 @@ export const cancelSaleHandler = async (req: AuthenticatedRequest, res: Response
       const eventReconciled = Boolean(sale.event?.reconciledAt);
 
       for (const item of physicalItems) {
-        if (eventReconciled || !sale.eventId) {
-          // If the event has ended and reconciled, unsold stock was returned to warehouse.
-          // Restore returned units back to warehouse inventory.
+        const hasStallAlloc = sale.eventId
+          ? await tx.eventAllocation.findFirst({
+              where: { eventId: sale.eventId, productId: item.productId },
+            })
+          : null;
+
+        if (eventReconciled || !sale.eventId || !hasStallAlloc) {
+          // If the event has ended and reconciled, or item was fulfilled from warehouse (no stall allocation),
+          // restore returned units back to warehouse inventory.
           await tx.inventory.update({
             where: { productId: item.productId },
             data: {
               quantityOnHand: { increment: item.quantity },
-              notes: `Restored ${item.quantity} units from cancelled sale #${sale.receiptNumber}`,
+              notes: `Restored ${item.quantity} units from deleted sale #${sale.receiptNumber}`,
               lastUpdated: new Date(),
             },
           });
@@ -1122,7 +1144,7 @@ export const cancelSaleHandler = async (req: AuthenticatedRequest, res: Response
             productId: item.productId,
             productName: item.productName,
             quantity: item.quantity,
-            location: `${sale.event.name} (Stall Allocation)`,
+            location: `${sale.event?.name || 'Event'} (Stall Allocation)`,
           });
         }
       }
@@ -1158,7 +1180,7 @@ export const cancelSaleHandler = async (req: AuthenticatedRequest, res: Response
     broadcast('inventory:updated', {});
 
     res.status(200).json({
-      message: `Sale #${outcome.sale.receiptNumber} successfully voided and inventory restored.`,
+      message: `Sale #${outcome.sale.receiptNumber} successfully deleted and inventory restored.`,
       sale: outcome.sale,
       restoredLocations: outcome.restoredLocations,
     });

@@ -543,7 +543,7 @@ test('Test 25: Safe void/cancellation of a normal sale restores stall stock and 
     reason: 'Customer cancelled transaction before delivery'
   });
   assert.equal(cancelRes.status, 200);
-  assert.match(cancelRes.data.message, /successfully voided and inventory restored/);
+  assert.match(cancelRes.data.message, /successfully (deleted|voided) and inventory restored/);
   assert.equal(cancelRes.data.sale.status, 'CANCELLED');
   assert.equal(cancelRes.data.sale.cancelReason, 'Customer cancelled transaction before delivery');
   assert.equal(cancelRes.data.sale.cancelledByName, f.user.name);
@@ -787,28 +787,30 @@ test('Test 31: Sales list, status filtering, and analytics exclude cancelled sal
   const cancelRes = await request(f, 'POST', `/api/sales/${s2.data.sale.id}/cancel`, { reason: 'Test void' });
   assert.equal(cancelRes.status, 200);
 
-  // 1. GET /api/sales?eventId=... default view
+  // 1. GET /api/sales?eventId=... default view: DELETED sales MUST be excluded from normal Sales History!
   const listRes = await request(f, 'GET', `/api/sales?eventId=${f.event.id}`);
   assert.equal(listRes.status, 200);
-  assert.equal(listRes.data.sales.length, 2); // Both are listed in history for auditability
+  assert.equal(listRes.data.sales.length, 1, 'Deleted sales must be excluded from default Sales History listing');
+  assert.equal(listRes.data.sales[0].id, s1.data.sale.id, 'Only active sale s1 should appear in normal table');
+  assert.equal(listRes.data.pagination.totalRecords, 1, 'Pagination total count must match active sales count');
   const activeSummaryUnits = listRes.data.summary.totalUnits;
   const activeSummaryRev = listRes.data.summary.totalRevenue;
-  // Summary revenue and units must ONLY count active (completed) sales (₹200 and 1 unit, NOT ₹500 and 2 units)
+  // Summary revenue and units must ONLY count active (completed) sales (₹200 and 1 unit)
   assert.equal(activeSummaryUnits, 1);
   assert.equal(activeSummaryRev, 200);
 
-  // 2. Status filter: ?status=CANCELLED returns only the voided sale
+  // 2. Status filter: ?status=CANCELLED returns only the voided/deleted sale in the audit archive
   const voidedRes = await request(f, 'GET', `/api/sales?eventId=${f.event.id}&status=CANCELLED`);
   assert.equal(voidedRes.status, 200);
   assert.equal(voidedRes.data.sales.length, 1);
   assert.equal(voidedRes.data.sales[0].id, s2.data.sale.id);
   assert.equal(voidedRes.data.sales[0].status, 'CANCELLED');
+  assert.equal(voidedRes.data.pagination.totalRecords, 1);
 
-  // 3. Status filter: ?status=COMPLETED returns only the active sale
-  const compRes = await request(f, 'GET', `/api/sales?eventId=${f.event.id}&status=COMPLETED`);
-  assert.equal(compRes.status, 200);
-  assert.equal(compRes.data.sales.length, 1);
-  assert.equal(compRes.data.sales[0].id, s1.data.sale.id);
+  // 3. Status filter: ?status=ALL (authorized audit view) returns all transactions
+  const allRes = await request(f, 'GET', `/api/sales?eventId=${f.event.id}&status=ALL`);
+  assert.equal(allRes.status, 200);
+  assert.equal(allRes.data.sales.length, 2);
 
   // 4. Analytics: GET /api/analytics/dashboard?eventId=... excludes cancelled sale
   const analyticsRes = await request(f, 'GET', `/api/analytics/dashboard?eventId=${f.event.id}`);
