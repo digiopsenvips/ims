@@ -601,20 +601,23 @@ router.put(
               ? NaN
               : moneyCents(alloc.priceAtEvent) / 100;
             const soldSoFar = salesByProduct[alloc.productId] || 0;
-
-            if (newQty < 0) {
-              throw new Error(`Allocated quantity cannot be negative for product ${alloc.productId}.`);
-            }
-
-            if (newQty < soldSoFar) {
-              throw new Error(
-                `Allocation cannot be lower than the quantity already sold. Product has already sold ${soldSoFar} unit(s).`
-              );
-            }
-
             const existingAlloc = existingEvent.allocations.find(
               a => a.productId === alloc.productId
             );
+
+            if (newQty < soldSoFar) {
+              // An existing allocation must never be forced below its already-consumed quantity.
+              // If the allocation is unchanged (e.g. user is updating pricing, stall details,
+              // or other allocations), allow the save to proceed without raising an artificial validation error.
+              if (existingAlloc && newQty === existingAlloc.allocatedQty) {
+                // Preserved unchanged allocation
+              } else {
+                const prodName = alloc.productName || alloc.productId;
+                throw new Error(
+                  `Allocation cannot be lower than the quantity already sold. Product ${prodName} has already sold ${soldSoFar} unit(s).`
+                );
+              }
+            }
 
             if (existingAlloc) {
               const diff = newQty - existingAlloc.allocatedQty;

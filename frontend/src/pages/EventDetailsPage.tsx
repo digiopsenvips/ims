@@ -180,13 +180,16 @@ export const EventDetailsPage: React.FC = () => {
         : 0;
       const mainInventoryStock = p.inventory ? p.inventory.quantityOnHand : 0;
       const remainingInEvent = Math.max(0, allocatedQty - soldQty);
-      const maxAllocatable = mainInventoryStock + remainingInEvent;
+      // Authoritative formula:
+      // Current allocation + unallocated warehouse stock available to add.
+      // Bounded below by soldQty to guarantee valid range even if historical discrepancy exists.
+      const maxAllocatable = Math.max(allocatedQty + mainInventoryStock, soldQty);
 
       return {
         productId: p.id,
         productName: p.name,
         projectName: p.project?.name || '—',
-        availableStock: maxAllocatable,
+        availableStock: mainInventoryStock,
         maxAllocatable,
         initialAllocatedQty: allocatedQty,
         allocatedQty,
@@ -224,10 +227,11 @@ export const EventDetailsPage: React.FC = () => {
       prev.map(row => {
         if (row.productId !== productId) return row;
         if (field === 'allocatedQty') {
+          const cleanQty = Number.isFinite(val) ? Math.max(0, Math.floor(val)) : 0;
           return {
             ...row,
-            allocatedQty: val,
-            remainingQty: Math.max(0, val - row.soldQty),
+            allocatedQty: cleanQty,
+            remainingQty: Math.max(0, cleanQty - row.soldQty),
           };
         }
         return {
@@ -255,12 +259,22 @@ export const EventDetailsPage: React.FC = () => {
     }
 
     for (const row of editAllocations) {
-      if (row.allocatedQty < row.soldQty) {
+      if (row.allocatedQty < 0) {
+        setEditError(`Allocation cannot be negative for ${row.productName}.`);
+        return;
+      }
+      if (!Number.isInteger(row.allocatedQty)) {
+        setEditError(`Allocation must be a whole number for ${row.productName}.`);
+        return;
+      }
+      // An existing allocation must never be forced below its already-consumed quantity.
+      // If unchanged, allow saving without triggering a block.
+      if (row.allocatedQty !== row.initialAllocatedQty && row.allocatedQty < row.soldQty) {
         setEditError(`Allocation cannot be lower than sold units. ${row.productName} has already sold ${row.soldQty} unit(s).`);
         return;
       }
       if (row.allocatedQty > row.maxAllocatable) {
-        setEditError(`Maximum available quantity for ${row.productName} is ${row.maxAllocatable}.`);
+        setEditError(`Maximum available quantity for ${row.productName} is ${row.maxAllocatable} (${row.availableStock} in warehouse + ${row.initialAllocatedQty} already allocated).`);
         return;
       }
     }
@@ -1832,7 +1846,7 @@ export const EventDetailsPage: React.FC = () => {
               </div>
             )}
 
-            <form onSubmit={handleSaveEditEvent} className="flex-1 overflow-y-auto p-5 space-y-6">
+            <form noValidate onSubmit={handleSaveEditEvent} className="flex-1 overflow-y-auto p-5 space-y-6">
               {/* Event Metadata */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -1925,70 +1939,106 @@ export const EventDetailsPage: React.FC = () => {
                         <th className="py-2.5 px-3">Product</th>
                         <th className="py-2.5 px-3 text-center">Available Max</th>
                         <th className="py-2.5 px-3 text-center">Sold So Far</th>
-                        <th className="py-2.5 px-3 text-center w-36">Allocated Qty</th>
+                        <th className="py-2.5 px-3 text-center w-40">Allocated Qty</th>
                         <th className="py-2.5 px-3 text-right w-32">Event Price (₹)</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {editAllocations.map(row => (
-                        <tr key={row.productId} className="hover:bg-slate-50/60 transition-colors">
-                          <td className="py-2.5 px-3">
-                            <div className="font-bold text-slate-900">{row.productName}</div>
-                            <div className="text-[10px] text-slate-400">{row.productId} • {row.projectName}</div>
-                          </td>
-                          <td className="py-2.5 px-3 text-center font-medium text-slate-600">
-                            {row.maxAllocatable}
-                          </td>
-                          <td className="py-2.5 px-3 text-center font-bold text-slate-700">
-                            {row.soldQty}
-                          </td>
-                          <td className="py-2.5 px-3 text-center">
-                            <div className="flex items-center gap-1 justify-center">
-                              <input
-                                type="number"
-                                min={row.soldQty}
-                                max={row.maxAllocatable}
-                                value={row.allocatedQty}
-                                onChange={e =>
-                                  handleAllocationChange(
-                                    row.productId,
-                                    'allocatedQty',
-                                    parseInt(e.target.value, 10) || 0
-                                  )
-                                }
-                                className="w-20 p-1.5 text-center text-xs border border-slate-300 rounded-lg font-bold focus:ring-1 focus:ring-slate-900"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleSetMaxAllocation(row.productId)}
-                                className="px-1.5 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors cursor-pointer"
-                                title="Set to maximum available warehouse stock"
-                              >
-                                Max
-                              </button>
-                            </div>
-                          </td>
-                          <td className="py-2.5 px-3 text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              <span className="text-slate-400 font-bold">₹</span>
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.5"
-                                value={row.priceAtEvent}
-                                onChange={e =>
-                                  handleAllocationChange(
-                                    row.productId,
-                                    'priceAtEvent',
-                                    parseFloat(e.target.value) || 0
-                                  )
-                                }
-                                className="w-20 p-1.5 text-right text-xs border border-slate-300 rounded-lg font-bold focus:ring-1 focus:ring-slate-900"
-                              />
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                      {editAllocations.map(row => {
+                        const hasDiscrepancy = row.soldQty > row.initialAllocatedQty;
+                        const minAllowed = Math.min(row.initialAllocatedQty, row.soldQty);
+                        const maxAllowed = Math.max(minAllowed, row.maxAllocatable);
+                        const isInvalidMin = row.allocatedQty !== row.initialAllocatedQty && row.allocatedQty < row.soldQty;
+                        const isInvalidMax = row.allocatedQty > row.maxAllocatable;
+
+                        return (
+                          <tr key={row.productId} className="hover:bg-slate-50/60 transition-colors">
+                            <td className="py-2.5 px-3">
+                              <div className="font-bold text-slate-900">{row.productName}</div>
+                              <div className="text-[10px] text-slate-400">{row.productId} • {row.projectName}</div>
+                              {hasDiscrepancy && (
+                                <div className="text-[10px] text-amber-600 font-semibold mt-0.5">
+                                  ⚠️ Discrepancy: {row.soldQty} sold vs {row.initialAllocatedQty} allocated. Preserved.
+                                </div>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 text-center font-medium text-slate-600">
+                              <div className="font-bold text-slate-900">{row.maxAllocatable}</div>
+                              <div className="text-[10px] text-slate-400 font-normal">
+                                {row.availableStock} in wh
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3 text-center font-bold text-slate-700">
+                              {row.soldQty}
+                            </td>
+                            <td className="py-2.5 px-3 text-center">
+                              <div className="flex items-center gap-1 justify-center">
+                                <input
+                                  type="number"
+                                  min={minAllowed}
+                                  max={maxAllowed}
+                                  step="1"
+                                  value={row.allocatedQty}
+                                  onChange={e => {
+                                    const val = parseInt(e.target.value, 10);
+                                    handleAllocationChange(
+                                      row.productId,
+                                      'allocatedQty',
+                                      isNaN(val) ? 0 : val
+                                    );
+                                  }}
+                                  className={`w-20 p-1.5 text-center text-xs border rounded-lg font-bold focus:ring-1 focus:ring-slate-900 ${
+                                    isInvalidMin || isInvalidMax
+                                      ? 'border-rose-400 bg-rose-50 text-rose-800'
+                                      : 'border-slate-300'
+                                  }`}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetMaxAllocation(row.productId)}
+                                  disabled={row.allocatedQty >= row.maxAllocatable}
+                                  className="px-1.5 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                                  title={`Allocate maximum available quantity (${row.maxAllocatable})`}
+                                >
+                                  Max
+                                </button>
+                              </div>
+                              <div className="text-[10px] text-slate-400 mt-0.5 whitespace-nowrap">
+                                {row.soldQty > 0 ? `Min: ${row.soldQty} (sold)` : 'Min: 0'} • Max: {row.maxAllocatable}
+                              </div>
+                              {isInvalidMin && (
+                                <div className="text-[10px] text-rose-600 font-bold mt-0.5">
+                                  Min allowed: {row.soldQty}
+                                </div>
+                              )}
+                              {isInvalidMax && (
+                                <div className="text-[10px] text-rose-600 font-bold mt-0.5">
+                                  Max allowed: {row.maxAllocatable}
+                                </div>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <span className="text-slate-400 font-bold">₹</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.5"
+                                  value={row.priceAtEvent}
+                                  onChange={e =>
+                                    handleAllocationChange(
+                                      row.productId,
+                                      'priceAtEvent',
+                                      parseFloat(e.target.value) || 0
+                                    )
+                                  }
+                                  className="w-20 p-1.5 text-right text-xs border border-slate-300 rounded-lg font-bold focus:ring-1 focus:ring-slate-900"
+                                />
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

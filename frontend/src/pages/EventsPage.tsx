@@ -356,7 +356,21 @@ export const EventsPage: React.FC = () => {
 
     // Check allocations against sold count and available stock
     for (const row of allocationsGrid) {
-      if (editingEventId && row.allocatedQty < row.soldQty) {
+      if (row.allocatedQty < 0) {
+        setStatusMessage({
+          type: 'error',
+          text: `Allocation cannot be negative for ${row.productName}.`,
+        });
+        return;
+      }
+      if (!Number.isInteger(row.allocatedQty)) {
+        setStatusMessage({
+          type: 'error',
+          text: `Allocation must be a whole number for ${row.productName}.`,
+        });
+        return;
+      }
+      if (editingEventId && row.allocatedQty !== row.initialAllocatedQty && row.allocatedQty < row.soldQty) {
         setStatusMessage({
           type: 'error',
           text: `Allocation cannot be lower than the quantity already sold. ${row.productName} has already sold ${row.soldQty} unit(s).`,
@@ -985,8 +999,9 @@ export const EventsPage: React.FC = () => {
                             <div className="flex items-center justify-end gap-1.5">
                               <input
                                 type="number"
-                                min={editingEventId ? row.soldQty : 0}
-                                max={row.maxAllocatable}
+                                min={editingEventId ? Math.min(row.initialAllocatedQty, row.soldQty) : 0}
+                                max={editingEventId ? Math.max(Math.min(row.initialAllocatedQty, row.soldQty), row.maxAllocatable) : row.maxAllocatable}
+                                step="1"
                                 value={row.allocatedQty}
                                 onChange={e =>
                                   handleAllocationChange(
