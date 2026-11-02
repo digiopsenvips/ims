@@ -442,3 +442,172 @@ test('Test 14 & 15: Previously valid allocations remain valid; POS sales & histo
   assert.equal(savedSale.items.length, 1);
   assert.equal(savedSale.items[0].quantity, 4);
 });
+
+test('Test 16: Extending deadline on active event updates deadline without affecting allocations or warehouse stock', async () => {
+  const f = await setupFixture({ whStock: 10, allocQty: 5 });
+  const futureEnd = new Date(Date.now() + 86400000 * 2).toISOString(); // +2 days
+
+  const res = await request(f, 'POST', `/api/events/${f.event.id}/extend-deadline`, {
+    newEndDatetime: futureEnd,
+    reason: 'Customer demand high',
+  });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.data.success, true);
+  assert.equal(res.data.event.status, 'ACTIVE');
+
+  // Warehouse stock unchanged
+  const inv = await prisma.inventory.findUnique({ where: { productId: f.product.id } });
+  assert.equal(inv.quantityOnHand, 10);
+
+  // Event allocation unchanged
+  const alloc = await prisma.eventAllocation.findFirst({ where: { eventId: f.event.id, productId: f.product.id } });
+  assert.equal(alloc.allocatedQty, 5);
+});
+
+test('Test 17 & 18: Extending deadline on expired event reactivates it, reclaims returned stock, and rejects invalid dates', async () => {
+  const f = await setupFixture({ whStock: 5, allocQty: 6 });
+
+  // Sell 2 units (4 remaining)
+  await request(f, 'POST', '/api/sales', {
+    clientTxId: randomUUID(),
+    eventId: f.event.id,
+    ownerUserId: f.user.id,
+    paymentMethod: 'CASH',
+    totalAmount: 400,
+    lines: [{ type: 'NORMAL_PRODUCT', productId: f.product.id, quantity: 2, unitPrice: 200, lineTotal: 400 }]
+  });
+
+  // Simulate timeout closure (4 unsold units returned to warehouse: 5 + 4 = 9)
+  await prisma.event.update({
+    where: { id: f.event.id },
+    data: {
+      endDatetime: new Date(Date.now() - 3600000), // ended 1 hr ago
+      status: 'ENDED',
+      reconciledAt: new Date(Date.now() - 3590000),
+    }
+  });
+  await prisma.inventory.update({
+    where: { productId: f.product.id },
+    data: { quantityOnHand: 9 }
+  });
+
+  // Reject past deadline
+  const pastRes = await request(f, 'POST', `/api/events/${f.event.id}/extend-deadline`, {
+    newEndDatetime: new Date(Date.now() - 1000).toISOString(),
+  });
+  assert.equal(pastRes.status, 400);
+
+  // Reject earlier than current deadline
+  const earlierRes = await request(f, 'POST', `/api/events/${f.event.id}/extend-deadline`, {
+    newEndDatetime: new Date(Date.now() - 7200000).toISOString(),
+  });
+  assert.equal(earlierRes.status, 400);
+
+  // Valid extension into the future
+  const validFuture = new Date(Date.now() + 86400000).toISOString();
+  const extendRes = await request(f, 'POST', `/api/events/${f.event.id}/extend-deadline`, {
+    newEndDatetime: validFuture,
+    reason: 'Stall operations extended for festival weekend',
+    reactivate: true,
+  });
+
+  assert.equal(extendRes.status, 200);
+  assert.equal(extendRes.data.success, true);
+  assert.equal(extendRes.data.reactivated, true);
+  assert.equal(extendRes.data.event.status, 'ACTIVE');
+  assert.equal(extendRes.data.event.reconciledAt, null);
+
+  // Warehouse stock has the 4 returned units reclaimed (9 - 4 = 5)
+  const inv = await prisma.inventory.findUnique({ where: { productId: f.product.id } });
+  assert.equal(inv.quantityOnHand, 5);
+
+  // Event allocation and historical sales preserved
+  const alloc = await prisma.eventAllocation.findFirst({ where: { eventId: f.event.id, productId: f.product.id } });
+  assert.equal(alloc.allocatedQty, 6);
+});
+
+test('Test 19 & 20: Reactivated stall allows POS sales and strictly conserves stock across subsequent closure', async () => {
+  const f = await setupFixture({ whStock: 5, allocQty: 4 });
+
+  // Simulate timeout closure with 0 sales (4 returned to warehouse -> 9)
+  await prisma.event.update({
+    where: { id: f.event.id },
+    data: {
+      endDatetime: new Date(Date.now() - 10000),
+      status: 'ENDED',
+      reconciledAt: new Date(),
+    }
+  });
+  await prisma.inventory.update({
+    where: { productId: f.product.id },
+    data: { quantityOnHand: 9 }
+  });
+
+  // Extend deadline to +1 day
+  const futureEnd = new Date(Date.now() + 86400000).toISOString();
+  const extendRes = await request(f, 'POST', `/api/events/${f.event.id}/extend-deadline`, {
+    newEndDatetime: futureEnd,
+  });
+  assert.equal(extendRes.status, 200);
+
+  // Now sell 1 unit from the reactivated stall
+  const saleRes = await request(f, 'POST', '/api/sales', {
+    clientTxId: randomUUID(),
+    eventId: f.event.id,
+    ownerUserId: f.user.id,
+    paymentMethod: 'CASH',
+    totalAmount: 200,
+    lines: [{ type: 'NORMAL_PRODUCT', productId: f.product.id, quantity: 1, unitPrice: 200, lineTotal: 200 }]
+  });
+  assert.equal(saleRes.status, 201);
+
+  // Now close the event cleanly -> 3 unsold units returned to warehouse (5 + 3 = 8)
+  const closeRes = await request(f, 'POST', `/api/events/${f.event.id}/close`);
+  assert.equal(closeRes.status, 200);
+
+  const finalInv = await prisma.inventory.findUnique({ where: { productId: f.product.id } });
+  assert.equal(finalInv.quantityOnHand, 8); // Total: 8 in warehouse + 1 sold = 9 initial total. Perfect conservation!
+});
+
+test('Test 21: Exhausted product allocation (sold == allocated) remains at 0 stall stock upon reactivation', async () => {
+  const f = await setupFixture({ whStock: 2, allocQty: 4 });
+
+  // Sell all 4 units
+  await request(f, 'POST', '/api/sales', {
+    clientTxId: randomUUID(),
+    eventId: f.event.id,
+    ownerUserId: f.user.id,
+    paymentMethod: 'CASH',
+    totalAmount: 800,
+    lines: [{ type: 'NORMAL_PRODUCT', productId: f.product.id, quantity: 4, unitPrice: 200, lineTotal: 800 }]
+  });
+
+  // Event timed out & reconciled
+  await prisma.event.update({
+    where: { id: f.event.id },
+    data: {
+      endDatetime: new Date(Date.now() - 10000),
+      status: 'ENDED',
+      reconciledAt: new Date(),
+    }
+  });
+
+  // Extend deadline
+  const futureEnd = new Date(Date.now() + 86400000).toISOString();
+  await request(f, 'POST', `/api/events/${f.event.id}/extend-deadline`, {
+    newEndDatetime: futureEnd,
+  });
+
+  // Attempting to sell 1 more unit must fail with Insufficient stock
+  const overdrawSale = await request(f, 'POST', '/api/sales', {
+    clientTxId: randomUUID(),
+    eventId: f.event.id,
+    ownerUserId: f.user.id,
+    paymentMethod: 'CASH',
+    totalAmount: 200,
+    lines: [{ type: 'NORMAL_PRODUCT', productId: f.product.id, quantity: 1, unitPrice: 200, lineTotal: 200 }]
+  });
+  assert.equal(overdrawSale.status, 409);
+  assert.match(overdrawSale.data.error, /Insufficient eligible event stock/);
+});

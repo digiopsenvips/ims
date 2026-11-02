@@ -10,9 +10,10 @@ import { EventStatus, Role } from '@prisma/client';
 import {
   computeEventStatus,
   reconcileSingleEvent,
+  extendEventDeadline,
 } from '../services/eventLifecycle';
 
-import { stockTransaction, StockConflict } from '../services/stock';
+import { stockTransaction, eventConsumption, StockConflict } from '../services/stock';
 import { InputError, nonnegativeInteger, moneyCents } from '../services/payment';
 
 const router = Router();
@@ -555,17 +556,70 @@ router.put(
         throw new InputError('End date must be after start date.');
       }
 
-      // For ENDED/finalized events: do NOT automatically reopen or change status
+      // For ENDED/finalized events: do NOT allow changing allocations
       const isAlreadyEnded = existingEvent.status === EventStatus.ENDED || Boolean(existingEvent.reconciledAt);
-      if (isAlreadyEnded && Array.isArray(allocations)) throw new StockConflict('Closed event allocations are immutable.');
+      
+      const allocationsChanged = Array.isArray(allocations) && (
+        allocations.length !== existingEvent.allocations.length ||
+        allocations.some((alloc: any) => {
+          const existing = existingEvent.allocations.find(a => a.productId === alloc.productId);
+          if (!existing) return true;
+          const newQty = alloc.allocatedQty === undefined || alloc.allocatedQty === null || alloc.allocatedQty === '' ? 0 : Number(alloc.allocatedQty);
+          const newPrice = alloc.priceAtEvent === undefined || alloc.priceAtEvent === null || alloc.priceAtEvent === '' ? Number(existing.priceAtEvent) : Number(alloc.priceAtEvent);
+          return existing.allocatedQty !== newQty || Number(existing.priceAtEvent) !== newPrice;
+        })
+      );
+
+      if (isAlreadyEnded && allocationsChanged) throw new StockConflict('Closed event allocations are immutable.');
       if (Array.isArray(allocations) && new Set(allocations.map((a: any) => a.productId)).size !== allocations.length) throw new InputError('Duplicate allocations are not allowed.');
-      const computedStatus = isAlreadyEnded
-        ? EventStatus.ENDED
-        : computeEventStatus(
-            parsedStart,
-            parsedEnd,
-            status ? (status.toUpperCase() as EventStatus) : existingEvent.status
-          );
+
+      const isDeadlineExtended = isAlreadyEnded && parsedEnd.getTime() > existingEvent.endDatetime.getTime() && parsedEnd.getTime() > Date.now();
+      const wasClosedByTimeout = isAlreadyEnded && existingEvent.endDatetime.getTime() <= Date.now();
+
+      let shouldReactivate = false;
+      let computedStatus = existingEvent.status;
+
+      if (isAlreadyEnded) {
+        if (isDeadlineExtended && wasClosedByTimeout) {
+          shouldReactivate = true;
+          computedStatus = EventStatus.ACTIVE;
+        } else {
+          computedStatus = EventStatus.ENDED;
+        }
+      } else {
+        computedStatus = computeEventStatus(
+          parsedStart,
+          parsedEnd,
+          status ? (status.toUpperCase() as EventStatus) : existingEvent.status
+        );
+      }
+
+      // If reactivating an ended event that was reconciled:
+      // Reclaim the returned unsold inventory from warehouse so physical stock matches and is not duplicated.
+      if (shouldReactivate && existingEvent.reconciledAt) {
+        const consumed = await eventConsumption(tx, id);
+        for (const allocation of existingEvent.allocations) {
+          const consumedQty = consumed.get(allocation.productId) || 0;
+          const unsold = Math.max(0, allocation.allocatedQty - consumedQty);
+          if (unsold > 0) {
+            const inv = await tx.inventory.findUnique({ where: { productId: allocation.productId } });
+            const currentWh = inv?.quantityOnHand ?? 0;
+            if (currentWh < unsold) {
+              throw new StockConflict(
+                `Cannot reactivate stall: Product '${allocation.productId}' has only ${currentWh} units in warehouse, but ${unsold} were returned upon closure.`
+              );
+            }
+            await tx.inventory.update({
+              where: { productId: allocation.productId },
+              data: {
+                quantityOnHand: { decrement: unsold },
+                notes: `Stall deadline extended; restored ${unsold} units to active stall allocation`,
+                lastUpdated: new Date(),
+              },
+            });
+          }
+        }
+      }
 
       // Group sales count by product for this event
       const salesByProduct: Record<string, number> = {};
@@ -589,10 +643,11 @@ router.put(
             startDatetime: parsedStart,
             endDatetime: parsedEnd,
             status: computedStatus,
+            reconciledAt: shouldReactivate ? null : existingEvent.reconciledAt,
           },
         });
 
-        if (Array.isArray(allocations)) {
+        if (!isAlreadyEnded && Array.isArray(allocations)) {
           for (const alloc of allocations) {
             const rawQty = alloc.allocatedQty === undefined || alloc.allocatedQty === null || alloc.allocatedQty === '' ? 0 : alloc.allocatedQty;
             const newQty = nonnegativeInteger(rawQty, 'Allocation');
@@ -704,6 +759,45 @@ router.put(
     } catch (error: any) {
       console.error('Update event error:', error);
       res.status(400).json({ error: error.message || 'Failed to update event' });
+    }
+  }
+);
+
+// POST /api/events/:id/extend-deadline: Dedicated authorized endpoint to extend deadline of active or closed events
+router.post(
+  '/:id/extend-deadline',
+  authenticateToken,
+  requirePermission('edit_events'),
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const { id } = req.params;
+    const { newEndDatetime, reason, reactivate } = req.body;
+
+    try {
+      const outcome = await extendEventDeadline({
+        eventId: id,
+        newEndDatetime,
+        reason: typeof reason === 'string' ? reason.trim() : undefined,
+        reactivate: reactivate !== undefined ? Boolean(reactivate) : true,
+        user: {
+          id: req.user!.id,
+          name: req.user!.name,
+          role: req.user!.role,
+        },
+      });
+
+      res.json({
+        success: true,
+        message: outcome.reactivated
+          ? `Event '${outcome.event.name}' deadline extended to ${outcome.newEndDatetime.toISOString()} and reopened for live transactions.`
+          : `Event '${outcome.event.name}' deadline extended successfully.`,
+        event: outcome.event,
+        reactivated: outcome.reactivated,
+        previousEndDatetime: outcome.previousEndDatetime,
+        newEndDatetime: outcome.newEndDatetime,
+      });
+    } catch (error: any) {
+      console.error('Extend deadline error:', error);
+      res.status(error.status || 400).json({ error: error.message || 'Failed to extend event deadline' });
     }
   }
 );

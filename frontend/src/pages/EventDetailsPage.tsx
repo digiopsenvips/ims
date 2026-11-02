@@ -156,8 +156,71 @@ export const EventDetailsPage: React.FC = () => {
   const [isEndingEvent, setIsEndingEvent] = useState(false);
   const [isOpeningStall, setIsOpeningStall] = useState(false);
 
+  // Extend Deadline Modal State
+  const [showExtendDeadlineModal, setShowExtendDeadlineModal] = useState(false);
+  const [extendEndDate, setExtendEndDate] = useState('');
+  const [extendEndTime, setExtendEndTime] = useState('20:00');
+  const [extendReason, setExtendReason] = useState('');
+  const [isSubmittingExtend, setIsSubmittingExtend] = useState(false);
+  const [extendError, setExtendError] = useState<string | null>(null);
+
   const canManage = isDeveloper || isAdmin || hasPermission('edit_events');
   const canManageCombos = isDeveloper || isAdmin;
+
+  const handleOpenExtendDeadlineModal = () => {
+    if (!event) return;
+    const currentEnd = new Date(event.endDatetime);
+    const now = new Date();
+    const baseDate = currentEnd.getTime() > now.getTime() ? currentEnd : new Date(now.getTime() + 86400000);
+    setExtendEndDate(toISTDateString(baseDate.toISOString()));
+    setExtendEndTime(toISTTimeString(baseDate.toISOString()) || '20:00');
+    setExtendReason('');
+    setExtendError(null);
+    setShowExtendDeadlineModal(true);
+  };
+
+  const handleSaveExtendDeadline = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!event) return;
+    if (!extendEndDate || !extendEndTime) {
+      setExtendError('Please select a valid new end date and time.');
+      return;
+    }
+
+    const newEndDatetime = new Date(`${extendEndDate}T${extendEndTime}:00+05:30`).toISOString();
+    const newEndMs = new Date(newEndDatetime).getTime();
+
+    if (newEndMs <= new Date(event.endDatetime).getTime()) {
+      setExtendError('New deadline must be later than the existing deadline.');
+      return;
+    }
+    if (newEndMs <= Date.now()) {
+      setExtendError('New deadline must be in the future.');
+      return;
+    }
+
+    setIsSubmittingExtend(true);
+    setExtendError(null);
+
+    try {
+      const res = await api.post(`/events/${event.id}/extend-deadline`, {
+        newEndDatetime,
+        reason: extendReason.trim() || undefined,
+        reactivate: true,
+      });
+
+      setStatusMessage({
+        type: 'success',
+        text: res.message || `Stall deadline successfully extended to ${extendEndDate} ${extendEndTime} IST!`,
+      });
+      setShowExtendDeadlineModal(false);
+      await fetchEventData();
+    } catch (err: any) {
+      setExtendError(err.message || 'Failed to extend event deadline');
+    } finally {
+      setIsSubmittingExtend(false);
+    }
+  };
 
   const handleOpenEditModal = () => {
     if (!event) return;
@@ -258,24 +321,28 @@ export const EventDetailsPage: React.FC = () => {
       return;
     }
 
-    for (const row of editAllocations) {
-      if (row.allocatedQty < 0) {
-        setEditError(`Allocation cannot be negative for ${row.productName}.`);
-        return;
-      }
-      if (!Number.isInteger(row.allocatedQty)) {
-        setEditError(`Allocation must be a whole number for ${row.productName}.`);
-        return;
-      }
-      // An existing allocation must never be forced below its already-consumed quantity.
-      // If unchanged, allow saving without triggering a block.
-      if (row.allocatedQty !== row.initialAllocatedQty && row.allocatedQty < row.soldQty) {
-        setEditError(`Allocation cannot be lower than sold units. ${row.productName} has already sold ${row.soldQty} unit(s).`);
-        return;
-      }
-      if (row.allocatedQty > row.maxAllocatable) {
-        setEditError(`Maximum available quantity for ${row.productName} is ${row.maxAllocatable} (${row.availableStock} in warehouse + ${row.initialAllocatedQty} already allocated).`);
-        return;
+    const isClosed = event.status === 'ENDED' || Boolean(event.reconciledAt);
+
+    if (!isClosed) {
+      for (const row of editAllocations) {
+        if (row.allocatedQty < 0) {
+          setEditError(`Allocation cannot be negative for ${row.productName}.`);
+          return;
+        }
+        if (!Number.isInteger(row.allocatedQty)) {
+          setEditError(`Allocation must be a whole number for ${row.productName}.`);
+          return;
+        }
+        // An existing allocation must never be forced below its already-consumed quantity.
+        // If unchanged, allow saving without triggering a block.
+        if (row.allocatedQty !== row.initialAllocatedQty && row.allocatedQty < row.soldQty) {
+          setEditError(`Allocation cannot be lower than sold units. ${row.productName} has already sold ${row.soldQty} unit(s).`);
+          return;
+        }
+        if (row.allocatedQty > row.maxAllocatable) {
+          setEditError(`Maximum available quantity for ${row.productName} is ${row.maxAllocatable} (${row.availableStock} in warehouse + ${row.initialAllocatedQty} already allocated).`);
+          return;
+        }
       }
     }
 
@@ -283,21 +350,24 @@ export const EventDetailsPage: React.FC = () => {
     setEditError(null);
 
     try {
-      const payload = {
+      const payload: any = {
         name: editName.trim(),
         location: editLocation.trim(),
         startDatetime,
         endDatetime,
         status: event.status,
-        allocations: editAllocations.map(a => ({
+      };
+
+      if (!isClosed) {
+        payload.allocations = editAllocations.map(a => ({
           productId: a.productId,
           allocatedQty: a.allocatedQty,
           priceAtEvent: a.priceAtEvent,
-        })),
-      };
+        }));
+      }
 
       await api.put(`/events/${event.id}`, payload);
-      setStatusMessage({ type: 'success', text: `Stall '${editName}' and allocations saved successfully!` });
+      setStatusMessage({ type: 'success', text: `Stall '${editName}' saved successfully!` });
       setShowEditEventModal(false);
       await fetchEventData();
     } catch (err: any) {
@@ -648,6 +718,18 @@ export const EventDetailsPage: React.FC = () => {
 
           {/* Quick Stall Actions */}
           <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {canManage && (
+              <button
+                type="button"
+                onClick={handleOpenExtendDeadlineModal}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 rounded-xl text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+                title="Extend stall deadline / reactivate closed event"
+              >
+                <Clock className="w-4 h-4 text-amber-600" />
+                <span>Extend Deadline</span>
+              </button>
+            )}
+
             {canManage && (
               <button
                 type="button"
@@ -1928,9 +2010,18 @@ export const EventDetailsPage: React.FC = () => {
                     Product Allocations & Event Pricing
                   </h4>
                   <p className="text-[11px] text-slate-500">
-                    Allocate units from warehouse and set stall-specific prices (historical sales remain protected)
+                    {event.status === 'ENDED' || Boolean(event.reconciledAt)
+                      ? 'Event is closed. Product allocations and prices are finalized and read-only. Use the Extend Deadline button or End Date field above to extend the stall.'
+                      : 'Allocate units from warehouse and set stall-specific prices (historical sales remain protected)'}
                   </p>
                 </div>
+
+                {(event.status === 'ENDED' || Boolean(event.reconciledAt)) && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs flex items-center gap-2 font-medium">
+                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>Closed event allocations and pricing are finalized and protected from accidental modification.</span>
+                  </div>
+                )}
 
                 <div className="border border-slate-200 rounded-xl overflow-hidden max-h-72 overflow-y-auto">
                   <table className="w-full text-left text-xs">
@@ -1945,11 +2036,12 @@ export const EventDetailsPage: React.FC = () => {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {editAllocations.map(row => {
+                        const isEventClosed = event.status === 'ENDED' || Boolean(event.reconciledAt);
                         const hasDiscrepancy = row.soldQty > row.initialAllocatedQty;
                         const minAllowed = Math.min(row.initialAllocatedQty, row.soldQty);
                         const maxAllowed = Math.max(minAllowed, row.maxAllocatable);
-                        const isInvalidMin = row.allocatedQty !== row.initialAllocatedQty && row.allocatedQty < row.soldQty;
-                        const isInvalidMax = row.allocatedQty > row.maxAllocatable;
+                        const isInvalidMin = !isEventClosed && row.allocatedQty !== row.initialAllocatedQty && row.allocatedQty < row.soldQty;
+                        const isInvalidMax = !isEventClosed && row.allocatedQty > row.maxAllocatable;
 
                         return (
                           <tr key={row.productId} className="hover:bg-slate-50/60 transition-colors">
@@ -1978,6 +2070,7 @@ export const EventDetailsPage: React.FC = () => {
                                   min={minAllowed}
                                   max={maxAllowed}
                                   step="1"
+                                  disabled={isEventClosed}
                                   value={row.allocatedQty}
                                   onChange={e => {
                                     const val = parseInt(e.target.value, 10);
@@ -1988,7 +2081,9 @@ export const EventDetailsPage: React.FC = () => {
                                     );
                                   }}
                                   className={`w-20 p-1.5 text-center text-xs border rounded-lg font-bold focus:ring-1 focus:ring-slate-900 ${
-                                    isInvalidMin || isInvalidMax
+                                    isEventClosed
+                                      ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed'
+                                      : isInvalidMin || isInvalidMax
                                       ? 'border-rose-400 bg-rose-50 text-rose-800'
                                       : 'border-slate-300'
                                   }`}
@@ -1996,7 +2091,7 @@ export const EventDetailsPage: React.FC = () => {
                                 <button
                                   type="button"
                                   onClick={() => handleSetMaxAllocation(row.productId)}
-                                  disabled={row.allocatedQty >= row.maxAllocatable}
+                                  disabled={isEventClosed || row.allocatedQty >= row.maxAllocatable}
                                   className="px-1.5 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                                   title={`Allocate maximum available quantity (${row.maxAllocatable})`}
                                 >
@@ -2024,6 +2119,7 @@ export const EventDetailsPage: React.FC = () => {
                                   type="number"
                                   min="0"
                                   step="0.5"
+                                  disabled={isEventClosed}
                                   value={row.priceAtEvent}
                                   onChange={e =>
                                     handleAllocationChange(
@@ -2032,7 +2128,11 @@ export const EventDetailsPage: React.FC = () => {
                                       parseFloat(e.target.value) || 0
                                     )
                                   }
-                                  className="w-20 p-1.5 text-right text-xs border border-slate-300 rounded-lg font-bold focus:ring-1 focus:ring-slate-900"
+                                  className={`w-20 p-1.5 text-right text-xs border rounded-lg font-bold focus:ring-1 focus:ring-slate-900 ${
+                                    isEventClosed
+                                      ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed'
+                                      : 'border-slate-300'
+                                  }`}
                                 />
                               </div>
                             </td>
@@ -2068,6 +2168,141 @@ export const EventDetailsPage: React.FC = () => {
                     <>
                       <Check className="w-4 h-4 stroke-[3]" />
                       <span>Save Stall & Allocations</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Dedicated Modal: Extend Stall Deadline */}
+      {showExtendDeadlineModal && event && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center">
+                  <Clock className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Extend Stall Deadline
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {event.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowExtendDeadlineModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {extendError && (
+              <div className="mx-5 mt-4 p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-xl flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{extendError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveExtendDeadline} className="p-5 space-y-4">
+              <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-500 font-medium">Current Status:</span>
+                  <span className={`font-bold px-2 py-0.5 rounded-md text-[11px] ${
+                    event.status === 'ACTIVE'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : event.status === 'ENDED'
+                      ? 'bg-slate-200 text-slate-700'
+                      : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {event.status}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-500 font-medium">Current Deadline:</span>
+                  <span className="font-bold text-slate-900">
+                    {toISTDateString(event.endDatetime)} at {toISTTimeString(event.endDatetime)} IST
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  New End Date & Time (IST) *
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="date"
+                    required
+                    value={extendEndDate}
+                    onChange={e => setExtendEndDate(e.target.value)}
+                    className="w-2/3 text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-1 focus:ring-slate-900 font-medium"
+                  />
+                  <input
+                    type="time"
+                    required
+                    value={extendEndTime}
+                    onChange={e => setExtendEndTime(e.target.value)}
+                    className="w-1/3 text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-1 focus:ring-slate-900 font-medium"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Reason for Extension (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={extendReason}
+                  onChange={e => setExtendReason(e.target.value)}
+                  placeholder="e.g. Festival crowd extended by organizers"
+                  className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-1 focus:ring-slate-900"
+                />
+              </div>
+
+              {event.status === 'ENDED' && (
+                <div className="p-3 bg-amber-50 border border-amber-200/80 rounded-xl text-xs text-amber-900 space-y-1">
+                  <div className="font-bold flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Reactivation Protection</span>
+                  </div>
+                  <p className="text-[11px] text-amber-800 leading-relaxed">
+                    Extending the deadline will safely reactivate this stall for live sales. All historical sales, receipts, and custom prices are strictly preserved.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowExtendDeadlineModal(false)}
+                  disabled={isSubmittingExtend}
+                  className="px-4 py-2 border border-slate-300 text-slate-700 font-bold text-xs rounded-xl hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingExtend}
+                  className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-2"
+                >
+                  {isSubmittingExtend ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Extending Deadline...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Clock className="w-4 h-4" />
+                      <span>{event.status === 'ENDED' ? 'Extend & Reopen Stall' : 'Update Deadline'}</span>
                     </>
                   )}
                 </button>
