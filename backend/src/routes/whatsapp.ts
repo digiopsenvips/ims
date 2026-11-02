@@ -17,6 +17,7 @@ router.get(
     try {
       const status = whatsappService.getStatus();
       const config = await whatsappQueueService.getConfig();
+      const summary = await whatsappQueueService.getSummaryStats();
       res.json({
         ...status,
         queueConfig: {
@@ -24,7 +25,14 @@ router.get(
           circuitBreakerTripped: config.circuitBreakerTripped,
           pauseReason: config.pauseReason,
           autoSendEnabled: config.autoSendEnabled,
+          minIntervalSeconds: config.minIntervalSeconds,
+          maxIntervalSeconds: config.maxIntervalSeconds,
+          maxDailyBudget: config.maxDailyBudget,
         },
+        pendingCount: summary.pendingCount,
+        nextSlotInMs: summary.nextSlotInMs,
+        lastDeliveredAt: summary.lastDeliveredAt,
+        checkpointReceipt: summary.checkpointReceipt,
       });
     } catch (error: any) {
       res.status(500).json({ error: error?.message || 'Failed to get WhatsApp status' });
@@ -132,6 +140,7 @@ router.get(
 
       res.json({
         deliveries,
+        total: totalRecords,
         pagination: {
           page,
           pageSize,
@@ -304,6 +313,25 @@ router.post(
   }
 );
 
+// GET /api/whatsapp/queue/reconcile-preview - Preview historical recovery
+router.get(
+  '/queue/reconcile-preview',
+  authenticateToken,
+  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const checkpointReceipt = req.query.checkpointReceipt
+        ? parseInt(String(req.query.checkpointReceipt), 10)
+        : 355;
+      const report = await whatsappQueueService.previewHistoricalReconciliation(checkpointReceipt);
+      res.json(report);
+    } catch (error: any) {
+      console.error('[WhatsAppQueue] Reconciliation preview error:', error);
+      res.status(500).json({ error: error?.message || 'Failed to preview reconciliation' });
+    }
+  }
+);
+
 // POST /api/whatsapp/queue/reconcile-historical - Reconcile historical sales
 router.post(
   '/queue/reconcile-historical',
@@ -311,17 +339,62 @@ router.post(
   requireRoles(Role.DEVELOPER, Role.ADMIN),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
-      const cutoffStr = req.body.cutoffTime;
-      const cutoff = cutoffStr ? new Date(cutoffStr) : new Date('2026-11-01T17:22:00+05:30');
-      const result = await whatsappQueueService.reconcileHistoricalBills(cutoff);
+      const checkpointReceipt = req.body.checkpointReceipt
+        ? parseInt(String(req.body.checkpointReceipt), 10)
+        : 355;
+      const includePreCheckpointAsUnknown = req.body.includePreCheckpointAsUnknown !== false;
+
+      const result = await whatsappQueueService.reconcileHistoricalBills({
+        checkpointReceipt,
+        includePreCheckpointAsUnknown,
+      });
+
       res.json({
         success: true,
-        message: `Historical audit complete: ${result.queuedUnsent} bills queued for delivery, ${result.flaggedUnknown} bills flagged for manual review, ${result.skippedAlreadyTracked} already tracked.`,
+        message: `Historical recovery complete: ${result.queuedUnsent} bills queued for delivery, ${result.alreadyDelivered} confirmed delivered, ${result.skippedIneligible} skipped (no phone), ${result.failedInvalid} failed (invalid phone), ${result.cancelled} cancelled, ${result.flaggedUnknown} pre-checkpoint bills marked UNKNOWN.`,
+        queued: result.queuedUnsent,
+        queuedUnsent: result.queuedUnsent,
+        delivered: result.alreadyDelivered,
+        alreadyDelivered: result.alreadyDelivered,
+        unknown: result.flaggedUnknown,
+        flaggedUnknown: result.flaggedUnknown,
+        skipped: result.skippedIneligible,
+        skippedIneligible: result.skippedIneligible,
+        failed: result.failedInvalid,
+        failedInvalid: result.failedInvalid,
+        cancelled: result.cancelled,
+        alreadyTracked: result.skippedAlreadyTracked,
+        skippedAlreadyTracked: result.skippedAlreadyTracked,
         details: result,
       });
     } catch (error: any) {
       console.error('[WhatsAppQueue] Reconciliation error:', error);
       res.status(500).json({ error: error?.message || 'Failed to reconcile historical bills' });
+    }
+  }
+);
+
+// PUT /api/whatsapp/queue/:id/phone - Update customer phone and queue bill
+router.put(
+  '/queue/:id/phone',
+  authenticateToken,
+  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+      const { phone, customerName } = req.body;
+      if (!phone || typeof phone !== 'string' || !phone.trim()) {
+        res.status(400).json({ error: 'Valid customer phone number is required.' });
+        return;
+      }
+      const success = await whatsappQueueService.editDeliveryPhone(id, phone, customerName);
+      if (!success) {
+        res.status(404).json({ error: 'Delivery record not found.' });
+        return;
+      }
+      res.json({ success: true, message: 'Phone number updated and bill queued for delivery.' });
+    } catch (error: any) {
+      res.status(400).json({ error: error?.message || 'Failed to update phone number' });
     }
   }
 );

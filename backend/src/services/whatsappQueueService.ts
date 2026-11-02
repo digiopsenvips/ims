@@ -28,6 +28,34 @@ export interface WhatsAppQueueConfig {
   consecutiveFailures: number;
 }
 
+export interface ReconciliationItem {
+  receiptNumber: number;
+  saleId?: number | null;
+  customerName: string | null;
+  customerPhone: string;
+  totalAmount: number;
+  transactionType: string;
+  saleTime: Date | string;
+  eventName?: string;
+  status: 'DELIVERED' | 'QUEUED' | 'SKIPPED' | 'FAILED' | 'UNKNOWN' | 'CANCELLED';
+  reason: string;
+  suggestedAction?: string;
+}
+
+export interface ReconciliationReport {
+  scanned: number;
+  checkpointReceipt: number;
+  scannedAfterCheckpoint: number;
+  queuedUnsent: number;
+  alreadyDelivered: number;
+  flaggedUnknown: number;
+  skippedIneligible: number;
+  failedInvalid: number;
+  cancelled: number;
+  skippedAlreadyTracked: number;
+  items: ReconciliationItem[];
+}
+
 export interface EnqueueReceiptParams {
   saleId?: number;
   receiptNumber: number;
@@ -229,10 +257,13 @@ class WhatsAppQueueService {
       formattedJid = (cleaned.length >= 10 && cleaned.length <= 15) ? `${cleaned}@s.whatsapp.net` : null;
     }
     const isValidPhone = Boolean(formattedJid);
+    const hasPhone = rawPhone.length > 0;
 
     const idempotencyKey = `sale_${params.saleId ?? 'standalone'}_rcpt_${params.receiptNumber}_bill`;
-    const initialStatus = isValidPhone ? 'QUEUED' : 'FAILED';
-    const lastError = isValidPhone ? null : 'Invalid customer phone number format';
+    const initialStatus = isValidPhone ? 'QUEUED' : (!hasPhone ? 'SKIPPED' : 'FAILED');
+    const lastError = isValidPhone
+      ? null
+      : (!hasPhone ? 'No customer phone provided at checkout' : 'Invalid customer phone number format');
 
     const deliveryPayload: SaleReceiptPayload = {
       phone: rawPhone,
@@ -256,13 +287,48 @@ class WhatsAppQueueService {
         status: initialStatus,
         details: isValidPhone
           ? 'Bill queued for automated delivery.'
-          : 'Bill delivery rejected: phone format invalid.',
+          : (!hasPhone ? 'Bill skipped: no customer phone number provided.' : 'Bill rejected: invalid phone number format.'),
       },
     ];
 
-    const record = await prisma.whatsAppDelivery.upsert({
+    const existingRecord = await prisma.whatsAppDelivery.findUnique({
       where: { idempotencyKey },
-      create: {
+    });
+
+    if (existingRecord) {
+      // Do not overwrite delivered or sent bills
+      if (['DELIVERED', 'SENT', 'SENDING'].includes(existingRecord.status)) {
+        return { id: existingRecord.id, status: existingRecord.status };
+      }
+
+      // If it was skipped or failed and now has valid phone, promote to QUEUED
+      const nextStatus = isValidPhone ? 'QUEUED' : (!hasPhone ? 'SKIPPED' : 'FAILED');
+      const audit = Array.isArray(existingRecord.auditLog) ? (existingRecord.auditLog as any[]) : [];
+      audit.push({
+        timestamp: new Date().toISOString(),
+        action: 'UPDATED',
+        status: nextStatus,
+        details: 'Delivery details updated.',
+      });
+
+      const updated = await prisma.whatsAppDelivery.update({
+        where: { id: existingRecord.id },
+        data: {
+          customerPhone: rawPhone,
+          customerName: params.customerName || existingRecord.customerName,
+          billSnapshot: deliveryPayload as any,
+          status: nextStatus,
+          nextAttemptAt: isValidPhone ? new Date() : null,
+          lastError,
+          auditLog: audit as any,
+        },
+      });
+
+      return { id: updated.id, status: updated.status };
+    }
+
+    const record = await prisma.whatsAppDelivery.create({
+      data: {
         receiptNumber: params.receiptNumber,
         saleId: params.saleId,
         customerName: params.customerName,
@@ -274,11 +340,6 @@ class WhatsAppQueueService {
         lastError,
         idempotencyKey,
         auditLog: initialAudit as any,
-      },
-      update: {
-        // If it was failed due to missing phone and updated, preserve existing record
-        customerPhone: rawPhone,
-        billSnapshot: deliveryPayload as any,
       },
     });
 
@@ -588,18 +649,262 @@ class WhatsAppQueueService {
   }
 
   /**
-   * Reconcile historical bills
+   * Helper to extract canonical commercial items for WhatsApp receipts
    */
-  public async reconcileHistoricalBills(cutoff: Date = new Date('2026-11-01T17:22:00+05:30')): Promise<{
+  public extractBillItems(sale: any): Array<{ productName: string; quantity: number; unitPrice: number; lineTotal: number }> {
+    // 1. If cartSnapshot exists and is non-empty, use canonical commercial items
+    if (Array.isArray(sale.cartSnapshot) && sale.cartSnapshot.length > 0) {
+      return sale.cartSnapshot.map((item: any) => ({
+        productName: item.type === 'COMBO' ? `[Combo] ${item.name}` : item.name,
+        quantity: Number(item.quantity) || 1,
+        unitPrice: Number(item.unitPrice) || 0,
+        lineTotal: Number(item.lineTotal) || 0,
+      }));
+    }
+
+    // 2. Physical items from sale.items
+    if (Array.isArray(sale.items) && sale.items.length > 0) {
+      return sale.items.map((i: any) => ({
+        productName: i.product?.name || i.productId,
+        quantity: Number(i.quantity) || 1,
+        unitPrice: Number(i.unitPrice) || 0,
+        lineTotal: Number(i.lineTotal) || 0,
+      }));
+    }
+
+    // 3. Fallback for Game transactions
+    if (sale.transactionType === 'GAME') {
+      return [{
+        productName: sale.game?.name ? `Game: ${sale.game.name}` : 'Game Session',
+        quantity: 1,
+        unitPrice: Number(sale.totalAmount) || 0,
+        lineTotal: Number(sale.totalAmount) || 0,
+      }];
+    }
+
+    // 4. Default single-item fallback
+    return [{
+      productName: sale.comboName || 'Products',
+      quantity: sale.quantity || 1,
+      unitPrice: Number(sale.unitPrice || sale.totalAmount) || 0,
+      lineTotal: Number(sale.totalAmount) || 0,
+    }];
+  }
+
+  /**
+   * Preview historical bill recovery without modifying database
+   */
+  public async previewHistoricalReconciliation(checkpointReceipt: number = 355): Promise<ReconciliationReport> {
+    const ws = getWhatsAppService();
+    const allSales = await prisma.sale.findMany({
+      include: {
+        event: true,
+        items: { include: { product: true } },
+        whatsappDelivery: true,
+      },
+      orderBy: { receiptNumber: 'asc' },
+    });
+
+    const items: ReconciliationItem[] = [];
+    let queuedUnsent = 0;
+    let alreadyDelivered = 0;
+    let flaggedUnknown = 0;
+    let skippedIneligible = 0;
+    let failedInvalid = 0;
+    let cancelled = 0;
+    let skippedAlreadyTracked = 0;
+    let scannedAfterCheckpoint = 0;
+
+    for (const s of allSales) {
+      const isPostCheckpoint = s.receiptNumber > checkpointReceipt;
+      const isCheckpoint = s.receiptNumber === checkpointReceipt;
+
+      if (isPostCheckpoint) {
+        scannedAfterCheckpoint++;
+      }
+
+      // Check if already tracked in WhatsAppDelivery
+      if (s.whatsappDelivery) {
+        skippedAlreadyTracked++;
+        items.push({
+          receiptNumber: s.receiptNumber,
+          saleId: s.id,
+          customerName: s.customerName,
+          customerPhone: s.customerPhone || '',
+          totalAmount: Number(s.totalAmount),
+          transactionType: s.transactionType,
+          saleTime: s.saleTime || s.createdAt,
+          eventName: s.event?.name,
+          status: s.whatsappDelivery.status as any,
+          reason: `Already tracked in queue with status ${s.whatsappDelivery.status}`,
+        });
+        continue;
+      }
+
+      // Checkpoint receipt #355
+      if (isCheckpoint) {
+        alreadyDelivered++;
+        items.push({
+          receiptNumber: s.receiptNumber,
+          saleId: s.id,
+          customerName: s.customerName,
+          customerPhone: s.customerPhone || '',
+          totalAmount: Number(s.totalAmount),
+          transactionType: s.transactionType,
+          saleTime: s.saleTime || s.createdAt,
+          eventName: s.event?.name,
+          status: 'DELIVERED',
+          reason: 'Historical checkpoint #355: confirmed successfully sent.',
+        });
+        continue;
+      }
+
+      // Post-checkpoint sales (> 355)
+      if (isPostCheckpoint) {
+        if (s.status === 'CANCELLED') {
+          cancelled++;
+          items.push({
+            receiptNumber: s.receiptNumber,
+            saleId: s.id,
+            customerName: s.customerName,
+            customerPhone: s.customerPhone || '',
+            totalAmount: Number(s.totalAmount),
+            transactionType: s.transactionType,
+            saleTime: s.saleTime || s.createdAt,
+            eventName: s.event?.name,
+            status: 'CANCELLED',
+            reason: 'Sale voided / cancelled. Will not be sent.',
+          });
+          continue;
+        }
+
+        const rawPhone = (s.customerPhone || '').trim();
+        if (!rawPhone) {
+          skippedIneligible++;
+          items.push({
+            receiptNumber: s.receiptNumber,
+            saleId: s.id,
+            customerName: s.customerName,
+            customerPhone: '',
+            totalAmount: Number(s.totalAmount),
+            transactionType: s.transactionType,
+            saleTime: s.saleTime || s.createdAt,
+            eventName: s.event?.name,
+            status: 'SKIPPED',
+            reason: 'Missing customer phone number at checkout.',
+            suggestedAction: 'Collect phone number from customer to enable sending.',
+          });
+          continue;
+        }
+
+        const jid = typeof ws?.formatPhoneToJid === 'function'
+          ? ws.formatPhoneToJid(rawPhone)
+          : (rawPhone.replace(/\D/g, '').length >= 10 ? `${rawPhone}@s.whatsapp.net` : null);
+
+        if (jid) {
+          queuedUnsent++;
+          items.push({
+            receiptNumber: s.receiptNumber,
+            saleId: s.id,
+            customerName: s.customerName,
+            customerPhone: rawPhone,
+            totalAmount: Number(s.totalAmount),
+            transactionType: s.transactionType,
+            saleTime: s.saleTime || s.createdAt,
+            eventName: s.event?.name,
+            status: 'QUEUED',
+            reason: 'Eligible bill after checkpoint #355. Ready for automated delivery.',
+          });
+        } else {
+          failedInvalid++;
+          // Detect swapped name/phone (e.g. #386)
+          const nameLooksLikePhone = typeof ws?.formatPhoneToJid === 'function'
+            ? Boolean(ws.formatPhoneToJid(s.customerName || ''))
+            : (s.customerName || '').replace(/\D/g, '').length === 10;
+
+          const swapHint = nameLooksLikePhone
+            ? ` Note: Customer name "${s.customerName}" appears to be a valid phone number.`
+            : '';
+
+          items.push({
+            receiptNumber: s.receiptNumber,
+            saleId: s.id,
+            customerName: s.customerName,
+            customerPhone: rawPhone,
+            totalAmount: Number(s.totalAmount),
+            transactionType: s.transactionType,
+            saleTime: s.saleTime || s.createdAt,
+            eventName: s.event?.name,
+            status: 'FAILED',
+            reason: `Invalid phone number format "${rawPhone}".${swapHint}`,
+            suggestedAction: nameLooksLikePhone
+              ? `Swap customer name "${s.customerName}" and phone "${rawPhone}" to queue.`
+              : 'Correct phone number format to retry.',
+          });
+        }
+        continue;
+      }
+
+      // Pre-checkpoint sales (< 355)
+      const rawPhone = (s.customerPhone || '').trim();
+      if (rawPhone) {
+        flaggedUnknown++;
+        items.push({
+          receiptNumber: s.receiptNumber,
+          saleId: s.id,
+          customerName: s.customerName,
+          customerPhone: rawPhone,
+          totalAmount: Number(s.totalAmount),
+          transactionType: s.transactionType,
+          saleTime: s.saleTime || s.createdAt,
+          eventName: s.event?.name,
+          status: 'UNKNOWN',
+          reason: 'Pre-checkpoint transaction. Recorded as UNKNOWN for safe audit review.',
+          suggestedAction: 'Review delivery status manually. Never auto-sent.',
+        });
+      }
+    }
+
+    return {
+      scanned: allSales.length,
+      checkpointReceipt,
+      scannedAfterCheckpoint,
+      queuedUnsent,
+      alreadyDelivered,
+      flaggedUnknown,
+      skippedIneligible,
+      failedInvalid,
+      cancelled,
+      skippedAlreadyTracked,
+      items,
+    };
+  }
+
+  /**
+   * Reconcile historical bills idempotently
+   */
+  public async reconcileHistoricalBills(
+    options?: { checkpointReceipt?: number; includePreCheckpointAsUnknown?: boolean } | Date
+  ): Promise<{
     scanned: number;
+    checkpointReceipt: number;
     queuedUnsent: number;
+    alreadyDelivered: number;
     flaggedUnknown: number;
+    skippedIneligible: number;
+    failedInvalid: number;
+    cancelled: number;
     skippedAlreadyTracked: number;
   }> {
-    const salesWithPhone = await prisma.sale.findMany({
-      where: {
-        customerPhone: { not: null },
-      },
+    const checkpointReceipt = typeof options === 'object' && options && 'checkpointReceipt' in options
+      ? (options.checkpointReceipt || 355)
+      : 355;
+    const includePre = typeof options === 'object' && options && 'includePreCheckpointAsUnknown' in options
+      ? options.includePreCheckpointAsUnknown !== false
+      : true;
+
+    const ws = getWhatsAppService();
+    const allSales = await prisma.sale.findMany({
       include: {
         event: true,
         items: { include: { product: true } },
@@ -609,37 +914,27 @@ class WhatsAppQueueService {
     });
 
     let queuedUnsent = 0;
+    let alreadyDelivered = 0;
     let flaggedUnknown = 0;
+    let skippedIneligible = 0;
+    let failedInvalid = 0;
+    let cancelled = 0;
     let skippedAlreadyTracked = 0;
 
-    for (const s of salesWithPhone) {
-      const phone = (s.customerPhone || '').trim();
-      if (!phone) continue;
+    for (const s of allSales) {
+      const isPostCheckpoint = s.receiptNumber > checkpointReceipt;
+      const isCheckpoint = s.receiptNumber === checkpointReceipt;
 
+      // Skip already tracked delivery records to prevent any modification of delivered/sent jobs
       if (s.whatsappDelivery) {
         skippedAlreadyTracked++;
         continue;
       }
 
-      const saleTime = new Date(s.saleTime || s.createdAt);
-      const isAfterCutoff = saleTime.getTime() > cutoff.getTime();
-
-      const items = (s.items && s.items.length > 0)
-        ? s.items.map(i => ({
-            productName: i.product?.name || i.productId,
-            quantity: i.quantity,
-            unitPrice: Number(i.unitPrice),
-            lineTotal: Number(i.lineTotal),
-          }))
-        : [{
-            productName: s.comboName || 'Products',
-            quantity: s.quantity || 1,
-            unitPrice: Number(s.unitPrice || s.totalAmount),
-            lineTotal: Number(s.totalAmount),
-          }];
-
+      const rawPhone = (s.customerPhone || '').trim();
+      const items = this.extractBillItems(s);
       const deliveryPayload: SaleReceiptPayload = {
-        phone,
+        phone: rawPhone,
         customerName: s.customerName || undefined,
         receiptNumber: s.receiptNumber,
         eventName: s.event?.name || 'Enactus Event',
@@ -650,44 +945,161 @@ class WhatsAppQueueService {
         cashAmount: s.cashAmount ? Number(s.cashAmount) : null,
         upiAmount: s.upiAmount ? Number(s.upiAmount) : null,
         sellerName: s.sellerNameAtSale || undefined,
-        saleTime,
+        saleTime: s.saleTime || s.createdAt,
       };
 
       const idempotencyKey = `sale_${s.id}_rcpt_${s.receiptNumber}_bill`;
 
-      if (isAfterCutoff) {
-        // Occurred after WhatsApp disconnected at 5:22 PM: reliably unattempted
+      // 1. Checkpoint bill #355: confirmed successfully sent
+      if (isCheckpoint) {
         await prisma.whatsAppDelivery.create({
           data: {
             receiptNumber: s.receiptNumber,
             saleId: s.id,
             customerName: s.customerName,
-            customerPhone: phone,
+            customerPhone: rawPhone,
             billSnapshot: deliveryPayload as any,
             messageType: 'SALE_RECEIPT',
-            status: 'QUEUED',
-            nextAttemptAt: new Date(),
+            status: 'DELIVERED',
+            sentAt: s.saleTime || s.createdAt,
+            deliveredAt: s.saleTime || s.createdAt,
+            attemptCount: 1,
             idempotencyKey,
             auditLog: [
               {
                 timestamp: new Date().toISOString(),
-                action: 'HISTORICAL_RECONCILIATION',
-                status: 'QUEUED',
-                details: 'Sale created after WhatsApp disconnect on Nov 1 ~5:22 PM. Queued for delivery.',
+                action: 'CHECKPOINT_RECORD',
+                status: 'DELIVERED',
+                details: `Historical checkpoint bill #${s.receiptNumber}: confirmed sent via WhatsApp.`,
               },
             ] as any,
           },
         });
-        queuedUnsent++;
-      } else {
-        // Occurred before cutoff: may have already been delivered or attempted
-        // Mark as UNKNOWN so operator can review and resolve without risk of duplicate sending
+        alreadyDelivered++;
+        continue;
+      }
+
+      // 2. Post-checkpoint sales (> 355)
+      if (isPostCheckpoint) {
+        if (s.status === 'CANCELLED') {
+          await prisma.whatsAppDelivery.create({
+            data: {
+              receiptNumber: s.receiptNumber,
+              saleId: s.id,
+              customerName: s.customerName,
+              customerPhone: rawPhone,
+              billSnapshot: deliveryPayload as any,
+              messageType: 'SALE_RECEIPT',
+              status: 'CANCELLED',
+              lastError: 'Underlying sale was cancelled / voided',
+              idempotencyKey,
+              auditLog: [
+                {
+                  timestamp: new Date().toISOString(),
+                  action: 'HISTORICAL_RECONCILIATION',
+                  status: 'CANCELLED',
+                  details: 'Sale was cancelled. Bill delivery omitted.',
+                },
+              ] as any,
+            },
+          });
+          cancelled++;
+          continue;
+        }
+
+        if (!rawPhone) {
+          await prisma.whatsAppDelivery.create({
+            data: {
+              receiptNumber: s.receiptNumber,
+              saleId: s.id,
+              customerName: s.customerName,
+              customerPhone: '',
+              billSnapshot: deliveryPayload as any,
+              messageType: 'SALE_RECEIPT',
+              status: 'SKIPPED',
+              lastError: 'Missing customer phone number at checkout',
+              idempotencyKey,
+              auditLog: [
+                {
+                  timestamp: new Date().toISOString(),
+                  action: 'HISTORICAL_RECONCILIATION',
+                  status: 'SKIPPED',
+                  details: 'Ineligible: customer phone number was not provided at checkout.',
+                },
+              ] as any,
+            },
+          });
+          skippedIneligible++;
+          continue;
+        }
+
+        const jid = typeof ws?.formatPhoneToJid === 'function'
+          ? ws.formatPhoneToJid(rawPhone)
+          : (rawPhone.replace(/\D/g, '').length >= 10 ? `${rawPhone}@s.whatsapp.net` : null);
+
+        if (jid) {
+          await prisma.whatsAppDelivery.create({
+            data: {
+              receiptNumber: s.receiptNumber,
+              saleId: s.id,
+              customerName: s.customerName,
+              customerPhone: rawPhone,
+              billSnapshot: deliveryPayload as any,
+              messageType: 'SALE_RECEIPT',
+              status: 'QUEUED',
+              nextAttemptAt: new Date(),
+              idempotencyKey,
+              auditLog: [
+                {
+                  timestamp: new Date().toISOString(),
+                  action: 'HISTORICAL_RECONCILIATION',
+                  status: 'QUEUED',
+                  details: `Unsent bill after checkpoint #${checkpointReceipt} recovered. Queued for controlled delivery.`,
+                },
+              ] as any,
+            },
+          });
+          queuedUnsent++;
+        } else {
+          const nameLooksLikePhone = (s.customerName || '').replace(/\D/g, '').length === 10;
+          const swapHint = nameLooksLikePhone
+            ? ` Note: Customer name "${s.customerName}" appears to be a phone number.`
+            : '';
+
+          await prisma.whatsAppDelivery.create({
+            data: {
+              receiptNumber: s.receiptNumber,
+              saleId: s.id,
+              customerName: s.customerName,
+              customerPhone: rawPhone,
+              billSnapshot: deliveryPayload as any,
+              messageType: 'SALE_RECEIPT',
+              status: 'FAILED',
+              lastError: `Invalid customer phone format: "${rawPhone}".${swapHint}`,
+              idempotencyKey,
+              auditLog: [
+                {
+                  timestamp: new Date().toISOString(),
+                  action: 'HISTORICAL_RECONCILIATION',
+                  status: 'FAILED',
+                  details: `Bill delivery rejected due to invalid phone number format: "${rawPhone}".${swapHint}`,
+                },
+              ] as any,
+            },
+          });
+          failedInvalid++;
+        }
+        continue;
+      }
+
+      // 3. Pre-checkpoint sales (< 355) with customer phone
+      if (includePre && rawPhone) {
         await prisma.whatsAppDelivery.create({
           data: {
             receiptNumber: s.receiptNumber,
             saleId: s.id,
             customerName: s.customerName,
-            customerPhone: phone,
+            customerPhone: rawPhone,
             billSnapshot: deliveryPayload as any,
             messageType: 'SALE_RECEIPT',
             status: 'UNKNOWN',
@@ -697,7 +1109,7 @@ class WhatsAppQueueService {
                 timestamp: new Date().toISOString(),
                 action: 'HISTORICAL_RECONCILIATION',
                 status: 'UNKNOWN',
-                details: 'Sale occurred prior to disconnect. Marked UNKNOWN for safe audit review.',
+                details: `Sale completed prior to checkpoint #${checkpointReceipt}. Flagged for review; duplicate dispatch prohibited.`,
               },
             ] as any,
           },
@@ -707,11 +1119,87 @@ class WhatsAppQueueService {
     }
 
     return {
-      scanned: salesWithPhone.length,
+      scanned: allSales.length,
+      checkpointReceipt,
       queuedUnsent,
+      alreadyDelivered,
       flaggedUnknown,
+      skippedIneligible,
+      failedInvalid,
+      cancelled,
       skippedAlreadyTracked,
     };
+  }
+
+  /**
+   * Edit customer phone number for a delivery and queue it
+   */
+  public async editDeliveryPhone(
+    deliveryId: string,
+    newPhone: string,
+    newCustomerName?: string
+  ): Promise<boolean> {
+    const delivery = await prisma.whatsAppDelivery.findUnique({ where: { id: deliveryId } });
+    if (!delivery) return false;
+
+    if (delivery.status === 'DELIVERED') {
+      throw new Error('Cannot edit phone number for a bill that is already delivered.');
+    }
+
+    const ws = getWhatsAppService();
+    const formattedJid = typeof ws?.formatPhoneToJid === 'function'
+      ? ws.formatPhoneToJid(newPhone)
+      : (newPhone.replace(/\D/g, '').length >= 10 ? `${newPhone}@s.whatsapp.net` : null);
+
+    if (!formattedJid) {
+      throw new Error(`Invalid phone number format: "${newPhone}". Must be a valid 10-15 digit phone number.`);
+    }
+
+    const rawPhone = newPhone.trim();
+    const customerName = newCustomerName !== undefined ? newCustomerName.trim() : delivery.customerName;
+
+    const currentSnapshot = (delivery.billSnapshot as any) || {};
+    const updatedSnapshot = {
+      ...currentSnapshot,
+      phone: rawPhone,
+      customerName: customerName || undefined,
+    };
+
+    const audit = Array.isArray(delivery.auditLog) ? (delivery.auditLog as any[]) : [];
+    audit.push({
+      timestamp: new Date().toISOString(),
+      action: 'OPERATOR_PHONE_UPDATE',
+      details: `Phone updated from "${delivery.customerPhone}" to "${rawPhone}" by operator. Queued for delivery.`,
+    });
+
+    await prisma.whatsAppDelivery.update({
+      where: { id: deliveryId },
+      data: {
+        customerPhone: rawPhone,
+        customerName: customerName || null,
+        billSnapshot: updatedSnapshot as any,
+        status: 'QUEUED',
+        nextAttemptAt: new Date(),
+        lastError: null,
+        auditLog: audit as any,
+      },
+    });
+
+    if (delivery.saleId) {
+      try {
+        await prisma.sale.update({
+          where: { id: delivery.saleId },
+          data: {
+            customerPhone: rawPhone,
+            customerName: customerName || undefined,
+          },
+        });
+      } catch (e) {
+        console.warn('[WhatsAppQueue] Note: Could not update underlying sale customerPhone:', e);
+      }
+    }
+
+    return true;
   }
 
   /**
@@ -844,32 +1332,59 @@ class WhatsAppQueueService {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
-    const [
-      totalPending,
-      totalQueued,
-      totalSending,
-      totalSent,
-      totalDelivered,
-      totalFailed,
-      totalUnknown,
-      totalCancelled,
-      sentToday,
-    ] = await Promise.all([
-      prisma.whatsAppDelivery.count({ where: { status: 'PENDING' } }),
-      prisma.whatsAppDelivery.count({ where: { status: 'QUEUED' } }),
-      prisma.whatsAppDelivery.count({ where: { status: 'SENDING' } }),
-      prisma.whatsAppDelivery.count({ where: { status: 'SENT' } }),
-      prisma.whatsAppDelivery.count({ where: { status: 'DELIVERED' } }),
-      prisma.whatsAppDelivery.count({ where: { status: 'FAILED' } }),
-      prisma.whatsAppDelivery.count({ where: { status: 'UNKNOWN' } }),
-      prisma.whatsAppDelivery.count({ where: { status: 'CANCELLED' } }),
+    // Efficient single groupBy query to avoid exhausting connection pool
+    const statusGroups = await prisma.whatsAppDelivery.groupBy({
+      by: ['status'],
+      _count: { id: true },
+    });
+
+    const byStatus: Record<string, number> = {
+      PENDING: 0,
+      QUEUED: 0,
+      SENDING: 0,
+      SENT: 0,
+      DELIVERED: 0,
+      FAILED: 0,
+      UNKNOWN: 0,
+      CANCELLED: 0,
+      SKIPPED: 0,
+    };
+
+    let total = 0;
+    for (const g of statusGroups) {
+      const count = g._count.id;
+      byStatus[g.status] = count;
+      total += count;
+    }
+
+    const [sentToday, lastDeliveryRow, lastErrorRow] = await Promise.all([
       prisma.whatsAppDelivery.count({
         where: {
           status: { in: ['SENT', 'DELIVERED'] },
           sentAt: { gte: startOfToday },
         },
       }),
+      prisma.whatsAppDelivery.findFirst({
+        where: { status: 'DELIVERED' },
+        orderBy: { deliveredAt: 'desc' },
+        select: { deliveredAt: true },
+      }),
+      prisma.whatsAppDelivery.findFirst({
+        where: { lastError: { not: null } },
+        orderBy: { updatedAt: 'desc' },
+        select: { lastError: true, updatedAt: true },
+      }),
     ]);
+
+    const totalPending = byStatus.PENDING || 0;
+    const totalQueued = byStatus.QUEUED || 0;
+    const totalSending = byStatus.SENDING || 0;
+    const totalSent = byStatus.SENT || 0;
+    const totalDelivered = byStatus.DELIVERED || 0;
+    const totalFailed = byStatus.FAILED || 0;
+    const totalUnknown = byStatus.UNKNOWN || 0;
+    const totalCancelled = byStatus.CANCELLED || 0;
+    const totalSkipped = byStatus.SKIPPED || 0;
 
     const config = await this.getConfig();
     const nextSlotInMs = Math.max(0, this.nextDispatchAllowedAt - Date.now());
@@ -878,18 +1393,6 @@ class WhatsAppQueueService {
     const eligibleCount = totalPending + totalQueued;
     const avgDelaySec = (config.minIntervalSeconds + config.maxIntervalSeconds) / 2;
     const estimatedTotalSeconds = eligibleCount * avgDelaySec + Math.ceil(nextSlotInMs / 1000);
-
-    const total = totalPending + totalQueued + totalSending + totalSent + totalDelivered + totalFailed + totalUnknown + totalCancelled;
-    const byStatus: Record<string, number> = {
-      PENDING: totalPending,
-      QUEUED: totalQueued,
-      SENDING: totalSending,
-      SENT: totalSent,
-      DELIVERED: totalDelivered,
-      FAILED: totalFailed,
-      UNKNOWN: totalUnknown,
-      CANCELLED: totalCancelled,
-    };
 
     return {
       total,
@@ -902,15 +1405,20 @@ class WhatsAppQueueService {
       totalFailed,
       totalUnknown,
       totalCancelled,
+      totalSkipped,
       pendingCount: totalPending + totalQueued,
       failedCount: totalFailed,
       unknownCount: totalUnknown,
+      skippedCount: totalSkipped,
       todayCount: sentToday,
       todaySent: sentToday,
       sentToday,
       eligibleCount,
       nextSlotInMs,
       estimatedTotalSeconds,
+      lastDeliveredAt: lastDeliveryRow?.deliveredAt || null,
+      lastError: lastErrorRow?.lastError || null,
+      checkpointReceipt: 355,
       config,
     };
   }

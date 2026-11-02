@@ -11,6 +11,7 @@ import { computeEventStatus } from '../services/eventLifecycle';
 import { stockTransaction, assertEventOpen, assertAllocatedStock, StockConflict } from '../services/stock';
 import { validateOperation, paymentAmounts } from '../services/payment';
 import { existingSaleAcknowledgement } from '../services/idempotency';
+import { whatsappQueueService } from '../services/whatsappQueueService';
 
 const router = Router();
 router.use(responsePolicy);
@@ -1353,6 +1354,30 @@ router.post(
           result: normResult,
           receiptNumber: gameSession.receiptNumber,
         });
+
+        // Auto-enqueue Digital WhatsApp Bill for game session
+        whatsappQueueService.enqueueBill({
+          saleId: sale?.id,
+          receiptNumber: gameSession.receiptNumber,
+          customerName: gameSession.customerName || 'Valued Player',
+          customerPhone: (gameSession.customerPhone || '').trim(),
+          eventName: gameSession.event?.name || 'Enactus Event',
+          eventLocation: gameSession.event?.location || '',
+          items: [
+            {
+              productName: `Game: ${game.name}${normResult === 'WIN' && rewardProductObj ? ` (Prize: ${rewardProductObj.name})` : ''}`,
+              quantity: 1,
+              unitPrice: entryFeeNum,
+              lineTotal: entryFeeNum,
+            },
+          ],
+          totalAmount: entryFeeNum,
+          paymentMethod: normMethod,
+          cashAmount: resolvedCashAmount,
+          upiAmount: resolvedUpiAmount,
+          sellerName: req.user?.name,
+          saleTime: gameSession.createdAt,
+        }).catch(err => console.error('[WhatsAppQueue] Game receipt auto-enqueue error:', err));
       }
 
       // Fetch remaining stock of the reward product

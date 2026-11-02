@@ -201,7 +201,7 @@ export interface Sale {
   whatsappDelivery?: WhatsAppDelivery | null;
 }
 
-export type WhatsAppDeliveryStatus = 'PENDING' | 'QUEUED' | 'SENDING' | 'SENT' | 'DELIVERED' | 'FAILED' | 'RETRY_WAIT' | 'UNKNOWN' | 'CANCELLED';
+export type WhatsAppDeliveryStatus = 'PENDING' | 'QUEUED' | 'SENDING' | 'SENT' | 'DELIVERED' | 'FAILED' | 'RETRY_WAIT' | 'UNKNOWN' | 'CANCELLED' | 'SKIPPED';
 
 export interface WhatsAppDelivery {
   id: string;
@@ -217,19 +217,84 @@ export interface WhatsAppDelivery {
   lastError?: string | null;
   sentAt?: string | null;
   deliveredAt?: string | null;
-  auditLog?: Array<{ ts: string; event: string; detail?: string }> | null;
+  auditLog?: Array<{ ts?: string; timestamp?: string; action?: string; event?: string; details?: string; detail?: string; error?: string }> | null;
   createdAt: string;
   updatedAt: string;
+  sale?: {
+    id: number;
+    receiptNumber: number;
+    totalAmount: number;
+    paymentMethod: string;
+    saleTime: string;
+    event?: {
+      id: string;
+      name: string;
+      location: string;
+    } | null;
+  } | null;
 }
 
 export interface WhatsAppQueueSummary {
   total: number;
   byStatus: Record<string, number>;
+  totalPending?: number;
+  totalQueued?: number;
+  totalSending?: number;
+  totalSent?: number;
+  totalDelivered?: number;
+  totalFailed?: number;
+  totalUnknown?: number;
+  totalCancelled?: number;
+  totalSkipped?: number;
   todayCount: number;
   todaySent: number;
+  sentToday?: number;
   pendingCount: number;
   failedCount: number;
   unknownCount: number;
+  skippedCount?: number;
+  eligibleCount?: number;
+  nextSlotInMs?: number;
+  estimatedTotalSeconds?: number;
+  lastDeliveredAt?: string | null;
+  lastError?: string | null;
+  checkpointReceipt?: number;
+  config?: WhatsAppQueueConfig;
+  gateway?: {
+    isConnected: boolean;
+    status: string;
+    connectedNumber?: string | null;
+    qrDataUrl?: string | null;
+    lastError?: string | null;
+  };
+}
+
+export interface ReconciliationItem {
+  receiptNumber: number;
+  saleId?: number | null;
+  customerName: string | null;
+  customerPhone: string;
+  totalAmount: number;
+  transactionType: string;
+  saleTime: string | Date;
+  eventName?: string;
+  status: WhatsAppDeliveryStatus;
+  reason: string;
+  suggestedAction?: string;
+}
+
+export interface ReconciliationPreviewReport {
+  scanned: number;
+  checkpointReceipt: number;
+  scannedAfterCheckpoint: number;
+  queuedUnsent: number;
+  alreadyDelivered: number;
+  flaggedUnknown: number;
+  skippedIneligible: number;
+  failedInvalid: number;
+  cancelled: number;
+  skippedAlreadyTracked: number;
+  items: ReconciliationItem[];
 }
 
 export interface WhatsAppQueueConfig {

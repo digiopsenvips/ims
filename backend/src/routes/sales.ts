@@ -936,29 +936,27 @@ export const recordSale = async (req: AuthenticatedRequest, res: Response): Prom
       });
     }
 
-    // 8. Auto-enqueue Digital WhatsApp Bill if customer phone provided
-    if (newSale.customerPhone && newSale.customerPhone.trim()) {
-      whatsappQueueService.enqueueBill({
-        saleId: newSale.id,
-        receiptNumber: newSale.receiptNumber,
-        customerName: newSale.customerName ? String(newSale.customerName).trim() : 'Valued Supporter',
-        customerPhone: newSale.customerPhone.trim(),
-        eventName: newSale.event.name,
-        eventLocation: newSale.event.location,
-        items: commercialSnapshots.map(item => ({
-          productName: item.type === 'COMBO' ? `[Combo] ${item.name}` : item.name,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          lineTotal: item.lineTotal,
-        })),
-        totalAmount: Number(newSale.totalAmount),
-        paymentMethod: newSale.paymentMethod,
-        cashAmount: Number(newSale.cashAmount ?? resolvedCashAmount),
-        upiAmount: Number(newSale.upiAmount ?? resolvedUpiAmount),
-        sellerName: newSale.sellerNameAtSale || req.user?.name,
-        saleTime: newSale.saleTime,
-      }).catch(err => console.error('[WhatsAppQueue] Auto-enqueue receipt error:', err));
-    }
+    // 8. Auto-enqueue Digital WhatsApp Bill (QUEUED if valid phone, SKIPPED if no phone)
+    whatsappQueueService.enqueueBill({
+      saleId: newSale.id,
+      receiptNumber: newSale.receiptNumber,
+      customerName: newSale.customerName ? String(newSale.customerName).trim() : 'Valued Supporter',
+      customerPhone: (newSale.customerPhone || '').trim(),
+      eventName: newSale.event.name,
+      eventLocation: newSale.event.location,
+      items: commercialSnapshots.map(item => ({
+        productName: item.type === 'COMBO' ? `[Combo] ${item.name}` : item.name,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        lineTotal: item.lineTotal,
+      })),
+      totalAmount: Number(newSale.totalAmount),
+      paymentMethod: newSale.paymentMethod,
+      cashAmount: Number(newSale.cashAmount ?? resolvedCashAmount),
+      upiAmount: Number(newSale.upiAmount ?? resolvedUpiAmount),
+      sellerName: newSale.sellerNameAtSale || req.user?.name,
+      saleTime: newSale.saleTime,
+    }).catch(err => console.error('[WhatsAppQueue] Auto-enqueue receipt error:', err));
 
     // 9. Format response payload
     const displayProductName = commercialSnapshots.map(l => `${l.name} × ${l.quantity}`).join(', ') || newSale.comboName || 'Products';
@@ -1188,6 +1186,23 @@ export const cancelSaleHandler = async (req: AuthenticatedRequest, res: Response
 
       return { sale: updatedSale, restoredLocations };
     });
+
+    // Cancel any pending WhatsApp delivery for this voided sale
+    try {
+      await prisma.whatsAppDelivery.updateMany({
+        where: {
+          saleId,
+          status: { in: ['QUEUED', 'PENDING', 'RETRY_WAIT'] },
+        },
+        data: {
+          status: 'CANCELLED',
+          lastError: `Sale #${outcome.sale.receiptNumber} was cancelled: ${reason}`,
+          nextAttemptAt: null,
+        },
+      });
+    } catch (e) {
+      console.warn('[Sales] Note: Could not cancel WhatsApp delivery on sale cancel:', e);
+    }
 
     broadcast('sale:cancelled', {
       id: outcome.sale.id,
