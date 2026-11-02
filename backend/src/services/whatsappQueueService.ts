@@ -879,7 +879,21 @@ class WhatsAppQueueService {
     const avgDelaySec = (config.minIntervalSeconds + config.maxIntervalSeconds) / 2;
     const estimatedTotalSeconds = eligibleCount * avgDelaySec + Math.ceil(nextSlotInMs / 1000);
 
+    const total = totalPending + totalQueued + totalSending + totalSent + totalDelivered + totalFailed + totalUnknown + totalCancelled;
+    const byStatus: Record<string, number> = {
+      PENDING: totalPending,
+      QUEUED: totalQueued,
+      SENDING: totalSending,
+      SENT: totalSent,
+      DELIVERED: totalDelivered,
+      FAILED: totalFailed,
+      UNKNOWN: totalUnknown,
+      CANCELLED: totalCancelled,
+    };
+
     return {
+      total,
+      byStatus,
       totalPending,
       totalQueued,
       totalSending,
@@ -888,6 +902,11 @@ class WhatsAppQueueService {
       totalFailed,
       totalUnknown,
       totalCancelled,
+      pendingCount: totalPending + totalQueued,
+      failedCount: totalFailed,
+      unknownCount: totalUnknown,
+      todayCount: sentToday,
+      todaySent: sentToday,
       sentToday,
       eligibleCount,
       nextSlotInMs,

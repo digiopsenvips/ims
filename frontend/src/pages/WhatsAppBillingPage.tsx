@@ -726,11 +726,38 @@ export const WhatsAppBillingPage: React.FC = () => {
       {/* Summary Stats Grid */}
       {summary && (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-          <StatCard label="Total" value={summary.total} icon={<Activity className="w-4 h-4" />} color="slate" sub="all time" />
-          <StatCard label="Pending / Queued" value={(summary.byStatus['PENDING'] || 0) + (summary.byStatus['QUEUED'] || 0)} icon={<Clock className="w-4 h-4" />} color="blue" sub="awaiting dispatch" />
-          <StatCard label="Delivered" value={summary.byStatus['DELIVERED'] || 0} icon={<CheckCheck className="w-4 h-4" />} color="emerald" sub="confirmed" />
-          <StatCard label="Failed" value={summary.failedCount} icon={<XCircle className="w-4 h-4" />} color="red" sub="need attention" />
-          <StatCard label="Unknown" value={summary.unknownCount} icon={<AlertTriangle className="w-4 h-4" />} color="yellow" sub="pre-cutoff bills" />
+          <StatCard label="Total" value={summary.total ?? 0} icon={<Activity className="w-4 h-4" />} color="slate" sub="all time" />
+          <StatCard
+            label="Pending / Queued"
+            value={
+              (summary.byStatus?.['PENDING'] ?? (summary as any).totalPending ?? 0) +
+              (summary.byStatus?.['QUEUED'] ?? (summary as any).totalQueued ?? 0)
+            }
+            icon={<Clock className="w-4 h-4" />}
+            color="blue"
+            sub="awaiting dispatch"
+          />
+          <StatCard
+            label="Delivered"
+            value={summary.byStatus?.['DELIVERED'] ?? (summary as any).totalDelivered ?? 0}
+            icon={<CheckCheck className="w-4 h-4" />}
+            color="emerald"
+            sub="confirmed"
+          />
+          <StatCard
+            label="Failed"
+            value={summary.failedCount ?? summary.byStatus?.['FAILED'] ?? (summary as any).totalFailed ?? 0}
+            icon={<XCircle className="w-4 h-4" />}
+            color="red"
+            sub="need attention"
+          />
+          <StatCard
+            label="Unknown"
+            value={summary.unknownCount ?? summary.byStatus?.['UNKNOWN'] ?? (summary as any).totalUnknown ?? 0}
+            icon={<AlertTriangle className="w-4 h-4" />}
+            color="yellow"
+            sub="pre-cutoff bills"
+          />
         </div>
       )}
 

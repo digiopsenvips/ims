@@ -43,8 +43,14 @@ export const WhatsAppIndicator: React.FC<WhatsAppIndicatorProps> = ({ className 
   const fetchPendingCount = async () => {
     if (!canManage) return;
     try {
-      const data = await api.get<{ byStatus?: Record<string, number>; pendingCount?: number }>('/whatsapp/queue/summary');
-      const pending = (data.byStatus?.['PENDING'] || 0) + (data.byStatus?.['QUEUED'] || 0) + (data.byStatus?.['RETRY_WAIT'] || 0);
+      const data = await api.get<{ byStatus?: Record<string, number>; pendingCount?: number; totalPending?: number; totalQueued?: number }>('/whatsapp/queue/summary');
+      const pending = data.pendingCount ?? (
+        (data.byStatus?.['PENDING'] || 0) +
+        (data.byStatus?.['QUEUED'] || 0) +
+        (data.byStatus?.['RETRY_WAIT'] || 0) +
+        ((data as any).totalPending || 0) +
+        ((data as any).totalQueued || 0)
+      );
       setPendingCount(pending);
     } catch {
       // Ignore
