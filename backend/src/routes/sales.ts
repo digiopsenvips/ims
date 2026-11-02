@@ -14,6 +14,7 @@ import { stockTransaction, assertAllocatedStock, StockConflict } from '../servic
 import { paymentAmounts, paymentMethod as normalizePaymentMethod, validateOperation, moneyCents, InputError } from '../services/payment';
 import { existingSaleAcknowledgement } from '../services/idempotency';
 import { whatsappService } from '../services/whatsappService';
+import { whatsappQueueService } from '../services/whatsappQueueService';
 
 const router = Router();
 router.use(responsePolicy);
@@ -231,6 +232,20 @@ router.get(
                 },
               },
             },
+            whatsappDelivery: {
+              select: {
+                id: true,
+                status: true,
+                attemptCount: true,
+                lastAttemptAt: true,
+                nextAttemptAt: true,
+                sentAt: true,
+                deliveredAt: true,
+                lastError: true,
+                providerMessageId: true,
+                auditLog: true,
+              },
+            },
           },
           orderBy,
           skip,
@@ -383,6 +398,8 @@ router.get(
           cancelledById: s.cancelledById,
           cancelledByName: s.cancelledByName,
           cancelReason: s.cancelReason,
+          whatsappStatus: (s as any).whatsappDelivery?.status || (s.customerPhone ? 'NOT_QUEUED' : 'NO_PHONE'),
+          whatsappDelivery: (s as any).whatsappDelivery || null,
         };
       });
 
@@ -919,12 +936,13 @@ export const recordSale = async (req: AuthenticatedRequest, res: Response): Prom
       });
     }
 
-    // 8. Auto-dispatch Digital WhatsApp Bill if customer phone provided
+    // 8. Auto-enqueue Digital WhatsApp Bill if customer phone provided
     if (newSale.customerPhone && newSale.customerPhone.trim()) {
-      whatsappService.sendSaleReceipt({
-        phone: newSale.customerPhone.trim(),
-        customerName: newSale.customerName ? String(newSale.customerName).trim() : 'Valued Supporter',
+      whatsappQueueService.enqueueBill({
+        saleId: newSale.id,
         receiptNumber: newSale.receiptNumber,
+        customerName: newSale.customerName ? String(newSale.customerName).trim() : 'Valued Supporter',
+        customerPhone: newSale.customerPhone.trim(),
         eventName: newSale.event.name,
         eventLocation: newSale.event.location,
         items: commercialSnapshots.map(item => ({
@@ -939,7 +957,7 @@ export const recordSale = async (req: AuthenticatedRequest, res: Response): Prom
         upiAmount: Number(newSale.upiAmount ?? resolvedUpiAmount),
         sellerName: newSale.sellerNameAtSale || req.user?.name,
         saleTime: newSale.saleTime,
-      }).catch(err => console.error('[WhatsApp] Auto-dispatch receipt error:', err));
+      }).catch(err => console.error('[WhatsAppQueue] Auto-enqueue receipt error:', err));
     }
 
     // 9. Format response payload

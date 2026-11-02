@@ -22,6 +22,7 @@ import { GamePlayPage } from './pages/GamePlayPage';
 import { GameSessionsPage } from './pages/GameSessionsPage';
 import { CustomerGameQrPage } from './pages/CustomerGameQrPage';
 import { CombosPage } from './pages/CombosPage';
+import { WhatsAppBillingPage } from './pages/WhatsAppBillingPage';
 
 export const App: React.FC = () => {
   const { user, isMember } = useAuth();
@@ -190,6 +191,15 @@ export const App: React.FC = () => {
           element={
             <ProtectedRoute allowedRoles={['DEVELOPER', 'ADMIN']}>
               <UserManagementPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="whatsapp"
+          element={
+            <ProtectedRoute allowedRoles={['DEVELOPER', 'ADMIN']}>
+              <WhatsAppBillingPage />
             </ProtectedRoute>
           }
         />

@@ -32,8 +32,10 @@ function load(filename) {
     if (name.endsWith('/config/prisma')) return { prisma };
     if (name.endsWith('/config/env')) return { ENV: { JWT_SECRET: secret, NODE_ENV: 'test' } };
     if (name.endsWith('/sockets')) return { broadcast() {} };
-    if (name.endsWith('/services/whatsappService')) return { whatsappService: {
-      sendSaleReceipt: async () => ({ success: true }), getStatus: () => ({}),
+    if (name.endsWith('/services/whatsappService') || name.endsWith('/whatsappService')) return { whatsappService: {
+      sendSaleReceipt: async () => ({ success: true, messageId: 'msg-test-123' }),
+      getStatus: () => ({ isConnected: true, status: 'CONNECTED', connectedNumber: '919876543210' }),
+      formatPhoneToJid: (phone) => phone ? `${phone.replace(/\D/g, '')}@s.whatsapp.net` : null,
     } };
     if (name.startsWith('.')) return load(path.resolve(path.dirname(filename), name + '.ts'));
     if (name === 'dotenv') throw Error('Environment files are forbidden in isolated tests');
@@ -43,7 +45,8 @@ function load(filename) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
   }).outputText;
   vm.runInNewContext(code, { module, exports: module.exports, require: customRequire, console,
-    Date, Map, Set, setTimeout, clearTimeout, Buffer, process: { env: { NODE_ENV: 'test' } } }, { filename });
+    __dirname: path.dirname(filename), __filename: filename,
+    Date, Map, Set, setTimeout, clearTimeout, setInterval, clearInterval, Buffer, process: { env: { NODE_ENV: 'test' } } }, { filename });
   return module.exports;
 }
 

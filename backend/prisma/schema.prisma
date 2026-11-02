@@ -285,6 +285,7 @@ model Sale {
   combo                Combo?          @relation(fields: [comboId], references: [id], onDelete: SetNull)
   gameSession          GameSession?
   items                SaleItem[]
+  whatsappDelivery     WhatsAppDelivery?
 
   @@index([eventId])
   @@index([saleTime])
@@ -358,3 +359,59 @@ model ComboItem {
   @@index([productId])
   @@map("combo_items")
 }
+
+model WhatsAppDelivery {
+  id                String    @id @default(uuid())
+  receiptNumber     Int       @map("receipt_number")
+  saleId            Int?      @unique @map("sale_id")
+  customerName      String?   @map("customer_name")
+  customerPhone     String    @map("customer_phone")
+  billSnapshot      Json      @map("bill_snapshot")
+  messageType       String    @default("SALE_RECEIPT") @map("message_type")
+  status            String    @default("PENDING") @map("status")
+  attemptCount      Int       @default(0) @map("attempt_count")
+  lastAttemptAt     DateTime? @map("last_attempt_at")
+  nextAttemptAt     DateTime? @map("next_attempt_at")
+  providerMessageId String?   @map("provider_message_id")
+  lastError         String?   @map("last_error")
+  sentAt            DateTime? @map("sent_at")
+  deliveredAt       DateTime? @map("delivered_at")
+  gatewaySession    String?   @map("gateway_session")
+  idempotencyKey    String    @unique @map("idempotency_key")
+  auditLog          Json?     @map("audit_log")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  sale              Sale?     @relation(fields: [saleId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([receiptNumber])
+  @@index([saleId])
+  @@index([nextAttemptAt])
+  @@index([createdAt])
+  @@map("whatsapp_deliveries")
+}
+
+model WhatsAppConfig {
+  id                    String   @id @default("default")
+  autoSendEnabled       Boolean  @default(true) @map("auto_send_enabled")
+  minIntervalSeconds    Int      @default(15) @map("min_interval_seconds")
+  maxIntervalSeconds    Int      @default(35) @map("max_interval_seconds")
+  randomDelayEnabled    Boolean  @default(true) @map("random_delay_enabled")
+  maxWindowMessages     Int      @default(20) @map("max_window_messages")
+  windowMinutes         Int      @default(10) @map("window_minutes")
+  maxDailyBudget        Int      @default(200) @map("max_daily_budget")
+  maxRetries            Int      @default(3) @map("max_retries")
+  retryBackoffMinutes   Int      @default(5) @map("retry_backoff_minutes")
+  quietHoursEnabled     Boolean  @default(false) @map("quiet_hours_enabled")
+  quietHoursStart       String   @default("23:00") @map("quiet_hours_start")
+  quietHoursEnd         String   @default("08:00") @map("quiet_hours_end")
+  isPaused              Boolean  @default(false) @map("is_paused")
+  pauseReason           String?  @map("pause_reason")
+  circuitBreakerTripped Boolean  @default(false) @map("circuit_breaker_tripped")
+  consecutiveFailures   Int      @default(0) @map("consecutive_failures")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@map("whatsapp_config")
+}
+

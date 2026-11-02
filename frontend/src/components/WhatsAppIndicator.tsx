@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import { MessageCircle, CheckCircle2, RefreshCw, X, Send, Smartphone } from 'lucide-react';
+import { MessageCircle, CheckCircle2, RefreshCw, X, Send, Smartphone, Clock, ExternalLink } from 'lucide-react';
 
 interface WhatsAppStatusResponse {
   isConnected: boolean;
@@ -19,8 +20,10 @@ interface WhatsAppIndicatorProps {
 
 export const WhatsAppIndicator: React.FC<WhatsAppIndicatorProps> = ({ className = '', showTextAlways = true }) => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const canManage = user?.role === 'DEVELOPER' || user?.role === 'ADMIN';
   const [status, setStatus] = useState<WhatsAppStatusResponse | null>(null);
+  const [pendingCount, setPendingCount] = useState(0);
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [testPhone, setTestPhone] = useState('');
@@ -37,9 +40,24 @@ export const WhatsAppIndicator: React.FC<WhatsAppIndicatorProps> = ({ className 
     }
   };
 
+  const fetchPendingCount = async () => {
+    if (!canManage) return;
+    try {
+      const data = await api.get<{ byStatus?: Record<string, number>; pendingCount?: number }>('/whatsapp/queue/summary');
+      const pending = (data.byStatus?.['PENDING'] || 0) + (data.byStatus?.['QUEUED'] || 0) + (data.byStatus?.['RETRY_WAIT'] || 0);
+      setPendingCount(pending);
+    } catch {
+      // Ignore
+    }
+  };
+
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, showModal ? 4000 : 15000);
+    fetchPendingCount();
+    const interval = setInterval(() => {
+      fetchStatus();
+      fetchPendingCount();
+    }, showModal ? 4000 : 20000);
     return () => clearInterval(interval);
   }, [showModal, canManage]);
 
@@ -76,6 +94,7 @@ export const WhatsAppIndicator: React.FC<WhatsAppIndicatorProps> = ({ className 
 
   const isConnected = status?.isConnected ?? false;
   const isScanQr = status?.status === 'SCAN_QR';
+  const hasPending = pendingCount > 0;
 
   const modalContent = (
     <div
@@ -106,13 +125,29 @@ export const WhatsAppIndicator: React.FC<WhatsAppIndicatorProps> = ({ className 
           </button>
         </div>
 
+        {/* Queue pending notice */}
+        {hasPending && (
+          <button
+            type="button"
+            onClick={() => { setShowModal(false); navigate('/whatsapp'); }}
+            className="w-full p-3 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-3 text-left hover:bg-blue-100 transition-colors cursor-pointer"
+          >
+            <Clock className="w-4 h-4 text-blue-600 shrink-0" />
+            <div className="flex-1">
+              <div className="text-xs font-bold text-blue-900">{pendingCount} bill{pendingCount !== 1 ? 's' : ''} queued for delivery</div>
+              <div className="text-[11px] text-blue-700">Click to open WhatsApp Billing Queue →</div>
+            </div>
+            <ExternalLink className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+          </button>
+        )}
+
         {/* Status section */}
         {isConnected ? (
           <div className="space-y-4">
             <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3">
               <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
               <div>
-                <h4 className="text-xs font-bold text-emerald-900">WhatsApp Gateway Active & Connected</h4>
+                <h4 className="text-xs font-bold text-emerald-900">WhatsApp Gateway Active &amp; Connected</h4>
                 <p className="text-[11px] text-emerald-800 mt-0.5">
                   Customer bills will automatically be sent from <strong>+{status?.connectedNumber}</strong> whenever contact numbers are submitted.
                 </p>
@@ -160,13 +195,22 @@ export const WhatsAppIndicator: React.FC<WhatsAppIndicatorProps> = ({ className 
               >
                 Unlink This Number
               </button>
-              <button
-                type="button"
-                onClick={() => setShowModal(false)}
-                className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg cursor-pointer transition-colors"
-              >
-                Done
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowModal(false); navigate('/whatsapp'); }}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg cursor-pointer flex items-center gap-1.5 transition-colors"
+                >
+                  <ExternalLink className="w-3 h-3" /> Queue
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg cursor-pointer transition-colors"
+                >
+                  Done
+                </button>
+              </div>
             </div>
           </div>
         ) : isScanQr && status?.qrDataUrl ? (
@@ -239,6 +283,12 @@ export const WhatsAppIndicator: React.FC<WhatsAppIndicatorProps> = ({ className 
             ? '📲 Link WhatsApp (Scan QR)'
             : '📲 Link WhatsApp'}
         </span>
+        {/* Pending badge */}
+        {hasPending && (
+          <span className={`ml-0.5 px-1.5 py-0.5 text-[9px] font-extrabold rounded-full ${isConnected ? 'bg-blue-600 text-white' : 'bg-white/30 text-white'}`}>
+            {pendingCount > 99 ? '99+' : pendingCount}
+          </span>
+        )}
       </button>
 
       {/* Render modal directly in document.body via Portal to prevent any parent clipping */}

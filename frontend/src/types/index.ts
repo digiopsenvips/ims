@@ -196,6 +196,59 @@ export interface Sale {
   cancelledById?: string | null;
   cancelledByName?: string | null;
   cancelReason?: string | null;
+  // WhatsApp delivery tracking
+  whatsappStatus?: 'PENDING' | 'QUEUED' | 'SENDING' | 'SENT' | 'DELIVERED' | 'FAILED' | 'RETRY_WAIT' | 'UNKNOWN' | 'CANCELLED' | 'NO_PHONE' | 'NOT_QUEUED' | null;
+  whatsappDelivery?: WhatsAppDelivery | null;
+}
+
+export type WhatsAppDeliveryStatus = 'PENDING' | 'QUEUED' | 'SENDING' | 'SENT' | 'DELIVERED' | 'FAILED' | 'RETRY_WAIT' | 'UNKNOWN' | 'CANCELLED';
+
+export interface WhatsAppDelivery {
+  id: string;
+  receiptNumber: number;
+  saleId?: number | null;
+  customerName?: string | null;
+  customerPhone: string;
+  status: WhatsAppDeliveryStatus;
+  attemptCount: number;
+  lastAttemptAt?: string | null;
+  nextAttemptAt?: string | null;
+  providerMessageId?: string | null;
+  lastError?: string | null;
+  sentAt?: string | null;
+  deliveredAt?: string | null;
+  auditLog?: Array<{ ts: string; event: string; detail?: string }> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WhatsAppQueueSummary {
+  total: number;
+  byStatus: Record<string, number>;
+  todayCount: number;
+  todaySent: number;
+  pendingCount: number;
+  failedCount: number;
+  unknownCount: number;
+}
+
+export interface WhatsAppQueueConfig {
+  autoSendEnabled: boolean;
+  minIntervalSeconds: number;
+  maxIntervalSeconds: number;
+  randomDelayEnabled: boolean;
+  maxWindowMessages: number;
+  windowMinutes: number;
+  maxDailyBudget: number;
+  maxRetries: number;
+  retryBackoffMinutes: number;
+  quietHoursEnabled: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+  isPaused: boolean;
+  pauseReason: string | null;
+  circuitBreakerTripped: boolean;
+  consecutiveFailures: number;
 }
 
 export interface PaginationInfo {

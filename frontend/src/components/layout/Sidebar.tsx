@@ -17,6 +17,7 @@ import {
   Dices,
   History,
   Gift,
+  MessageCircle,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -48,6 +49,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
     if (to === '/inventory') return currentPath === '/inventory';
     if (to === '/analytics') return currentPath === '/analytics';
     if (to === '/users') return currentPath === '/users';
+    if (to === '/whatsapp') return currentPath === '/whatsapp';
     return currentPath === to;
   };
 
@@ -150,6 +152,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           label: 'Users',
           to: '/users',
           icon: Users,
+          show: isDeveloper || isAdmin,
+        },
+        {
+          label: 'WhatsApp Billing',
+          to: '/whatsapp',
+          icon: MessageCircle,
+          badge: 'QUEUE',
           show: isDeveloper || isAdmin,
         },
       ],

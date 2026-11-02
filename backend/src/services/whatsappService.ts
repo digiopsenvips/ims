@@ -57,7 +57,8 @@ class WhatsAppService {
   private activeStorage: 'SUPABASE' | 'LOCAL' = 'LOCAL';
 
   constructor() {
-    this.authDir = path.resolve(__dirname, '../../whatsapp-auth');
+    const baseDir = typeof __dirname !== 'undefined' ? __dirname : process.cwd();
+    this.authDir = path.resolve(baseDir, '../../whatsapp-auth');
     if (!fs.existsSync(this.authDir)) {
       fs.mkdirSync(this.authDir, { recursive: true });
     }
@@ -200,6 +201,29 @@ class WhatsAppService {
 
       this.sock.ev.on('creds.update', auth.saveCreds);
 
+      // Listen for delivery and read receipts from WhatsApp network
+      this.sock.ev.on('messages.update', async (messageUpdates) => {
+        try {
+          const queue = require('./whatsappQueueService').whatsappQueueService;
+          for (const update of messageUpdates) {
+            const msgId = update.key?.id;
+            const status = update.update?.status;
+            if (msgId && status !== undefined) {
+              // Compare as raw numbers to avoid TypeScript enum overlap errors.
+              // 3 = DELIVERY_ACK (delivered to handset), 4 = READ, 5 = PLAYED
+              const statusNum = status as unknown as number;
+              if (statusNum === 3) {
+                await queue?.handleDeliveryAck(msgId, 'DELIVERED');
+              } else if (statusNum === 4 || statusNum === 5) {
+                await queue?.handleDeliveryAck(msgId, 'READ');
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[WhatsApp] Error handling messages.update:', err);
+        }
+      });
+
       this.sock.ev.on('connection.update', async (update: Partial<ConnectionState>) => {
         const { connection, lastDisconnect, qr } = update;
 
@@ -231,6 +255,14 @@ class WhatsAppService {
           console.log(`[WhatsApp] Connection closed (code: ${statusCode}). Reconnect: ${shouldReconnect}`);
           this.lastError = lastDisconnect?.error ? String(lastDisconnect.error) : 'Connection closed';
 
+          try {
+            const queue = require('./whatsappQueueService').whatsappQueueService;
+            queue?.notifyGatewayState('DISCONNECTED', null, this.lastError);
+            if (statusCode === DisconnectReason.loggedOut) {
+              queue?.tripCircuitBreaker('WhatsApp session logged out or restricted by provider.');
+            }
+          } catch {}
+
           if (statusCode === DisconnectReason.loggedOut) {
             this.status = 'DISCONNECTED';
             this.currentQr = null;
@@ -258,6 +290,11 @@ class WhatsAppService {
           this.connectedNumber = rawId.split(':')[0] || rawId.split('@')[0] || 'Connected';
           console.log(`✅ [WhatsApp] Enactus VIPS WhatsApp connected successfully! Number: +${this.connectedNumber}`);
           this.isInitializing = false;
+
+          try {
+            const queue = require('./whatsappQueueService').whatsappQueueService;
+            queue?.notifyGatewayState('CONNECTED', this.connectedNumber);
+          } catch {}
         }
       });
     } catch (error: any) {

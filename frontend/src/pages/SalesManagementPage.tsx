@@ -31,6 +31,7 @@ import {
   Info,
   Ban,
   Archive,
+  MessageCircle,
 } from 'lucide-react';
 
 function getPageNumbers(current: number, total: number): (number | string)[] {
@@ -44,6 +45,35 @@ function getPageNumbers(current: number, total: number): (number | string)[] {
     return [1, '...', total - 4, total - 3, total - 2, total - 1, total];
   }
   return [1, '...', current - 1, current, current + 1, '...', total];
+}
+
+
+// WhatsApp delivery status badge for Sales History table
+function WaBadge({ status }: { status?: string | null }) {
+  if (!status || status === 'NO_PHONE') {
+    return <span className="text-[10px] text-slate-400 italic">No phone</span>;
+  }
+  if (status === 'NOT_QUEUED') {
+    return <span className="text-[10px] text-slate-400">—</span>;
+  }
+  const meta: Record<string, { label: string; cls: string }> = {
+    PENDING:    { label: 'Pending',   cls: 'bg-slate-100 text-slate-600 border-slate-300' },
+    QUEUED:     { label: 'Queued',    cls: 'bg-blue-100 text-blue-700 border-blue-300' },
+    SENDING:    { label: 'Sending',   cls: 'bg-amber-100 text-amber-700 border-amber-300' },
+    SENT:       { label: 'Sent',      cls: 'bg-blue-100 text-blue-700 border-blue-300' },
+    DELIVERED:  { label: 'Delivered', cls: 'bg-emerald-100 text-emerald-700 border-emerald-300' },
+    FAILED:     { label: 'Failed',    cls: 'bg-red-100 text-red-700 border-red-300' },
+    RETRY_WAIT: { label: 'Retry',     cls: 'bg-orange-100 text-orange-700 border-orange-300' },
+    UNKNOWN:    { label: 'Unknown',   cls: 'bg-yellow-100 text-yellow-700 border-yellow-300' },
+    CANCELLED:  { label: 'Cancelled', cls: 'bg-slate-100 text-slate-500 border-slate-200' },
+  };
+  const m = meta[status] ?? { label: status, cls: 'bg-slate-100 text-slate-600 border-slate-200' };
+  return (
+    <span className={"inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] font-bold uppercase " + m.cls}>
+      <MessageCircle className="w-2.5 h-2.5" />
+      {m.label}
+    </span>
+  );
 }
 
 export const SalesManagementPage: React.FC = () => {
@@ -834,6 +864,7 @@ export const SalesManagementPage: React.FC = () => {
                 <th scope="col" className="px-4 py-3 w-28 whitespace-nowrap">Time</th>
                 <th scope="col" className="px-4 py-3 w-32 whitespace-nowrap">Event</th>
                 <th scope="col" className="px-4 py-3 w-36 whitespace-nowrap">Customer Info</th>
+                 <th scope="col" className="px-4 py-3 w-24 text-center whitespace-nowrap">WhatsApp</th>
                 <th scope="col" className="px-4 py-3 text-center w-36 whitespace-nowrap">Actions</th>
               </tr>
             </thead>
@@ -841,7 +872,7 @@ export const SalesManagementPage: React.FC = () => {
               {isLoading ? (
                 <tr>
                   <td
-                    colSpan={canViewRevenue ? 13 : 12}
+                    colSpan={canViewRevenue ? 14 : 13}
                     className="px-4 py-12 text-center text-slate-400 text-xs"
                   >
                     <Loader2 className="w-5 h-5 mx-auto mb-2 animate-spin text-slate-400" />
@@ -851,7 +882,7 @@ export const SalesManagementPage: React.FC = () => {
               ) : sales.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={canViewRevenue ? 13 : 12}
+                    colSpan={canViewRevenue ? 14 : 13}
                     className="px-4 py-8 text-center text-slate-400 text-xs"
                   >
                     No matching sales records found.
@@ -1081,7 +1112,11 @@ export const SalesManagementPage: React.FC = () => {
                           <span className="text-slate-400 italic">None</span>
                         )}
                       </td>
-                      {/* Active Actions: Details + Developer Edit & Delete */}
+                      {/* WhatsApp Status */}
+                      <td className="px-4 py-3 text-center whitespace-nowrap">
+                        <WaBadge status={sale.whatsappStatus} />
+                      </td>
+                                            {/* Active Actions: Details + Developer Edit & Delete */}
                       <td className="px-4 py-3 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1.5">
                           <button
