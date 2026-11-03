@@ -4,6 +4,8 @@ import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { api } from '../lib/api';
 import { Sale, AppEvent, PaymentMethod } from '../types';
+import { SyncIssuesDrawer } from '../components/SyncIssuesDrawer';
+import { syncManager, SyncState } from '../lib/sync';
 import {
   ReceiptText,
   Download,
@@ -18,6 +20,8 @@ import {
   Trash2,
   X,
   AlertTriangle,
+  AlertCircle,
+  RefreshCw,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -128,6 +132,15 @@ export const SalesManagementPage: React.FC = () => {
   const [cancelReason, setCancelReason] = useState<string>('');
   const [isCancelling, setIsCancelling] = useState<boolean>(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+
+  // Offline Sync State & Issues Drawer
+  const [syncState, setSyncState] = useState<SyncState>(syncManager.getStatus());
+  const [isSyncDrawerOpen, setIsSyncDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    const unsub = syncManager.subscribe(state => setSyncState(state));
+    return () => unsub();
+  }, []);
 
   const canViewRevenue = isDeveloper || isAdmin || hasPermission('view_revenue');
   const canViewPII = isDeveloper || isAdmin || hasPermission('view_customer_pii');
@@ -623,7 +636,39 @@ export const SalesManagementPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          {syncState.failedCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => setIsSyncDrawerOpen(true)}
+              className="px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs font-semibold rounded-lg bg-amber-50 border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              title="Review unresolved transactions and sync errors"
+            >
+              <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+              <span>{syncState.failedCount} {syncState.failedCount === 1 ? 'transaction needs review' : 'transactions need review'}</span>
+            </button>
+          ) : syncState.pendingCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => setIsSyncDrawerOpen(true)}
+              className="px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs font-semibold rounded-lg bg-blue-50 border border-blue-200 text-blue-800 hover:bg-blue-100 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              title="View pending sync queue"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-blue-600 shrink-0 ${syncState.isSyncing ? 'animate-spin' : ''}`} />
+              <span>{syncState.pendingCount} awaiting sync</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsSyncDrawerOpen(true)}
+              className="hidden sm:inline-flex px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs font-semibold rounded-lg bg-emerald-50/70 border border-emerald-200 text-emerald-800 hover:bg-emerald-100/70 transition-colors items-center gap-1.5 cursor-pointer shadow-2xs"
+              title="All local transactions synchronized"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span>No unresolved issues</span>
+            </button>
+          )}
+
           {canExport && (
             <button
               onClick={handleExportCSV}
@@ -2203,6 +2248,12 @@ export const SalesManagementPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Sync & Transaction Issues Drawer */}
+      <SyncIssuesDrawer
+        isOpen={isSyncDrawerOpen}
+        onClose={() => setIsSyncDrawerOpen(false)}
+      />
     </div>
   );
 };

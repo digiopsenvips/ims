@@ -1,6 +1,7 @@
 import { api, ApiError } from './api';
 import { getPendingSales, getPendingSalesCount, getFailedSalesCount, updateOfflineSaleStatus,
-  acknowledgeOfflineSale, queueOfflineSale, retryFailedOfflineSales, getOfflineSale } from './db';
+  acknowledgeOfflineSale, queueOfflineSale, retryFailedOfflineSales, retryOfflineSale,
+  markOfflineSaleResolved, archiveOfflineSale, getOfflineSale } from './db';
 import { QueuedSale } from '../types';
 
 export interface SyncState { isOnline: boolean; pendingCount: number; failedCount: number; isSyncing: boolean; }
@@ -39,14 +40,33 @@ class SyncManager {
         await updateOfflineSaleStatus(sale.clientTxId, 'conflict', 'Original seller is missing or differs from this login. Preserved for review; not replayed.'); return;
       }
       if (!this.state.isOnline || !localStorage.getItem('enactus_ims_token')) return;
-      await updateOfflineSaleStatus(sale.clientTxId, 'processing');
+
+      // Pre-flight check: if this transaction was already processed by backend, acknowledge it directly
       try {
-        if (sale.transactionType === 'GAME') {
-          const response = await api.post('/games/play', sale);
+        const checkRes: any = await api.get(`/sales/check/${sale.clientTxId}`);
+        if (checkRes?.exists && checkRes.saleId && checkRes.receiptNumber) {
+          await acknowledgeOfflineSale(sale.clientTxId, {
+            saleId: checkRes.saleId,
+            receiptNumber: checkRes.receiptNumber,
+            receipt: checkRes.sale,
+          });
+          return;
+        }
+      } catch {
+        // If check endpoint is unreachable or 404, proceed with sync
+      }
+
+      await updateOfflineSaleStatus(sale.clientTxId, 'processing');
+      const isGame = sale.transactionType === 'GAME' || Boolean(sale.gameId) || Boolean(sale.rewardProductId);
+      const outgoingSale = isGame && sale.transactionType !== 'GAME' ? { ...sale, transactionType: 'GAME' as const } : sale;
+
+      try {
+        if (isGame) {
+          const response = await api.post('/games/play', outgoingSale);
           if (!response?.receipt?.receiptNumber || !response?.saleId) throw new Error('Unconfirmed game response');
           await acknowledgeOfflineSale(sale.clientTxId, { saleId: response.saleId, receiptNumber: response.receipt.receiptNumber, receipt: response.receipt });
         } else {
-          const response = await api.post('/sales/sync', { transactions: [sale] });
+          const response = await api.post('/sales/sync', { transactions: [outgoingSale] });
           const results = response?.results?.filter((r: any) => r.clientTxId === sale.clientTxId);
           if (!Array.isArray(results) || results.length !== 1) {
             await updateOfflineSaleStatus(sale.clientTxId, 'conflict', 'Ambiguous backend acknowledgement. Preserved for reconciliation.'); return;
@@ -112,5 +132,35 @@ class SyncManager {
     return syncing;
   }
   async retryAllFailed() { await retryFailedOfflineSales(currentOwner() || undefined); await this.triggerSync(); }
+  async retrySale(clientTxId: string) {
+    await retryOfflineSale(clientTxId);
+    await this.refreshCount();
+    await this.triggerSync();
+  }
+  async resolveSale(clientTxId: string, note?: string) {
+    await markOfflineSaleResolved(clientTxId, note);
+    await this.refreshCount();
+  }
+  async archiveSale(clientTxId: string, reason?: string) {
+    await archiveOfflineSale(clientTxId, reason);
+    await this.refreshCount();
+  }
+  async checkSale(clientTxId: string) {
+    try {
+      const res: any = await api.get(`/sales/check/${clientTxId}`);
+      if (res?.exists && res.saleId && res.receiptNumber) {
+        await acknowledgeOfflineSale(clientTxId, {
+          saleId: res.saleId,
+          receiptNumber: res.receiptNumber,
+          receipt: res.sale,
+        });
+        await this.refreshCount();
+        return { synced: true, sale: res.sale };
+      }
+      return { synced: false };
+    } catch (err: any) {
+      return { synced: false, error: err.message };
+    }
+  }
 }
 export const syncManager = new SyncManager();

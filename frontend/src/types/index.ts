@@ -346,6 +346,8 @@ export interface QueuedSaleItem {
 export interface QueuedTransaction {
   ownerUserId?: string;
   gameId?: string;
+  rewardProductId?: string;
+  rewardQuantity?: number;
   result?: GameResult;
   acknowledgement?: { saleId: number; receiptNumber: number; receipt?: any };
   errorMessage?: string;
@@ -374,7 +376,7 @@ export interface QueuedTransaction {
   cartSnapshot?: any[];
   saleTime: string;
   queuedAt: number;
-  syncStatus: 'pending' | 'processing' | 'committed' | 'rejected' | 'conflict' | 'syncing' | 'failed';
+  syncStatus: 'pending' | 'processing' | 'committed' | 'rejected' | 'conflict' | 'syncing' | 'failed' | 'resolved' | 'archived';
 }
 
 export type QueuedSale = QueuedTransaction;

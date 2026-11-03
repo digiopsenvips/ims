@@ -27,7 +27,7 @@ export const queueOfflineSale = async (sale: QueuedSale): Promise<void> => {
   await tx.store.add(sale); await tx.done;
 };
 export const getPreservedSales = async () => (await getDB()).getAll('offline_sales');
-export const getAllQueuedSales = async () => (await getPreservedSales()).filter(s => s.syncStatus !== 'committed');
+export const getAllQueuedSales = async () => (await getPreservedSales()).filter(s => !['committed', 'resolved', 'archived'].includes(s.syncStatus));
 export const getPendingSales = async () => (await getAllQueuedSales()).filter(s => ['pending', 'processing', 'syncing'].includes(s.syncStatus));
 export const getPendingSalesCount = async () => (await getPendingSales()).length;
 export const getFailedSales = async () => (await getAllQueuedSales()).filter(s => ['failed', 'rejected', 'conflict'].includes(s.syncStatus));
@@ -52,12 +52,63 @@ export const acknowledgeOfflineSale = async (id: string, acknowledgement: NonNul
   }
   await tx.done;
 };
+
+export const retryOfflineSale = async (id: string): Promise<void> => {
+  const db = await getDB();
+  const tx = db.transaction('offline_sales', 'readwrite');
+  const sale = await tx.store.get(id);
+  if (sale && sale.syncStatus !== 'committed') {
+    const isGame = Boolean(sale.gameId || sale.rewardProductId || sale.transactionType === 'GAME');
+    await tx.store.put({
+      ...sale,
+      transactionType: isGame ? 'GAME' : (sale.transactionType || 'SALE'),
+      syncStatus: 'pending',
+      errorMessage: undefined,
+      lastAttemptAt: Date.now(),
+    });
+  }
+  await tx.done;
+};
+
+export const markOfflineSaleResolved = async (id: string, resolutionNote?: string): Promise<void> => {
+  const db = await getDB();
+  const tx = db.transaction('offline_sales', 'readwrite');
+  const sale = await tx.store.get(id);
+  if (sale && sale.syncStatus !== 'committed') {
+    await tx.store.put({
+      ...sale,
+      syncStatus: 'resolved',
+      errorMessage: resolutionNote || sale.errorMessage,
+      lastAttemptAt: Date.now(),
+    });
+  }
+  await tx.done;
+};
+
+export const archiveOfflineSale = async (id: string, reason?: string): Promise<void> => {
+  const db = await getDB();
+  const tx = db.transaction('offline_sales', 'readwrite');
+  const sale = await tx.store.get(id);
+  if (sale && sale.syncStatus !== 'committed') {
+    await tx.store.put({
+      ...sale,
+      syncStatus: 'archived',
+      errorMessage: reason || sale.errorMessage || 'Archived',
+      lastAttemptAt: Date.now(),
+    });
+  }
+  await tx.done;
+};
+
 // Retain legacy function names for callers, but never erase pending or historical payloads.
 export const deleteOfflineSale = async (id: string) => updateOfflineSaleStatus(id, 'conflict', 'Preserved for reconciliation; discarding is disabled.');
 export const clearFailedOfflineSales = async (): Promise<void> => { throw new Error('Failed transactions must be preserved for reconciliation.'); };
+
 export const retryFailedOfflineSales = async (ownerUserId?: string): Promise<void> => {
   for (const sale of await getFailedSales()) {
-    if (ownerUserId && sale.ownerUserId === ownerUserId && sale.syncStatus !== 'conflict') await updateOfflineSaleStatus(sale.clientTxId, 'pending');
+    if (!ownerUserId || sale.ownerUserId === ownerUserId) {
+      await retryOfflineSale(sale.clientTxId);
+    }
   }
 };
 export const cacheEvents = async (events: AppEvent[]): Promise<void> => {

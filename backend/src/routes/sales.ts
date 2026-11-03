@@ -15,6 +15,7 @@ import { paymentAmounts, paymentMethod as normalizePaymentMethod, validateOperat
 import { existingSaleAcknowledgement } from '../services/idempotency';
 import { whatsappService } from '../services/whatsappService';
 import { whatsappQueueService } from '../services/whatsappQueueService';
+import { recordGamePlay } from './games';
 
 const router = Router();
 router.use(responsePolicy);
@@ -126,6 +127,7 @@ router.get(
           { gameSession: { sessionCode: { contains: term, mode: 'insensitive' } } },
           { comboName: { contains: term, mode: 'insensitive' } },
           { combo: { name: { contains: term, mode: 'insensitive' } } },
+          { clientTxId: { contains: term, mode: 'insensitive' } },
         ];
         const num = parseInt(term.replace(/^#/, ''), 10);
         if (!isNaN(num)) {
@@ -1022,6 +1024,76 @@ router.post(
   recordSale
 );
 
+// GET /api/sales/check/:clientTxId: Check if an offline transaction was already committed
+router.get(
+  '/check/:clientTxId',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const { clientTxId } = req.params;
+      if (!clientTxId) {
+        res.status(400).json({ error: 'clientTxId is required' });
+        return;
+      }
+      const sale = await prisma.sale.findUnique({
+        where: { clientTxId },
+        select: {
+          id: true,
+          receiptNumber: true,
+          clientTxId: true,
+          transactionType: true,
+          totalAmount: true,
+          paymentMethod: true,
+          customerName: true,
+          customerPhone: true,
+          saleTime: true,
+          status: true,
+          eventId: true,
+          gameId: true,
+          memberId: true,
+          sellerNameAtSale: true,
+          gameSession: {
+            select: {
+              sessionCode: true,
+              result: true,
+              rewardQuantity: true,
+              rewardProduct: { select: { name: true } },
+            },
+          },
+          items: {
+            select: {
+              productId: true,
+              quantity: true,
+              unitPrice: true,
+              lineTotal: true,
+              product: { select: { name: true } },
+            },
+          },
+        },
+      });
+
+      if (!sale) {
+        res.json({ exists: false });
+        return;
+      }
+
+      res.json({
+        exists: true,
+        saleId: sale.id,
+        receiptNumber: sale.receiptNumber,
+        transactionType: sale.transactionType,
+        totalAmount: Number(sale.totalAmount),
+        status: sale.status,
+        saleTime: sale.saleTime,
+        sale,
+      });
+    } catch (err: any) {
+      console.error('Error checking sale status:', err);
+      res.status(500).json({ error: 'Failed to verify transaction status' });
+    }
+  }
+);
+
 // POST /api/sales/sync: Bulk offline sync endpoint from PWA IndexedDB queue
 router.post(
   '/sync',
@@ -1043,14 +1115,32 @@ router.post(
         json(value: any) { response = value; return this; },
       } as unknown as Response;
       const operationReq = Object.assign(Object.create(req), { body });
-      try { await recordSale(operationReq, capture); }
-      catch { status = 500; response = { error: 'Transaction outcome requires reconciliation; retry the same key.' }; }
-      if (status < 300 && response?.sale?.id && response.sale.receiptNumber) {
-        results.push({ clientTxId: body?.clientTxId, status: status === 200 ? 'already_synced' : 'success',
-          saleId: response.sale.id, receiptNumber: response.sale.receiptNumber });
+      const isGame = Boolean(body?.gameId || body?.gameSessionId || body?.transactionType === 'GAME');
+      try {
+        if (isGame) {
+          await recordGamePlay(operationReq, capture);
+        } else {
+          await recordSale(operationReq, capture);
+        }
+      } catch {
+        status = 500;
+        response = { error: 'Transaction outcome requires reconciliation; retry the same key.' };
+      }
+      const saleId = response?.sale?.id || response?.saleId;
+      const receiptNumber = response?.sale?.receiptNumber || response?.receipt?.receiptNumber;
+      if (status < 300 && saleId && receiptNumber) {
+        results.push({
+          clientTxId: body?.clientTxId,
+          status: status === 200 ? 'already_synced' : 'success',
+          saleId,
+          receiptNumber,
+        });
       } else {
-        results.push({ clientTxId: body?.clientTxId, status: status === 409 ? 'conflict' : status >= 500 ? 'pending' : 'failed',
-          error: response?.error || 'Transaction not acknowledged. Preserve the queued operation.' });
+        results.push({
+          clientTxId: body?.clientTxId,
+          status: status === 409 ? 'conflict' : status >= 500 ? 'pending' : 'failed',
+          error: response?.error || 'Transaction not acknowledged. Preserve the queued operation.',
+        });
       }
     }
     res.json({ results, syncedCount: results.filter(r => r.status === 'success').length });

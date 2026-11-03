@@ -1025,15 +1025,12 @@ router.delete(
 
 // POST /api/games/play: Atomic transaction for game play, result, inventory deduction, and receipt generation
 // Accessible by: DEVELOPER, ADMIN, HEAD, MEMBER
-router.post(
-  '/play',
-  authenticateToken,
-  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    try {
-      const acknowledged = typeof req.body?.clientTxId === 'string'
-        ? await existingSaleAcknowledgement(prisma, req.body, req.user!.id) : null;
-      if (acknowledged) { res.status(200).json({ receipt: acknowledged.receipt, saleId: acknowledged.id }); return; }
-      validateOperation(req.body, req.user!.id);
+export const recordGamePlay = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const acknowledged = typeof req.body?.clientTxId === 'string'
+      ? await existingSaleAcknowledgement(prisma, req.body, req.user!.id) : null;
+    if (acknowledged) { res.status(200).json({ receipt: acknowledged.receipt, saleId: acknowledged.id }); return; }
+    validateOperation(req.body, req.user!.id);
 
       const {
         gameId,
@@ -1427,7 +1424,12 @@ router.post(
       console.error('Play game error:', error);
       res.status(error.status || 500).json({ error: error.message || 'Failed to process game play' });
     }
-  }
+  };
+
+router.post(
+  '/play',
+  authenticateToken,
+  recordGamePlay
 );
 
 export default router;
