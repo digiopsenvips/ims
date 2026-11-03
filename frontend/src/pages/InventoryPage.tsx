@@ -529,9 +529,113 @@ export const InventoryPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Inventory Table Container */}
+      {/* Inventory Table / Mobile Card Container */}
       <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Mobile Inventory Cards (<md) */}
+        <div className="md:hidden divide-y divide-slate-100">
+          {isLoading ? (
+            <div className="p-8 text-center text-slate-400">
+              <Boxes className="w-6 h-6 mx-auto mb-2 animate-bounce text-slate-400" />
+              <p className="font-medium text-slate-600 text-xs">Loading live inventory...</p>
+            </div>
+          ) : filteredInventory.length === 0 ? (
+            <div className="p-8 text-center">
+              <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mx-auto mb-2">
+                <Search className="w-5 h-5" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-900">No matching inventory items</h3>
+              <p className="text-xs text-slate-500 mt-1">No products match your current filters.</p>
+            </div>
+          ) : (
+            filteredInventory.map(item => {
+              const isRecent = item.productId === recentlyUpdatedId;
+              return (
+                <div
+                  key={item.id}
+                  className={`p-3 space-y-2 transition-colors ${
+                    isRecent ? 'bg-amber-50/70' : 'bg-white'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-mono font-bold text-slate-800 bg-slate-100 px-1.5 py-0.5 rounded text-[11px] border border-slate-200">
+                          {item.productId}
+                        </span>
+                        <span className="text-[10px] font-semibold text-slate-600 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200">
+                          {item.projectName}
+                        </span>
+                        {item.isArchived && (
+                          <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300 uppercase">
+                            Archived
+                          </span>
+                        )}
+                      </div>
+                      <div className="font-bold text-slate-900 text-xs sm:text-sm mt-1 leading-snug">
+                        {item.productName}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      {item.totalAvailable === 0 ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold text-red-700 bg-red-50 border border-red-200 font-mono">
+                          0 Out
+                        </span>
+                      ) : item.totalAvailable <= 5 ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-200 font-mono">
+                          {item.totalAvailable} Low
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 font-mono">
+                          {item.totalAvailable} Total
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Stock Metrics Grid */}
+                  <div className="grid grid-cols-3 gap-1.5 pt-1 text-center text-xs">
+                    <div className="bg-slate-50 rounded-lg p-1.5 border border-slate-200/60">
+                      <div className="text-[10px] text-slate-400 font-medium">Warehouse</div>
+                      <div className="font-bold text-slate-900 font-mono mt-0.5">
+                        {item.quantityOnHand}
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-1.5 border border-slate-200/60">
+                      <div className="text-[10px] text-slate-400 font-medium">Active Stall</div>
+                      <div className="font-bold text-emerald-800 font-mono mt-0.5">
+                        {item.activeAllocatedQty}
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-1.5 border border-slate-200/60">
+                      <div className="text-[10px] text-slate-400 font-medium">Ref Price</div>
+                      <div className="font-bold text-slate-900 font-mono mt-0.5">
+                        {item.basePrice !== null && item.basePrice !== undefined ? `₹${Number(item.basePrice).toFixed(0)}` : '—'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {canEditInventory && (
+                    <div className="flex items-center justify-end pt-1 border-t border-slate-50">
+                      <button
+                        onClick={() => {
+                          setAdjustItem(item);
+                          setAdjustQtyInput(item.quantityOnHand.toString());
+                          setAdjustNotesInput(item.notes || '');
+                        }}
+                        className="inline-flex items-center gap-1 px-3 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                      >
+                        <Edit2 className="w-3 h-3 text-slate-500" /> Adjust Stock
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Desktop Table View (>=md) */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs min-w-[1150px] border-collapse">
             <thead className="bg-slate-50/90 text-slate-500 border-b border-slate-200 font-semibold uppercase tracking-wider text-[10px]">
               <tr>

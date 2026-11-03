@@ -109,11 +109,11 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
       </div>
 
       {/* Middle/Right: Active Stall Badge & Sync & Quick Actions */}
-      <div className="flex flex-1 min-w-0 flex-wrap sm:flex-nowrap justify-end items-center gap-1 sm:gap-3">
+      <div className="flex flex-1 min-w-0 items-center justify-end gap-1.5 sm:gap-3">
         {activeEvent ? (
-          <div className="flex items-center gap-2 px-2.5 sm:px-3 py-1 bg-emerald-50 border border-emerald-200 rounded-full text-xs text-emerald-900 shadow-2xs">
+          <div className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 bg-emerald-50 border border-emerald-200 rounded-full text-xs text-emerald-900 shadow-2xs shrink-0 max-w-[190px] sm:max-w-none">
             {isMember ? (
-              <div className="flex items-center gap-1.5 text-left select-none">
+              <div className="flex items-center gap-1.5 text-left select-none min-w-0">
                 <span className="relative flex h-2 w-2 shrink-0">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
@@ -121,7 +121,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
                 <span className="font-black text-[11px] uppercase tracking-wide text-emerald-800 hidden sm:inline">
                   Stall:
                 </span>
-                <span className="font-bold text-slate-800 text-xs max-w-[120px] sm:max-w-[200px] truncate" title={activeEvent.name}>
+                <span className="font-bold text-slate-800 text-xs truncate max-w-[110px] sm:max-w-[200px]" title={activeEvent.name}>
                   {activeEvent.name}
                 </span>
               </div>
@@ -133,7 +133,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
                     setModalTargetEventId(activeEvent.id);
                     setShowStallModal(true);
                   }}
-                  className="flex items-center gap-1.5 hover:opacity-85 transition-opacity cursor-pointer text-left focus:outline-none"
+                  className="flex items-center gap-1.5 hover:opacity-85 transition-opacity cursor-pointer text-left focus:outline-none min-w-0"
                   title="Open Live Stall Management"
                 >
                   <span className="relative flex h-2 w-2 shrink-0">
@@ -143,7 +143,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar }) => {
                   <span className="font-black text-[11px] uppercase tracking-wide text-emerald-800 hidden sm:inline">
                     Live Stall:
                   </span>
-                  <span className="font-bold text-slate-800 text-xs max-w-[90px] sm:max-w-[160px] truncate" title={activeEvent.name}>
+                  <span className="font-bold text-slate-800 text-xs truncate max-w-[80px] sm:max-w-[160px]" title={activeEvent.name}>
                     {activeEvent.name}
                   </span>
                   {activeEvents.length > 1 && (

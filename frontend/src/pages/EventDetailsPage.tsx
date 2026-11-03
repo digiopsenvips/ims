@@ -2023,7 +2023,123 @@ export const EventDetailsPage: React.FC = () => {
                   </div>
                 )}
 
-                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-72 overflow-y-auto">
+                {/* Mobile Allocation Cards (<md) */}
+                <div className="md:hidden space-y-2.5 max-h-96 overflow-y-auto pr-1">
+                  {editAllocations.map(row => {
+                    const isEventClosed = event.status === 'ENDED' || Boolean(event.reconciledAt);
+                    const minAllowed = Math.min(row.initialAllocatedQty, row.soldQty);
+                    const maxAllowed = Math.max(minAllowed, row.maxAllocatable);
+                    const isInvalidMin = !isEventClosed && row.allocatedQty !== row.initialAllocatedQty && row.allocatedQty < row.soldQty;
+                    const isInvalidMax = !isEventClosed && row.allocatedQty > row.maxAllocatable;
+
+                    return (
+                      <div
+                        key={row.productId}
+                        className="p-3 bg-white border border-slate-200 rounded-xl space-y-2 shadow-2xs"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="font-bold text-slate-900 text-xs leading-snug truncate" title={row.productName}>
+                              {row.productName}
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="font-mono text-[10px] text-slate-500 bg-slate-100 px-1 py-0.2 rounded border border-slate-200">
+                                {row.productId}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-semibold truncate max-w-[120px]">
+                                {row.projectName}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="text-[10px] text-slate-400 block font-medium">In Wh</span>
+                            <span className="font-bold text-xs text-slate-800">{row.availableStock}</span>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 p-2 bg-slate-50 rounded-lg text-[11px] border border-slate-100">
+                          <div>
+                            <span className="text-slate-500">Sold:</span>{' '}
+                            <strong className="text-emerald-700">{row.soldQty}</strong>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-slate-500">Max Avail:</span>{' '}
+                            <strong className="text-slate-900">{row.maxAllocatable}</strong>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 items-end">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1">
+                              Allocated Qty
+                            </label>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={minAllowed}
+                                max={maxAllowed}
+                                step="1"
+                                disabled={isEventClosed}
+                                value={row.allocatedQty}
+                                onChange={e => {
+                                  const val = parseInt(e.target.value, 10);
+                                  handleAllocationChange(
+                                    row.productId,
+                                    'allocatedQty',
+                                    isNaN(val) ? 0 : val
+                                  );
+                                }}
+                                className={`w-full text-base sm:text-xs p-1.5 text-center border rounded-lg font-bold ${
+                                  isEventClosed
+                                    ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed'
+                                    : isInvalidMin || isInvalidMax
+                                    ? 'border-rose-400 bg-rose-50 text-rose-800'
+                                    : 'border-slate-300'
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleSetMaxAllocation(row.productId)}
+                                disabled={isEventClosed || row.allocatedQty >= row.maxAllocatable}
+                                className="px-2 py-1.5 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors cursor-pointer disabled:opacity-40"
+                              >
+                                Max
+                              </button>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1">
+                              Event Price (₹)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.5"
+                              disabled={isEventClosed}
+                              value={row.priceAtEvent}
+                              onChange={e =>
+                                handleAllocationChange(
+                                  row.productId,
+                                  'priceAtEvent',
+                                  parseFloat(e.target.value) || 0
+                                )
+                              }
+                              className={`w-full text-base sm:text-xs p-1.5 text-right border rounded-lg font-bold ${
+                                isEventClosed
+                                  ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed'
+                                  : 'border-slate-300'
+                              }`}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop Allocation Table (hidden <md) */}
+                <div className="hidden md:block border border-slate-200 rounded-xl overflow-hidden max-h-72 overflow-y-auto">
                   <table className="w-full text-left text-xs">
                     <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] font-bold sticky top-0 z-10 border-b border-slate-200">
                       <tr>

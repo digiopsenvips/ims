@@ -935,21 +935,21 @@ export const EventsPage: React.FC = () => {
 
       {/* Modal: Create / Edit Event with Inline Allocations & Pricing */}
       {showEventModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg border border-slate-200 shadow-xl max-w-4xl w-full p-6 max-h-[92vh] flex flex-col">
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xl max-w-4xl w-full p-3.5 sm:p-6 max-h-[94vh] flex flex-col">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <h3 className="text-base font-bold text-slate-900">
                 {editingEventId ? 'Edit Event & Adjust Pricing' : 'Create Event & Allocate Inventory'}
               </h3>
               <button
                 onClick={() => setShowEventModal(false)}
-                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveEvent} noValidate className="flex-1 overflow-y-auto py-4 space-y-4">
+            <form onSubmit={handleSaveEvent} noValidate className="flex-1 overflow-y-auto py-3 space-y-4 pr-1">
               {/* Notice for Finalized Event */}
               {editingEventId && events.find(e => e.id === editingEventId)?.status === 'ENDED' && (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-800 flex items-start gap-2">
@@ -972,7 +972,7 @@ export const EventsPage: React.FC = () => {
                     placeholder="e.g. VIPS Annual Cultural Fest 2026"
                     value={nameInput}
                     onChange={e => setNameInput(e.target.value)}
-                    className="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-slate-900"
+                    className="w-full text-base sm:text-xs p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-900"
                   />
                 </div>
 
@@ -986,7 +986,7 @@ export const EventsPage: React.FC = () => {
                     placeholder="e.g. Main Auditorium Lawn"
                     value={locationInput}
                     onChange={e => setLocationInput(e.target.value)}
-                    className="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-slate-900"
+                    className="w-full text-base sm:text-xs p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-900"
                   />
                 </div>
 
@@ -1000,7 +1000,7 @@ export const EventsPage: React.FC = () => {
                       required
                       value={startDateInput}
                       onChange={e => setStartDateInput(e.target.value)}
-                      className="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-slate-900"
+                      className="w-full text-base sm:text-xs p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-900"
                     />
                   </div>
                   <div>
@@ -1011,7 +1011,7 @@ export const EventsPage: React.FC = () => {
                       type="time"
                       value={startTimeInput}
                       onChange={e => setStartTimeInput(e.target.value)}
-                      className="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-slate-900"
+                      className="w-full text-base sm:text-xs p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-900"
                     />
                   </div>
                 </div>
@@ -1026,7 +1026,7 @@ export const EventsPage: React.FC = () => {
                       required
                       value={endDateInput}
                       onChange={e => setEndDateInput(e.target.value)}
-                      className="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-slate-900"
+                      className="w-full text-base sm:text-xs p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-900"
                     />
                   </div>
                   <div>
@@ -1037,22 +1037,22 @@ export const EventsPage: React.FC = () => {
                       type="time"
                       value={endTimeInput}
                       onChange={e => setEndTimeInput(e.target.value)}
-                      className="w-full text-xs p-2 border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-slate-900"
+                      className="w-full text-base sm:text-xs p-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-900"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Inline Product Allocation & Pricing Table */}
+              {/* Inline Product Allocation & Pricing Section */}
               <div className="pt-3 border-t border-slate-200">
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-2 gap-1">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800">
-                    Product Allocations & Event-Specific Pricing
+                    Product Allocations & Event Pricing
                   </h4>
                   <span className="text-[11px] text-slate-500">
                     {editingEventId && events.find(ev => ev.id === editingEventId)?.status === 'ENDED'
-                      ? 'Event is closed. Product allocations and prices are finalized and read-only.'
-                      : 'Allocations deduct from main inventory; unsold units return when ended.'}
+                      ? 'Event is closed. Product allocations and prices are finalized.'
+                      : 'Allocations deduct from warehouse stock; unsold return upon conclusion.'}
                   </span>
                 </div>
 
@@ -1063,7 +1063,119 @@ export const EventsPage: React.FC = () => {
                   </div>
                 )}
 
-                <div className="overflow-x-auto border border-slate-200 rounded-md">
+                {/* 1. Mobile Allocation Cards (<md) */}
+                <div className="md:hidden space-y-2.5">
+                  {allocationsGrid.map(row => {
+                    const isTargetClosed = Boolean(editingEventId && events.find(ev => ev.id === editingEventId)?.status === 'ENDED');
+                    const minAllowed = editingEventId ? Math.max(0, row.soldQty) : 0;
+                    const maxAllowed = Math.max(minAllowed, row.maxAllocatable);
+
+                    return (
+                      <div
+                        key={row.productId}
+                        className="p-3 bg-white border border-slate-200 rounded-xl space-y-2 shadow-2xs"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="font-bold text-slate-900 text-xs leading-snug truncate" title={row.productName}>
+                              {row.productName}
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="font-mono text-[10px] text-slate-500 bg-slate-100 px-1 py-0.2 rounded border border-slate-200">
+                                {row.productId}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-semibold truncate max-w-[120px]">
+                                {row.projectName}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="text-[10px] text-slate-400 block font-medium">In Wh</span>
+                            <span className="font-bold text-xs text-slate-800">{row.availableStock}</span>
+                          </div>
+                        </div>
+
+                        {editingEventId && (
+                          <div className="grid grid-cols-2 gap-2 p-2 bg-slate-50 rounded-lg text-[11px] border border-slate-100">
+                            <div>
+                              <span className="text-slate-500">Sold:</span>{' '}
+                              <strong className="text-emerald-700">{row.soldQty}</strong>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-slate-500">Remaining:</span>{' '}
+                              <strong className="text-slate-900">{row.remainingQty}</strong>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 items-end">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1">
+                              Allocated Qty
+                            </label>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={minAllowed}
+                                max={maxAllowed}
+                                step="1"
+                                disabled={isTargetClosed}
+                                value={row.allocatedQty}
+                                onChange={e =>
+                                  handleAllocationChange(
+                                    row.productId,
+                                    'allocatedQty',
+                                    parseInt(e.target.value, 10) || 0
+                                  )
+                                }
+                                className={`w-full text-base sm:text-xs p-1.5 border rounded-lg font-bold text-center ${
+                                  isTargetClosed ? 'bg-slate-100 text-slate-500 border-slate-200' : 'border-slate-300'
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleSetMaxAllocation(row.productId)}
+                                disabled={isTargetClosed || row.allocatedQty >= row.maxAllocatable}
+                                className="px-2 py-1.5 text-[10px] font-bold uppercase rounded-lg border bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-40"
+                              >
+                                MAX
+                              </button>
+                            </div>
+                            <div className="text-[9px] text-slate-400 mt-0.5">
+                              {editingEventId && row.soldQty > 0 ? `Min: ${row.soldQty} · ` : ''}Max: {row.maxAllocatable}
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1">
+                              Event Price (₹)
+                            </label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min={0}
+                              disabled={isTargetClosed}
+                              value={row.priceAtEvent}
+                              onChange={e =>
+                                handleAllocationChange(
+                                  row.productId,
+                                  'priceAtEvent',
+                                  parseFloat(e.target.value) || 0
+                                )
+                              }
+                              className={`w-full text-base sm:text-xs p-1.5 border rounded-lg font-bold text-right ${
+                                isTargetClosed ? 'bg-slate-100 text-slate-500 border-slate-200' : 'border-slate-300'
+                              }`}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 2. Desktop Allocation Table (hidden <md) */}
+                <div className="hidden md:block overflow-x-auto border border-slate-200 rounded-md">
                   <table className="w-full text-left text-xs min-w-[720px] border-collapse">
                     <thead className="bg-slate-50 text-slate-600 font-semibold uppercase text-[10px]">
                       <tr>
@@ -1079,6 +1191,8 @@ export const EventsPage: React.FC = () => {
                     <tbody className="divide-y divide-slate-100">
                       {allocationsGrid.map(row => {
                         const isTargetClosed = Boolean(editingEventId && events.find(ev => ev.id === editingEventId)?.status === 'ENDED');
+                        const minAllowed = editingEventId ? Math.max(0, row.soldQty) : 0;
+                        const maxAllowed = Math.max(minAllowed, row.maxAllocatable);
                         return (
                         <tr key={row.productId} className="hover:bg-slate-50/70">
                           <td className="px-3 py-2 font-medium text-slate-900 min-w-[180px]">
@@ -1093,8 +1207,8 @@ export const EventsPage: React.FC = () => {
                             <div className="flex items-center justify-end gap-1.5">
                               <input
                                 type="number"
-                                min={editingEventId ? Math.min(row.initialAllocatedQty, row.soldQty) : 0}
-                                max={editingEventId ? Math.max(Math.min(row.initialAllocatedQty, row.soldQty), row.maxAllocatable) : row.maxAllocatable}
+                                min={minAllowed}
+                                max={maxAllowed}
                                 step="1"
                                 disabled={isTargetClosed}
                                 value={row.allocatedQty}

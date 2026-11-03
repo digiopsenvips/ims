@@ -953,17 +953,17 @@ export const GamePlayPage: React.FC = () => {
                   type="button"
                   disabled={isEventEnded || isEventUpcoming || !currentGame}
                   onClick={() => setRecordedResult('WIN')}
-                  className={`p-4 rounded-2xl border-2 flex flex-col items-center justify-center text-center gap-2 transition-all cursor-pointer min-h-[145px] ${
+                  className={`p-3 sm:p-4 rounded-2xl border-2 flex flex-col items-center justify-center text-center gap-1.5 sm:gap-2 transition-all cursor-pointer min-h-[110px] sm:min-h-[145px] ${
                     recordedResult === 'WIN'
                       ? 'border-amber-500 bg-amber-50 text-amber-950 shadow-sm ring-2 ring-amber-400/30'
                       : 'border-slate-200 bg-slate-50/70 hover:bg-amber-50/40 hover:border-amber-300 text-slate-800'
                   } ${isEventEnded || isEventUpcoming ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
-                  <div className="w-12 h-12 rounded-2xl bg-amber-100 border border-amber-200 flex items-center justify-center text-2xl shadow-2xs">
+                  <div className="w-9 h-9 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-amber-100 border border-amber-200 flex items-center justify-center text-xl sm:text-2xl shadow-2xs">
                     🏆
                   </div>
                   <div>
-                    <div className="text-base font-black tracking-tight text-amber-950">
+                    <div className="text-sm sm:text-base font-black tracking-tight text-amber-950">
                       WIN
                     </div>
                     <div className="text-[11px] font-bold text-amber-900 mt-0.5 line-clamp-1" title={currentGame?.winReward.productName}>
@@ -980,17 +980,17 @@ export const GamePlayPage: React.FC = () => {
                   type="button"
                   disabled={isEventEnded || isEventUpcoming || !currentGame}
                   onClick={() => setRecordedResult('LOSE')}
-                  className={`p-4 rounded-2xl border-2 flex flex-col items-center justify-center text-center gap-2 transition-all cursor-pointer min-h-[145px] ${
+                  className={`p-3 sm:p-4 rounded-2xl border-2 flex flex-col items-center justify-center text-center gap-1.5 sm:gap-2 transition-all cursor-pointer min-h-[110px] sm:min-h-[145px] ${
                     recordedResult === 'LOSE'
                       ? 'border-slate-800 bg-slate-100 text-slate-950 shadow-sm ring-2 ring-slate-400/30'
                       : 'border-slate-200 bg-slate-50/70 hover:bg-slate-100 hover:border-slate-300 text-slate-800'
                   } ${isEventEnded || isEventUpcoming ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
-                  <div className="w-12 h-12 rounded-2xl bg-slate-200 border border-slate-300 flex items-center justify-center text-2xl shadow-2xs">
+                  <div className="w-9 h-9 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-slate-200 border border-slate-300 flex items-center justify-center text-xl sm:text-2xl shadow-2xs">
                     ❌
                   </div>
                   <div>
-                    <div className="text-base font-black tracking-tight text-slate-900">
+                    <div className="text-sm sm:text-base font-black tracking-tight text-slate-900">
                       LOSE
                     </div>
                     <div className="text-[11px] font-bold text-slate-800 mt-0.5 line-clamp-1" title={currentGame?.loseReward?.productName || 'Consolation'}>

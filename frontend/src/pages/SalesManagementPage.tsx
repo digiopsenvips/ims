@@ -801,7 +801,7 @@ export const SalesManagementPage: React.FC = () => {
               placeholder="Search product, receipt #, member..."
               value={searchQuery}
               onChange={handleSearchInputChange}
-              className="w-full pl-9 pr-8 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-900"
+              className="w-full pl-9 pr-8 py-2 text-base sm:text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-900"
             />
             {isFetching && (
               <Loader2 className="w-3.5 h-3.5 absolute right-3 top-3 text-slate-400 animate-spin" />
@@ -809,9 +809,9 @@ export const SalesManagementPage: React.FC = () => {
           </div>
 
           {/* Filter Pills */}
-          <div className="flex flex-wrap items-center gap-2.5 sm:gap-4">
+          <div className="w-full lg:w-auto flex flex-wrap sm:flex-nowrap items-center gap-2 sm:gap-4 overflow-x-auto scrollbar-none pb-1 sm:pb-0">
             {/* Payment Filter */}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 shrink-0">
               <span className="text-[11px] font-semibold text-slate-500 shrink-0">Payment:</span>
               <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs">
                 {(['ALL', 'UPI', 'CASH', 'CASH_UPI'] as const).map(p => (
@@ -829,7 +829,7 @@ export const SalesManagementPage: React.FC = () => {
             </div>
 
             {/* Transaction Type Filter */}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 shrink-0">
               <span className="text-[11px] font-semibold text-slate-500 shrink-0">Type:</span>
               <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs">
                 {(['ALL', 'SALES', 'COMBOS', 'GAMES'] as const).map(t => (
@@ -1268,111 +1268,102 @@ export const SalesManagementPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Card Middle: Products & Quantities */}
-                  <div className="text-xs">
-                    {sale.transactionType === 'GAME' ? (
-                      <div>
-                        <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
-                          <span>🎮 {sale.game?.name || sale.productName || 'Stall Game'}</span>
-                          {sale.gameSession && (
-                            <span className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase ${
-                              sale.gameSession.result === 'WIN'
-                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                : 'bg-amber-100 text-amber-800 border border-amber-200'
-                            }`}>
-                              {sale.gameSession.result === 'WIN' ? '🏆 WIN' : 'LOSE'}
-                            </span>
+                  {/* Card Middle: Products on left, Total Amount & Payment on right */}
+                  <div className="flex items-start justify-between gap-3 text-xs">
+                    <div className="min-w-0 flex-1">
+                      {sale.transactionType === 'GAME' ? (
+                        <div>
+                          <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
+                            <span>🎮 {sale.game?.name || sale.productName || 'Stall Game'}</span>
+                            {sale.gameSession && (
+                              <span className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase ${
+                                sale.gameSession.result === 'WIN'
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                  : 'bg-amber-100 text-amber-800 border border-amber-200'
+                              }`}>
+                                {sale.gameSession.result === 'WIN' ? '🏆 WIN' : 'LOSE'}
+                              </span>
+                            )}
+                          </div>
+                          {sale.gameSession?.rewardProduct && (
+                            <div className="text-[11px] text-slate-600 mt-0.5">
+                              Reward: <span className="font-semibold text-slate-800">{sale.gameSession.rewardProduct.name}</span> × {sale.gameSession.rewardQuantity}
+                            </div>
                           )}
                         </div>
-                        {sale.gameSession?.rewardProduct && (
-                          <div className="text-[11px] text-slate-600 mt-0.5">
-                            Reward: <span className="font-semibold text-slate-800">{sale.gameSession.rewardProduct.name}</span> × {sale.gameSession.rewardQuantity}
-                          </div>
-                        )}
-                      </div>
-                    ) : (() => {
-                      const cLines = (sale.lines && sale.lines.length > 0) ? sale.lines : (Array.isArray(sale.cartSnapshot) && sale.cartSnapshot.length > 0 ? (sale.cartSnapshot as any[]) : null);
-                      if (cLines && cLines.length > 0) {
-                        return (
-                          <div className="space-y-1">
-                            {cLines.map((line: any, lIdx: number) => {
-                              const isCombo = line.type === 'COMBO' || Boolean(line.comboId);
-                              return (
-                                <div key={lIdx} className="space-y-0.5">
-                                  <div className="flex items-center justify-between text-xs">
-                                    <span className="font-semibold text-slate-900 truncate mr-2 flex items-center gap-1">
-                                      {isCombo && (
-                                        <span className="px-1 py-0.2 bg-emerald-50 text-emerald-800 text-[9px] font-bold rounded border border-emerald-200 shrink-0">
-                                          COMBO
-                                        </span>
-                                      )}
-                                      <span className="truncate">{line.name}</span>
-                                    </span>
-                                    <span className="font-bold text-slate-700 shrink-0">× {line.quantity}</span>
-                                  </div>
-                                  {isCombo && line.components && line.components.length > 0 && (
-                                    <div className="text-[10px] text-slate-500 pl-2">
-                                      {line.components.map((c: any) => `${c.quantity * line.quantity}× ${c.productName}`).join(', ')}
+                      ) : (() => {
+                        const cLines = (sale.lines && sale.lines.length > 0) ? sale.lines : (Array.isArray(sale.cartSnapshot) && sale.cartSnapshot.length > 0 ? (sale.cartSnapshot as any[]) : null);
+                        if (cLines && cLines.length > 0) {
+                          return (
+                            <div className="space-y-1">
+                              {cLines.map((line: any, lIdx: number) => {
+                                const isCombo = line.type === 'COMBO' || Boolean(line.comboId);
+                                return (
+                                  <div key={lIdx} className="space-y-0.5">
+                                    <div className="flex items-center justify-between text-xs">
+                                      <span className="font-semibold text-slate-900 truncate mr-2 flex items-center gap-1">
+                                        {isCombo && (
+                                          <span className="px-1 py-0.2 bg-emerald-50 text-emerald-800 text-[9px] font-bold rounded border border-emerald-200 shrink-0">
+                                            COMBO
+                                          </span>
+                                        )}
+                                        <span className="truncate">{line.name}</span>
+                                      </span>
+                                      <span className="font-bold text-slate-700 shrink-0">× {line.quantity}</span>
                                     </div>
-                                  )}
+                                    {isCombo && line.components && line.components.length > 0 && (
+                                      <div className="text-[10px] text-slate-500 pl-2">
+                                        {line.components.map((c: any) => `${c.quantity * line.quantity}× ${c.productName}`).join(', ')}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        }
+                        return null;
+                      })() || ((sale.transactionType === 'COMBO' || sale.comboId) ? (
+                        <div>
+                          <div className="font-bold text-slate-900">
+                            🎁 {sale.comboName || sale.productName || 'Combo Offer'}
+                          </div>
+                          {sale.items && sale.items.length > 0 && (
+                            <div className="text-[11px] text-slate-600 mt-1 space-y-0.5 border-l-2 border-emerald-200 pl-2">
+                              {sale.items.map((it, itIdx) => (
+                                <div key={itIdx} className="flex items-center justify-between">
+                                  <span>{it.productName}</span>
+                                  <span className="font-bold text-slate-700">× {it.quantity}</span>
                                 </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      }
-                      return null;
-                    })() || ((sale.transactionType === 'COMBO' || sale.comboId) ? (
-                      <div>
-                        <div className="font-bold text-slate-900">
-                          🎁 {sale.comboName || sale.productName || 'Combo Offer'}
+                              ))}
+                            </div>
+                          )}
                         </div>
-                        {sale.items && sale.items.length > 0 && (
-                          <div className="text-[11px] text-slate-600 mt-1 space-y-0.5 border-l-2 border-emerald-200 pl-2">
-                            {sale.items.map((it, itIdx) => (
-                              <div key={itIdx} className="flex items-center justify-between">
-                                <span>{it.productName}</span>
-                                <span className="font-bold text-slate-700">× {it.quantity}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ) : sale.items && sale.items.length > 0 ? (
-                      <div className="space-y-1">
-                        {sale.items.map((it, itIdx) => (
-                          <div key={itIdx} className="flex items-center justify-between text-xs">
-                            <span className="font-semibold text-slate-900 truncate mr-2">{it.productName}</span>
-                            <span className="font-bold text-slate-700 shrink-0">× {it.quantity}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-semibold text-slate-900 truncate mr-2">{sale.productName}</span>
-                        <span className="font-bold text-slate-700 shrink-0">× {sale.quantity}</span>
-                      </div>
-                    ))}
-                  </div>
+                      ) : sale.items && sale.items.length > 0 ? (
+                        <div className="space-y-1">
+                          {sale.items.map((it, itIdx) => (
+                            <div key={itIdx} className="flex items-center justify-between text-xs">
+                              <span className="font-semibold text-slate-900 truncate mr-2">{it.productName}</span>
+                              <span className="font-bold text-slate-700 shrink-0">× {it.quantity}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-semibold text-slate-900 truncate mr-2">{sale.productName}</span>
+                          <span className="font-bold text-slate-700 shrink-0">× {sale.quantity}</span>
+                        </div>
+                      ))}
+                    </div>
 
-                  {/* Card Meta: Stall & Seller */}
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 pt-1 border-t border-slate-50">
-                    <span>Stall: <strong className="text-slate-700 font-medium">{sale.eventName}</strong></span>
-                    <span>Seller: <strong className="text-slate-700 font-medium">{sale.memberName}</strong></span>
-                    {sale.customerName && (
-                      <span>Customer: <strong className="text-slate-700 font-medium">{sale.customerName}</strong></span>
-                    )}
-                  </div>
-
-                  {/* Card Bottom: Payment & Actions */}
-                  <div className="flex items-center justify-between gap-2 pt-1.5 flex-wrap">
-                    <div className="flex items-center gap-2">
+                    {/* Total Amount & Payment badge */}
+                    <div className="text-right shrink-0">
                       {canViewRevenue && sale.totalAmount != null && (
-                        <span className="font-black text-slate-900 text-sm">
-                          ₹{Number(sale.totalAmount).toFixed(2)}
-                        </span>
+                        <div className="font-black text-slate-900 text-sm">
+                          ₹{Number(sale.totalAmount).toFixed(0)}
+                        </div>
                       )}
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      <span className={`inline-block px-1.5 py-0.2 rounded text-[10px] font-bold mt-0.5 ${
                         sale.paymentMethod === 'UPI'
                           ? 'bg-blue-50 text-blue-700 border border-blue-200'
                           : sale.paymentMethod === 'CASH_UPI'
@@ -1382,12 +1373,27 @@ export const SalesManagementPage: React.FC = () => {
                         {sale.paymentMethod === 'CASH_UPI' ? 'CASH + UPI' : sale.paymentMethod}
                       </span>
                     </div>
+                  </div>
 
-                    <div className="flex items-center gap-1.5">
+                  {/* Card Meta: Stall & Seller on left, Details & Actions on right */}
+                  <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-100 text-[11px] text-slate-500">
+                    <div className="truncate text-slate-600 min-w-0 flex-1">
+                      <span className="font-medium text-slate-700">{sale.eventName}</span>
+                      <span className="text-slate-300 mx-1">·</span>
+                      <span>@{sale.memberUsername || sale.memberName}</span>
+                      {sale.customerName && (
+                        <>
+                          <span className="text-slate-300 mx-1">·</span>
+                          <span className="text-slate-700">{sale.customerName}</span>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
                       <button
                         type="button"
                         onClick={() => setSelectedSaleForDetails(sale)}
-                        className="inline-flex items-center gap-1 px-3 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition-colors cursor-pointer"
                       >
                         <Eye className="w-3.5 h-3.5" />
                         <span>Details</span>
@@ -1399,21 +1405,17 @@ export const SalesManagementPage: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => handleOpenEdit(sale)}
-                              className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+                              className="p-1 text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 rounded-md transition-colors cursor-pointer"
                               title="Edit sale (Developer)"
                             >
                               <Pencil className="w-3.5 h-3.5" />
                             </button>
                           )}
-                          {sale.status === 'CANCELLED' ? (
-                            <span className="px-2 py-0.5 text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg">
-                              Voided
-                            </span>
-                          ) : (
+                          {sale.status !== 'CANCELLED' && (
                             <button
                               type="button"
                               onClick={() => handleOpenCancelModal(sale)}
-                              className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+                              className="p-1 text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 rounded-md transition-colors cursor-pointer"
                               title="Delete sale (Restores inventory)"
                             >
                               <Trash2 className="w-3.5 h-3.5 text-rose-600" />

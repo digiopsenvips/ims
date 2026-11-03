@@ -470,9 +470,85 @@ export const ProjectsProductsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Products Table Container */}
+      {/* Products Table / Mobile Card Container */}
       <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Mobile Product Cards (<md) */}
+        <div className="md:hidden divide-y divide-slate-100">
+          {isLoading ? (
+            <div className="p-8 text-center text-slate-400">
+              <Package className="w-6 h-6 mx-auto mb-2 animate-bounce text-slate-400" />
+              <p className="font-medium text-slate-600 text-xs">Loading catalog products...</p>
+            </div>
+          ) : filteredProducts.length === 0 ? (
+            <div className="p-8 text-center">
+              <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mx-auto mb-2">
+                <Search className="w-5 h-5" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-900">No matching products</h3>
+              <p className="text-xs text-slate-500 mt-1">
+                No catalog items match your selected filters.
+              </p>
+            </div>
+          ) : (
+            filteredProducts.map(prod => (
+              <div
+                key={prod.id}
+                className={`p-3 space-y-2 transition-colors ${
+                  prod.isArchived ? 'bg-slate-50/60 opacity-85' : 'bg-white'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-mono font-bold text-slate-800 bg-slate-100 px-1.5 py-0.5 rounded text-[11px] border border-slate-200">
+                        {prod.id}
+                      </span>
+                      <span className="text-[10px] font-semibold text-slate-600 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200">
+                        {prod.project?.name || '—'}
+                      </span>
+                      {prod.isArchived && (
+                        <span className="text-[9px] font-bold text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 uppercase">
+                          Retired
+                        </span>
+                      )}
+                    </div>
+                    <div className="font-bold text-slate-900 text-xs sm:text-sm mt-1 leading-snug">
+                      {prod.name}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-xs sm:text-sm font-bold text-slate-900 font-mono">
+                      {prod.basePrice !== null && prod.basePrice !== undefined ? `₹${Number(prod.basePrice).toFixed(0)}` : '—'}
+                    </div>
+                    <div className="text-[10px] font-medium text-slate-500 mt-0.5">
+                      Stock: <span className={`font-bold ${(prod.inventory?.quantityOnHand ?? 0) <= 5 ? 'text-amber-700' : 'text-slate-900'}`}>{prod.inventory ? prod.inventory.quantityOnHand : 0}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-1.5 pt-1.5 border-t border-slate-50">
+                  <button
+                    onClick={() => handleOpenEditProduct(prod)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <Pencil className="w-3 h-3 text-slate-500" /> Edit
+                  </button>
+                  <button
+                    onClick={() => handleToggleArchiveProduct(prod)}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                      prod.isArchived ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600 hover:bg-amber-50 hover:text-amber-700'
+                    }`}
+                  >
+                    {prod.isArchived ? 'Unarchive' : 'Archive'}
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Desktop Table View (>=md) */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs min-w-[960px] border-collapse">
             <thead className="bg-slate-50/90 text-slate-500 border-b border-slate-200 font-semibold uppercase tracking-wider text-[10px]">
               <tr>

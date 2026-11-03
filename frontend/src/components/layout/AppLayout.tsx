@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Navbar } from './Navbar';
 import { Sidebar } from './Sidebar';
+import { MobileBottomNav } from './MobileBottomNav';
 import { Outlet } from 'react-router-dom';
 
 export const AppLayout: React.FC = () => {
@@ -14,9 +15,12 @@ export const AppLayout: React.FC = () => {
       {/* Main Content Area (shifted right on desktop by 64 = 16rem = 256px) */}
       <div className="flex-1 lg:pl-64 flex flex-col min-w-0 min-h-screen">
         <Navbar onToggleSidebar={() => setSidebarOpen(prev => !prev)} />
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto min-w-0 max-w-full">
+        <main className="flex-1 p-2.5 sm:p-4 md:p-6 lg:p-8 pb-20 lg:pb-8 overflow-y-auto min-w-0 max-w-full">
           <Outlet />
         </main>
+
+        {/* Mobile Bottom Navigation Bar */}
+        <MobileBottomNav onToggleSidebar={() => setSidebarOpen(prev => !prev)} />
       </div>
     </div>
   );

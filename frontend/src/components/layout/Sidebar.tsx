@@ -29,6 +29,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
   const { user, logout, isDeveloper, isAdmin, isHead, isMember, hasPermission } = useAuth();
   const location = useLocation();
 
+  // Escape key handler
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   const storageKey = user?.id ? `enactus_ims_pos_event_${user.id}` : 'enactus_ims_pos_event_guest';
   let savedEventId: string | null = null;
   try {
