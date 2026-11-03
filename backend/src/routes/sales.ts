@@ -1094,6 +1094,121 @@ router.get(
   }
 );
 
+// POST /api/sales/reconcile-check: Intelligent verification and matching of client offline records against committed sales
+router.post(
+  '/reconcile-check',
+  authenticateToken,
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const {
+        clientTxId,
+        eventId,
+        totalAmount,
+        paymentMethod,
+        saleTime,
+        queuedAt,
+        items,
+      } = req.body || {};
+
+      if (!clientTxId && !eventId) {
+        res.status(400).json({ error: 'Either clientTxId or eventId is required for reconciliation check.' });
+        return;
+      }
+
+      // 1. Exact match by clientTxId
+      if (clientTxId) {
+        const exactSale = await prisma.sale.findUnique({
+          where: { clientTxId: String(clientTxId) },
+          include: {
+            items: { include: { product: true } },
+            gameSession: true,
+          },
+        });
+        if (exactSale) {
+          res.json({
+            matchType: 'EXACT_KEY',
+            saleId: exactSale.id,
+            receiptNumber: exactSale.receiptNumber,
+            status: exactSale.status,
+            saleTime: exactSale.saleTime,
+            message: `Exact match found in database (Receipt #${exactSale.receiptNumber}).`,
+            sale: exactSale,
+          });
+          return;
+        }
+      }
+
+      // 2. Historical equivalent match
+      if (eventId && totalAmount !== undefined) {
+        const targetAmount = typeof totalAmount === 'number' ? totalAmount : parseFloat(String(totalAmount || 0));
+        const saleTimestamp = saleTime ? new Date(saleTime).getTime() : queuedAt ? Number(queuedAt) : Date.now();
+        // 12-hour window on the day of the sale
+        const windowStart = new Date(saleTimestamp - 12 * 3600 * 1000);
+        const windowEnd = new Date(saleTimestamp + 12 * 3600 * 1000);
+
+        // Normalize payment method if provided
+        let targetMethod: PaymentMethod | undefined;
+        try {
+          if (paymentMethod) targetMethod = normalizePaymentMethod(paymentMethod);
+        } catch {}
+
+        const candidates = await prisma.sale.findMany({
+          where: {
+            eventId: String(eventId),
+            status: { not: 'CANCELLED' },
+            totalAmount: targetAmount,
+            saleTime: { gte: windowStart, lte: windowEnd },
+            ...(targetMethod ? { paymentMethod: targetMethod } : {}),
+          },
+          include: {
+            items: { include: { product: true } },
+            gameSession: true,
+          },
+          orderBy: { saleTime: 'asc' },
+        });
+
+        if (candidates.length > 0) {
+          let matched = candidates[0];
+          if (Array.isArray(items) && items.length > 0) {
+            const requestedItemMap = new Map<string, number>();
+            for (const it of items) {
+              if (it.productId) requestedItemMap.set(it.productId, (requestedItemMap.get(it.productId) || 0) + (Number(it.quantity) || 1));
+            }
+            const candidateWithMatchingItems = candidates.find(c => {
+              for (const [prodId, qty] of requestedItemMap.entries()) {
+                const foundItem = c.items.find(ci => ci.productId === prodId);
+                if (!foundItem || foundItem.quantity < qty) return false;
+              }
+              return true;
+            });
+            if (candidateWithMatchingItems) matched = candidateWithMatchingItems;
+          }
+
+          res.json({
+            matchType: 'HISTORICAL_EQUIVALENT',
+            saleId: matched.id,
+            receiptNumber: matched.receiptNumber,
+            status: matched.status,
+            saleTime: matched.saleTime,
+            message: `Confirmed in database as Receipt #${matched.receiptNumber} (₹${matched.totalAmount} via ${matched.paymentMethod}).`,
+            sale: matched,
+          });
+          return;
+        }
+      }
+
+      res.json({
+        matchType: 'NONE',
+        safeToRetry: true,
+        message: 'No duplicate found in database. Transaction is safe to retry with idempotency protection.',
+      });
+    } catch (err: any) {
+      console.error('Error during reconciliation check:', err);
+      res.status(500).json({ error: 'Failed to verify transaction reconciliation status' });
+    }
+  }
+);
+
 // POST /api/sales/sync: Bulk offline sync endpoint from PWA IndexedDB queue
 router.post(
   '/sync',

@@ -657,17 +657,7 @@ export const SalesManagementPage: React.FC = () => {
               <RefreshCw className={`w-3.5 h-3.5 text-blue-600 shrink-0 ${syncState.isSyncing ? 'animate-spin' : ''}`} />
               <span>{syncState.pendingCount} awaiting sync</span>
             </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setIsSyncDrawerOpen(true)}
-              className="hidden sm:inline-flex px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs font-semibold rounded-lg bg-emerald-50/70 border border-emerald-200 text-emerald-800 hover:bg-emerald-100/70 transition-colors items-center gap-1.5 cursor-pointer shadow-2xs"
-              title="All local transactions synchronized"
-            >
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              <span>No unresolved issues</span>
-            </button>
-          )}
+          ) : null}
 
           {canExport && (
             <button

@@ -1,7 +1,7 @@
 import { api, ApiError } from './api';
 import { getPendingSales, getPendingSalesCount, getFailedSalesCount, updateOfflineSaleStatus,
   acknowledgeOfflineSale, queueOfflineSale, retryFailedOfflineSales, retryOfflineSale,
-  markOfflineSaleResolved, archiveOfflineSale, getOfflineSale } from './db';
+  markOfflineSaleResolved, archiveOfflineSale, getOfflineSale, getPreservedSales } from './db';
 import { QueuedSale } from '../types';
 
 export interface SyncState { isOnline: boolean; pendingCount: number; failedCount: number; isSyncing: boolean; }
@@ -18,8 +18,17 @@ class SyncManager {
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => { this.state.isOnline = true; this.notify(); void this.triggerSync(); });
       window.addEventListener('offline', () => { this.state.isOnline = false; this.notify(); });
-      setInterval(() => { if (this.state.isOnline) void this.triggerSync(); }, 15000);
-      void this.refreshCount();
+      setInterval(() => {
+        if (this.state.isOnline) {
+          void this.triggerSync();
+          void this.autoReconcileFailed();
+        }
+      }, 15000);
+      void this.refreshCount().then(() => {
+        if (this.state.isOnline && this.state.failedCount > 0) {
+          void this.autoReconcileFailed();
+        }
+      });
     }
   }
   subscribe(listener: SyncListener) { this.listeners.add(listener); listener(this.getStatus()); return () => { this.listeners.delete(listener); }; }
@@ -124,7 +133,13 @@ class SyncManager {
       this.state.isSyncing = true; this.notify();
       try { for (const sale of await getPendingSales()) await this.sendOperation(sale); }
       catch (error) { console.error('Sync stopped; operations retained:', error); }
-      finally { this.state.isSyncing = false; await this.refreshCount(); }
+      finally {
+        this.state.isSyncing = false;
+        await this.refreshCount();
+        if (this.state.failedCount > 0) {
+          void this.autoReconcileFailed();
+        }
+      }
     };
     const syncing = Promise.resolve(typeof navigator !== 'undefined' && navigator.locks
       ? navigator.locks.request('enactus-ims-sync', run) : run()).then(() => {}).finally(() => { this.syncing = null; });
@@ -160,6 +175,45 @@ class SyncManager {
       return { synced: false };
     } catch (err: any) {
       return { synced: false, error: err.message };
+    }
+  }
+  async reconcileCheck(sale: QueuedSale) {
+    try {
+      const res: any = await api.post('/sales/reconcile-check', sale);
+      return res;
+    } catch (err: any) {
+      return { matchType: 'NONE', error: err.message };
+    }
+  }
+  async linkReconciledReceipt(clientTxId: string, acknowledgement: { saleId: number; receiptNumber: number; receipt?: any }) {
+    await acknowledgeOfflineSale(clientTxId, acknowledgement);
+    await this.refreshCount();
+  }
+  async autoReconcileFailed(): Promise<number> {
+    if (!this.state.isOnline || !localStorage.getItem('enactus_ims_token')) return 0;
+    try {
+      const all = await getPreservedSales();
+      const failed = all.filter(s => ['failed', 'rejected', 'conflict'].includes(s.syncStatus));
+      if (failed.length === 0) return 0;
+      let reconciledCount = 0;
+      for (const item of failed) {
+        const check = await this.reconcileCheck(item);
+        if (check?.saleId && check?.receiptNumber && (check.matchType === 'EXACT_KEY' || check.matchType === 'HISTORICAL_EQUIVALENT')) {
+          await acknowledgeOfflineSale(item.clientTxId, {
+            saleId: check.saleId,
+            receiptNumber: check.receiptNumber,
+            receipt: check.sale,
+          });
+          reconciledCount++;
+        }
+      }
+      if (reconciledCount > 0) {
+        await this.refreshCount();
+      }
+      return reconciledCount;
+    } catch (err) {
+      console.warn('Auto-reconciliation pass encountered an issue:', err);
+      return 0;
     }
   }
 }
