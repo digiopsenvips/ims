@@ -120,10 +120,19 @@ export const ReopenStallModal: React.FC<ReopenStallModalProps> = ({
 
   // Step 2 Allocations State: map of productId -> allocatedQty
   const [allocations, setAllocations] = useState<Record<string, number>>({});
+  const [rawInputs, setRawInputs] = useState<Record<string, string>>({});
+  const [initialAllocations, setInitialAllocations] = useState<Record<string, number>>({});
+  const [initialRawInputs, setInitialRawInputs] = useState<Record<string, string>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProject, setSelectedProject] = useState('ALL');
   const [onlyAllocated, setOnlyAllocated] = useState(false);
   const [showDiscrepancyHelp, setShowDiscrepancyHelp] = useState(false);
+  const [rowAlert, setRowAlert] = useState<{
+    productId: string;
+    type: 'success' | 'warning' | 'info';
+    message: string;
+  } | null>(null);
+  const [isValidatingStep2, setIsValidatingStep2] = useState(false);
 
   // Step 3 Confirmation State
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -151,14 +160,16 @@ export const ReopenStallModal: React.FC<ReopenStallModalProps> = ({
 
         // Pre-fill allocations with suggested values
         const initialAlloc: Record<string, number> = {};
+        const initialRaw: Record<string, string> = {};
         for (const p of res.products) {
-          if (p.isPreviouslyAllocated) {
-            initialAlloc[p.productId] = p.suggestedAllocation;
-          } else {
-            initialAlloc[p.productId] = 0;
-          }
+          const val = p.isPreviouslyAllocated ? p.suggestedAllocation : 0;
+          initialAlloc[p.productId] = val;
+          initialRaw[p.productId] = String(val);
         }
         setAllocations(initialAlloc);
+        setRawInputs(initialRaw);
+        setInitialAllocations(initialAlloc);
+        setInitialRawInputs(initialRaw);
       } catch (err: any) {
         if (!isMounted) return;
         console.error('Failed to load reopen preview:', err);
@@ -306,38 +317,208 @@ export const ReopenStallModal: React.FC<ReopenStallModalProps> = ({
     setStep(2);
   };
 
-  // Handler: Change single allocation
-  const handleAllocationChange = (productId: string, val: string) => {
-    const num = val === '' ? 0 : parseInt(val, 10);
-    if (isNaN(num)) return;
+  // Handler: Change single allocation typing
+  const handleAllocationChange = (productId: string, rawVal: string, p: ReopenPreviewProduct) => {
+    // Keep only digits
+    let digitsOnly = rawVal.replace(/[^\d]/g, '');
+    // Strip leading zeros if more than 1 digit, e.g. "01" -> "1", "00" -> "0"
+    if (digitsOnly.length > 1 && digitsOnly.startsWith('0')) {
+      digitsOnly = digitsOnly.replace(/^0+/, '') || '0';
+    }
+
+    setRawInputs(prev => ({
+      ...prev,
+      [productId]: digitsOnly,
+    }));
+
+    if (digitsOnly === '') {
+      // Allow user to clear input while typing without breaking total calculation
+      setAllocations(prev => ({
+        ...prev,
+        [productId]: 0,
+      }));
+      return;
+    }
+
+    const num = parseInt(digitsOnly, 10);
+    if (!isNaN(num)) {
+      setAllocations(prev => ({
+        ...prev,
+        [productId]: num,
+      }));
+    }
+  };
+
+  // Handler: Blur allocation input (clamp to valid bounds)
+  const handleAllocationBlur = (productId: string, p: ReopenPreviewProduct) => {
+    const maxVal = p.previouslySold + p.currentWarehouse;
+    const current = allocations[productId] ?? p.minAllowed;
+    const clamped = Math.max(p.minAllowed, Math.min(maxVal, current));
     setAllocations(prev => ({
       ...prev,
-      [productId]: Math.max(0, num),
+      [productId]: clamped,
+    }));
+    setRawInputs(prev => ({
+      ...prev,
+      [productId]: String(clamped),
     }));
   };
 
-  // Handler: Bulk reset to sold (0 active)
-  const handleResetToZeroActive = () => {
-    if (!previewData) return;
-    const updated: Record<string, number> = {};
-    for (const p of previewData.products) {
-      updated[p.productId] = p.previouslySold;
+  // Handler: Independent MAX button per product
+  const handleSetMax = (p: ReopenPreviewProduct) => {
+    const maxVal = p.previouslySold + p.currentWarehouse;
+    setAllocations(prev => ({
+      ...prev,
+      [p.productId]: maxVal,
+    }));
+    setRawInputs(prev => ({
+      ...prev,
+      [p.productId]: String(maxVal),
+    }));
+
+    if (p.currentWarehouse === 0) {
+      setRowAlert({
+        productId: p.productId,
+        type: 'warning',
+        message: `${p.productName} has 0 warehouse units available. Allocation set to historical sales (${p.previouslySold}).`,
+      });
+    } else {
+      setRowAlert({
+        productId: p.productId,
+        type: 'success',
+        message: `${p.productName} set to MAX: ${maxVal} (${p.previouslySold} sold + ${p.currentWarehouse} warehouse units).`,
+      });
     }
-    setAllocations(updated);
+  };
+
+  // Handler: Independent 0-Active / Min button per product
+  const handleSetZeroActive = (p: ReopenPreviewProduct) => {
+    const minVal = p.previouslySold;
+    setAllocations(prev => ({
+      ...prev,
+      [p.productId]: minVal,
+    }));
+    setRawInputs(prev => ({
+      ...prev,
+      [p.productId]: String(minVal),
+    }));
+    setRowAlert({
+      productId: p.productId,
+      type: 'info',
+      message: `${p.productName} set to 0 active units (${minVal} historical sales preserved).`,
+    });
+  };
+
+  // Handler: Bulk Set All to MAX
+  const handleSetAllToMax = () => {
+    if (!previewData) return;
+    const updatedAlloc: Record<string, number> = {};
+    const updatedRaw: Record<string, string> = {};
+    let totalPulled = 0;
+    for (const p of previewData.products) {
+      const maxVal = p.previouslySold + p.currentWarehouse;
+      updatedAlloc[p.productId] = maxVal;
+      updatedRaw[p.productId] = String(maxVal);
+      totalPulled += p.currentWarehouse;
+    }
+    setAllocations(updatedAlloc);
+    setRawInputs(updatedRaw);
+    setRowAlert({
+      productId: 'ALL',
+      type: 'success',
+      message: `Set all ${previewData.products.length} products to MAX (pulling +${totalPulled} total active units from warehouse).`,
+    });
   };
 
   // Handler: Bulk keep previous up to available
   const handleKeepPreviousAvailable = () => {
     if (!previewData) return;
-    const updated: Record<string, number> = {};
+    const updatedAlloc: Record<string, number> = {};
+    const updatedRaw: Record<string, string> = {};
     for (const p of previewData.products) {
       if (p.isPreviouslyAllocated) {
-        updated[p.productId] = Math.min(p.previousAllocated, p.maxAllocatable);
+        const maxVal = p.previouslySold + p.currentWarehouse;
+        const target = Math.min(p.previousAllocated, maxVal);
+        updatedAlloc[p.productId] = target;
+        updatedRaw[p.productId] = String(target);
       } else {
-        updated[p.productId] = 0;
+        updatedAlloc[p.productId] = 0;
+        updatedRaw[p.productId] = '0';
       }
     }
-    setAllocations(updated);
+    setAllocations(updatedAlloc);
+    setRawInputs(updatedRaw);
+    setRowAlert({
+      productId: 'ALL',
+      type: 'info',
+      message: 'Allocations updated to previous quantities (capped at available warehouse stock).',
+    });
+  };
+
+  // Handler: Bulk reset to sold (0 active)
+  const handleResetToZeroActive = () => {
+    if (!previewData) return;
+    const updatedAlloc: Record<string, number> = {};
+    const updatedRaw: Record<string, string> = {};
+    for (const p of previewData.products) {
+      updatedAlloc[p.productId] = p.previouslySold;
+      updatedRaw[p.productId] = String(p.previouslySold);
+    }
+    setAllocations(updatedAlloc);
+    setRawInputs(updatedRaw);
+    setRowAlert({
+      productId: 'ALL',
+      type: 'info',
+      message: 'Set all products to 0 active units (preserving all historical sales).',
+    });
+  };
+
+  // Handler: Reset to Initial modal values
+  const handleResetToInitial = () => {
+    setAllocations({ ...initialAllocations });
+    setRawInputs({ ...initialRawInputs });
+    setRowAlert({
+      productId: 'ALL',
+      type: 'info',
+      message: 'Reverted all allocations to initial modal values.',
+    });
+  };
+
+  // Handler: Step 2 to Step 3 transition with live server check
+  const handleProceedToStep3 = async () => {
+    if (!previewData || !allocationValidation.isValid) return;
+    setIsValidatingStep2(true);
+    try {
+      const fresh = await api.get<ReopenPreviewData>(`/events/${event.id}/reopen-preview`);
+      setPreviewData(fresh);
+
+      // Verify each allocation against live warehouse stock
+      const freshErrors: string[] = [];
+      for (const p of fresh.products) {
+        const alloc = allocations[p.productId] ?? (p.isPreviouslyAllocated ? p.previouslySold : 0);
+        const active = alloc - p.previouslySold;
+        if (active > p.currentWarehouse) {
+          freshErrors.push(
+            `${p.productName}: Warehouse stock changed to ${p.currentWarehouse}. Requested ${active} active units exceeds available stock.`
+          );
+        }
+      }
+
+      if (freshErrors.length > 0) {
+        setRowAlert({
+          productId: 'ALL',
+          type: 'warning',
+          message: 'Warehouse stock changed during review. Please review the updated limits.',
+        });
+        return;
+      }
+      setStep(3);
+    } catch {
+      // Proceed even if network refresh fails
+      setStep(3);
+    } finally {
+      setIsValidatingStep2(false);
+    }
   };
 
   // Handler: Final Reopen Submission
@@ -646,10 +827,46 @@ export const ReopenStallModal: React.FC<ReopenStallModalProps> = ({
                     </div>
                   </div>
 
+                  {/* Row Notification Alert Banner */}
+                  {rowAlert && (
+                    <div
+                      className={`p-2.5 rounded-xl border text-xs flex items-center justify-between animate-in fade-in duration-150 ${
+                        rowAlert.type === 'success'
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                          : rowAlert.type === 'warning'
+                          ? 'bg-amber-50 border-amber-200 text-amber-900'
+                          : 'bg-blue-50 border-blue-200 text-blue-900'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {rowAlert.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />}
+                        {rowAlert.type === 'warning' && <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />}
+                        {rowAlert.type === 'info' && <Info className="w-4 h-4 text-blue-600 shrink-0" />}
+                        <span className="font-semibold text-[11px]">{rowAlert.message}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setRowAlert(null)}
+                        className="text-slate-400 hover:text-slate-600 cursor-pointer p-0.5"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+
                   {/* Bulk Actions */}
                   <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs">
                     <span className="text-slate-500 font-medium">Quick Bulk Actions:</span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSetAllToMax}
+                        className="px-2.5 py-1 text-[11px] font-bold rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                        title="Set all products to maximum available warehouse allocation"
+                      >
+                        <Sparkles className="w-3 h-3 text-emerald-600" />
+                        <span>Set All to MAX</span>
+                      </button>
                       <button
                         type="button"
                         onClick={handleKeepPreviousAvailable}
@@ -665,6 +882,14 @@ export const ReopenStallModal: React.FC<ReopenStallModalProps> = ({
                         title="Sets new allocation equal to historical sales (0 active units pulled from warehouse)"
                       >
                         Set All to 0 Active Stock
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleResetToInitial}
+                        className="px-2.5 py-1 text-[11px] font-medium rounded-lg border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors cursor-pointer"
+                        title="Revert all changes to initial modal values"
+                      >
+                        Reset to Initial
                       </button>
                     </div>
                   </div>
@@ -702,10 +927,14 @@ export const ReopenStallModal: React.FC<ReopenStallModalProps> = ({
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {filteredProducts.map(p => {
+                          const maxVal = p.previouslySold + p.currentWarehouse;
                           const currentVal = allocations[p.productId] ?? (p.isPreviouslyAllocated ? p.previouslySold : 0);
+                          const rawVal = rawInputs[p.productId] ?? String(currentVal);
                           const activeUnits = Math.max(0, currentVal - p.previouslySold);
                           const isShortfall = activeUnits > p.currentWarehouse;
                           const isBelowSold = currentVal < p.minAllowed;
+                          const isAtMax = currentVal === maxVal;
+                          const isAtZeroActive = currentVal === p.minAllowed;
 
                           return (
                             <tr key={p.productId} className={`hover:bg-slate-50/70 ${isShortfall ? 'bg-rose-50/40' : ''}`}>
@@ -742,12 +971,12 @@ export const ReopenStallModal: React.FC<ReopenStallModalProps> = ({
                               <td className="px-3 py-1.5 text-right whitespace-nowrap">
                                 <div className="flex items-center justify-end gap-1.5">
                                   <input
-                                    type="number"
-                                    min={p.minAllowed}
-                                    max={p.maxAllocatable}
-                                    step="1"
-                                    value={currentVal}
-                                    onChange={e => handleAllocationChange(p.productId, e.target.value)}
+                                    type="text"
+                                    inputMode="numeric"
+                                    pattern="[0-9]*"
+                                    value={rawVal}
+                                    onChange={e => handleAllocationChange(p.productId, e.target.value, p)}
+                                    onBlur={() => handleAllocationBlur(p.productId, p)}
                                     className={`w-20 text-right p-1.5 border rounded-lg font-bold text-slate-900 focus:outline-none focus:ring-1 ${
                                       isShortfall || isBelowSold
                                         ? 'border-rose-400 ring-1 ring-rose-400 bg-rose-50/50'
@@ -756,35 +985,49 @@ export const ReopenStallModal: React.FC<ReopenStallModalProps> = ({
                                   />
                                   <button
                                     type="button"
-                                    onClick={() => handleAllocationChange(p.productId, String(p.maxAllocatable))}
-                                    className="px-1.5 py-1 text-[10px] font-bold uppercase rounded border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 cursor-pointer"
-                                    title={`Max possible: ${p.maxAllocatable}`}
+                                    onClick={() => handleSetMax(p)}
+                                    className={`px-2 py-1 text-[10px] font-black uppercase rounded border transition-colors cursor-pointer flex items-center gap-1 ${
+                                      isAtMax
+                                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-300'
+                                    }`}
+                                    title={`Set to maximum possible: ${maxVal} (${p.previouslySold} sold + ${p.currentWarehouse} warehouse)`}
                                   >
+                                    {isAtMax && <Check className="w-2.5 h-2.5" />}
                                     MAX
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => handleAllocationChange(p.productId, String(p.minAllowed))}
-                                    className="px-1.5 py-1 text-[10px] font-bold uppercase rounded border border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 cursor-pointer"
-                                    title="Allocate 0 active units (equal to historical sales)"
+                                    onClick={() => handleSetZeroActive(p)}
+                                    className={`px-2 py-1 text-[10px] font-bold uppercase rounded border transition-colors cursor-pointer ${
+                                      isAtZeroActive
+                                        ? 'bg-slate-800 text-white border-slate-800 shadow-xs'
+                                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-300'
+                                    }`}
+                                    title={`Allocate 0 active units (equal to ${p.previouslySold} historical sales)`}
                                   >
-                                    0
+                                    0 Act
                                   </button>
                                 </div>
                                 <div className="text-[10px] text-slate-400 text-right mt-0.5">
-                                  Min: {p.minAllowed} &bull; Max: {p.maxAllocatable}
+                                  Min: <span className="font-semibold text-slate-600">{p.minAllowed}</span> (sold) &bull; Max:{' '}
+                                  <span className="font-semibold text-slate-600">{maxVal}</span> (sold+WH)
                                 </div>
                               </td>
                               <td className="px-3 py-2 text-right whitespace-nowrap">
-                                <span
-                                  className={`font-bold px-2 py-0.5 rounded text-[11px] ${
-                                    activeUnits > 0
-                                      ? 'bg-blue-50 text-blue-800 border border-blue-200'
-                                      : 'text-slate-400'
-                                  }`}
-                                >
-                                  +{activeUnits}
-                                </span>
+                                {isShortfall ? (
+                                  <span className="font-bold px-2 py-0.5 rounded text-[11px] bg-rose-100 text-rose-800 border border-rose-300">
+                                    +{activeUnits} (Shortfall: {activeUnits - p.currentWarehouse})
+                                  </span>
+                                ) : activeUnits > 0 ? (
+                                  <span className="font-black px-2 py-0.5 rounded text-[11px] bg-blue-50 text-blue-800 border border-blue-200">
+                                    +{activeUnits}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 font-semibold px-2 py-0.5 text-[11px]">
+                                    0
+                                  </span>
+                                )}
                               </td>
                             </tr>
                           );
@@ -805,12 +1048,21 @@ export const ReopenStallModal: React.FC<ReopenStallModalProps> = ({
                     </button>
                     <button
                       type="button"
-                      disabled={!allocationValidation.isValid}
-                      onClick={() => setStep(3)}
+                      disabled={!allocationValidation.isValid || isValidatingStep2}
+                      onClick={handleProceedToStep3}
                       className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <span>Review & Confirm</span>
-                      <ArrowRight className="w-4 h-4" />
+                      {isValidatingStep2 ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Checking Live Warehouse Stock...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Review & Confirm</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
