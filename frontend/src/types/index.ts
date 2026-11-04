@@ -97,6 +97,7 @@ export interface AppEvent {
   totalSold: number;
   totalRemaining: number;
   totalRevenue: number;
+  productRevenue?: number;
   allocations: EventAllocation[];
   createdAt: string;
   gamesCount?: number;

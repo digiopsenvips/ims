@@ -653,7 +653,9 @@ export const EventsPage: React.FC = () => {
             const isEnded = event.status === 'ENDED';
             const isActive = event.status === 'ACTIVE';
             const isPreviewOpen = !!expandedPreviews[event.id];
-            const combinedRevenue = (event.totalRevenue || 0) + (event.gameRevenue || 0);
+            const eventTotalRevenue = event.totalRevenue || 0;
+            const eventGameRevenue = event.gameRevenue || 0;
+            const eventProductRevenue = event.productRevenue ?? Math.max(0, eventTotalRevenue - eventGameRevenue);
             const soldPct = event.totalAllocated > 0
               ? Math.min(100, Math.round((event.totalSold / event.totalAllocated) * 100))
               : 0;
@@ -726,10 +728,10 @@ export const EventsPage: React.FC = () => {
                         Total Revenue
                       </div>
                       <div className="text-lg font-black text-emerald-700 mt-0.5">
-                        ₹{combinedRevenue.toLocaleString('en-IN')}
+                        ₹{eventTotalRevenue.toLocaleString('en-IN')}
                       </div>
                       <div className="text-[10px] text-slate-500 font-medium truncate mt-0.5">
-                        Products: ₹{(event.totalRevenue || 0).toLocaleString('en-IN')} &bull; Games: ₹{(event.gameRevenue || 0).toLocaleString('en-IN')}
+                        Products: ₹{eventProductRevenue.toLocaleString('en-IN')} &bull; Games: ₹{eventGameRevenue.toLocaleString('en-IN')}
                       </div>
                     </div>
 

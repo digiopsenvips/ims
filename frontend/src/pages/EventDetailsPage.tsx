@@ -541,8 +541,8 @@ export const EventDetailsPage: React.FC = () => {
   const isEnded = event.status === 'ENDED';
 
   // Defensively calculate all summary metrics to prevent any undefined/null runtime exceptions
-  const productRevenue = Number(
-    (event as any).summary?.productRevenue ??
+  const totalRevenue = Number(
+    (event as any).summary?.totalRevenue ??
     (event as any).summary?.totalSalesRevenue ??
     (event as any).totalRevenue ??
     0
@@ -552,9 +552,10 @@ export const EventDetailsPage: React.FC = () => {
     (event as any).gameRevenue ??
     0
   );
-  const totalRevenue = Number(
-    (event as any).summary?.totalRevenue ??
-    (productRevenue + gameRevenue)
+  const productRevenue = Number(
+    (event as any).summary?.productRevenue ??
+    (event as any).productRevenue ??
+    Math.max(0, totalRevenue - gameRevenue)
   );
   const totalAllocatedUnits = Number(
     (event as any).summary?.totalAllocatedUnits ??

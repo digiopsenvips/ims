@@ -12,6 +12,7 @@ import {
   reconcileSingleEvent,
   extendEventDeadline,
 } from '../services/eventLifecycle';
+import { calculateEventRevenue } from '../services/revenue';
 
 import { stockTransaction, eventConsumption, StockConflict } from '../services/stock';
 import { InputError, nonnegativeInteger, moneyCents } from '../services/payment';
@@ -116,7 +117,7 @@ router.get(
 
         const gamesCount = event.games.length > 0 ? event.games.length : activeGamesCount;
         const gamesPlayed = event.gameSessions.length;
-        const gameRevenue = event.gameSessions.reduce((sum, gs) => sum + Number(gs.entryFee), 0);
+        const rev = calculateEventRevenue(event.sales, event.gameSessions);
         const productsSoldCount = Object.keys(salesByProduct).length;
 
         return {
@@ -130,12 +131,28 @@ router.get(
           totalAllocated,
           totalSold,
           totalRemaining: Math.max(0, totalAllocated - totalSold),
-          totalRevenue,
+          totalRevenue: rev.totalRevenue,
+          productRevenue: rev.productRevenue,
+          gameRevenue: rev.gameRevenue,
           gamesCount,
           gamesPlayed,
-          gameRevenue,
           productsSoldCount,
           allocations: enrichedAllocations,
+          summary: {
+            totalAllocated,
+            totalSold,
+            totalRemaining: Math.max(0, totalAllocated - totalSold),
+            totalRevenue: rev.totalRevenue,
+            totalSalesRevenue: rev.totalRevenue,
+            productRevenue: rev.productRevenue,
+            gameRevenue: rev.gameRevenue,
+            gamesCount,
+            gamesPlayed,
+            productsSoldCount,
+            totalTransactions: rev.totalTransactions,
+            totalSalesCount: rev.productSalesCount,
+            totalGamesPlayed: gamesPlayed,
+          },
           createdAt: event.createdAt,
         };
       });
@@ -317,7 +334,7 @@ router.get(
       const computedStatus = computeEventStatus(event.startDatetime, event.endDatetime, event.status);
 
       const gamesPlayed = event.gameSessions.length;
-      const gameRevenue = event.gameSessions.reduce((sum, gs) => sum + Number(gs.entryFee), 0);
+      const rev = calculateEventRevenue(event.sales, event.gameSessions);
       const productsSoldCount = Object.keys(salesByProduct).length;
 
       // Format recent sales
@@ -379,7 +396,9 @@ router.get(
         totalAllocated,
         totalSold,
         totalRemaining,
-        totalRevenue: totalSalesRevenue,
+        totalRevenue: rev.totalRevenue,
+        productRevenue: rev.productRevenue,
+        gameRevenue: rev.gameRevenue,
         allocations: enrichedAllocations,
         games: enrichedGames,
         sales: formattedSales,
@@ -387,15 +406,16 @@ router.get(
           totalAllocated,
           totalSold,
           totalRemaining,
-          totalRevenue: totalSalesRevenue,
-          totalSalesRevenue,
-          productRevenue: event.sales.filter(sale => sale.transactionType !== 'GAME' && sale.status !== 'CANCELLED').reduce((sum, sale) => sum + Number(sale.totalAmount), 0),
+          totalRevenue: rev.totalRevenue,
+          totalSalesRevenue: rev.totalRevenue,
+          productRevenue: rev.productRevenue,
+          gameRevenue: rev.gameRevenue,
           gamesCount: enrichedGames.length,
           gamesPlayed,
-          gameRevenue,
           productsSoldCount,
-          totalTransactions: formattedSales.length,
-          totalSalesCount: formattedSales.filter(s => s.transactionType !== 'GAME').length,
+          totalTransactions: rev.totalTransactions,
+          totalSalesCount: rev.productSalesCount,
+          totalGamesPlayed: gamesPlayed,
         },
         createdAt: event.createdAt,
       };
