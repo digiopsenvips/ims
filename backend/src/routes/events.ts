@@ -11,6 +11,7 @@ import {
   computeEventStatus,
   reconcileSingleEvent,
   extendEventDeadline,
+  getEventReopenPreview,
 } from '../services/eventLifecycle';
 import { calculateEventRevenue } from '../services/revenue';
 
@@ -622,21 +623,28 @@ router.put(
           const consumedQty = consumed.get(allocation.productId) || 0;
           const unsold = Math.max(0, allocation.allocatedQty - consumedQty);
           if (unsold > 0) {
-            const inv = await tx.inventory.findUnique({ where: { productId: allocation.productId } });
+            const inv = await tx.inventory.findUnique({ where: { productId: allocation.productId }, include: { product: true } });
             const currentWh = inv?.quantityOnHand ?? 0;
-            if (currentWh < unsold) {
-              throw new StockConflict(
-                `Cannot reactivate stall: Product '${allocation.productId}' has only ${currentWh} units in warehouse, but ${unsold} were returned upon closure.`
-              );
+            const reclaimQty = Math.min(unsold, currentWh);
+            if (reclaimQty > 0) {
+              await tx.inventory.update({
+                where: { productId: allocation.productId },
+                data: {
+                  quantityOnHand: { decrement: reclaimQty },
+                  notes: `Stall deadline extended; restored ${reclaimQty} units to active stall allocation`,
+                  lastUpdated: new Date(),
+                },
+              });
             }
-            await tx.inventory.update({
-              where: { productId: allocation.productId },
-              data: {
-                quantityOnHand: { decrement: unsold },
-                notes: `Stall deadline extended; restored ${unsold} units to active stall allocation`,
-                lastUpdated: new Date(),
-              },
-            });
+            if (reclaimQty < unsold) {
+              await tx.eventAllocation.update({
+                where: { id: allocation.id },
+                data: {
+                  allocatedQty: consumedQty + reclaimQty,
+                  updatedAt: new Date(),
+                },
+              });
+            }
           }
         }
       }
@@ -783,44 +791,60 @@ router.put(
   }
 );
 
-// POST /api/events/:id/extend-deadline: Dedicated authorized endpoint to extend deadline of active or closed events
-router.post(
-  '/:id/extend-deadline',
+// GET /api/events/:id/reopen-preview: Preview authoritative server-side numbers for reopening an ended stall
+router.get(
+  '/:id/reopen-preview',
   authenticateToken,
   requirePermission('edit_events'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { id } = req.params;
-    const { newEndDatetime, reason, reactivate } = req.body;
-
     try {
-      const outcome = await extendEventDeadline({
-        eventId: id,
-        newEndDatetime,
-        reason: typeof reason === 'string' ? reason.trim() : undefined,
-        reactivate: reactivate !== undefined ? Boolean(reactivate) : true,
-        user: {
-          id: req.user!.id,
-          name: req.user!.name,
-          role: req.user!.role,
-        },
-      });
-
-      res.json({
-        success: true,
-        message: outcome.reactivated
-          ? `Event '${outcome.event.name}' deadline extended to ${outcome.newEndDatetime.toISOString()} and reopened for live transactions.`
-          : `Event '${outcome.event.name}' deadline extended successfully.`,
-        event: outcome.event,
-        reactivated: outcome.reactivated,
-        previousEndDatetime: outcome.previousEndDatetime,
-        newEndDatetime: outcome.newEndDatetime,
-      });
+      const preview = await getEventReopenPreview(id);
+      res.json(preview);
     } catch (error: any) {
-      console.error('Extend deadline error:', error);
-      res.status(error.status || 400).json({ error: error.message || 'Failed to extend event deadline' });
+      console.error('Reopen preview error:', error);
+      res.status(error.status || 400).json({ error: error.message || 'Failed to preview stall reopening' });
     }
   }
 );
+
+// POST /api/events/:id/extend-deadline & POST /api/events/:id/reopen: Authorized endpoint to extend deadline or reopen stall with reviewed allocations
+const handleExtendOrReopen = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const { id } = req.params;
+  const { newEndDatetime, reason, reactivate, allocations } = req.body;
+
+  try {
+    const outcome = await extendEventDeadline({
+      eventId: id,
+      newEndDatetime,
+      reason: typeof reason === 'string' ? reason.trim() : undefined,
+      reactivate: reactivate !== undefined ? Boolean(reactivate) : true,
+      allocations: Array.isArray(allocations) ? allocations : undefined,
+      user: {
+        id: req.user!.id,
+        name: req.user!.name,
+        role: req.user!.role,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: outcome.reactivated
+        ? `Event '${outcome.event.name}' deadline extended to ${outcome.newEndDatetime.toISOString()} and reopened for live transactions.`
+        : `Event '${outcome.event.name}' deadline extended successfully.`,
+      event: outcome.event,
+      reactivated: outcome.reactivated,
+      previousEndDatetime: outcome.previousEndDatetime,
+      newEndDatetime: outcome.newEndDatetime,
+    });
+  } catch (error: any) {
+    console.error('Extend/Reopen stall error:', error);
+    res.status(error.status || 400).json({ error: error.message || 'Failed to extend or reopen stall' });
+  }
+};
+
+router.post('/:id/extend-deadline', authenticateToken, requirePermission('edit_events'), handleExtendOrReopen);
+router.post('/:id/reopen', authenticateToken, requirePermission('edit_events'), handleExtendOrReopen);
 
 // Core transactional service for closing an event/stall and returning unsold inventory
 async function executeCloseEvent(id: string) {

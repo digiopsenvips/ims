@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { api } from '../lib/api';
 import { AppEvent, Product, EventStatus } from '../types';
+import { ReopenStallModal } from '../components/ReopenStallModal';
 import {
   Calendar,
   Plus,
@@ -126,6 +127,7 @@ export const EventsPage: React.FC = () => {
 
   // Extend Deadline Modal State
   const [extendEventTarget, setExtendEventTarget] = useState<AppEvent | null>(null);
+  const [reopenStallTarget, setReopenStallTarget] = useState<AppEvent | null>(null);
   const [extendEndDate, setExtendEndDate] = useState('');
   const [extendEndTime, setExtendEndTime] = useState('20:00');
   const [extendReason, setExtendReason] = useState('');
@@ -135,6 +137,12 @@ export const EventsPage: React.FC = () => {
   const canEditEvents = isDeveloper || isAdmin || hasPermission('edit_events');
 
   const handleOpenExtendModal = (event: AppEvent) => {
+    // If the stall has ended, open the comprehensive Reopening Wizard to review allocations
+    if (event.status === 'ENDED') {
+      setReopenStallTarget(event);
+      return;
+    }
+
     setExtendEventTarget(event);
     const currentEnd = new Date(event.endDatetime);
     const now = new Date();
@@ -1579,6 +1587,18 @@ export const EventsPage: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Reopen Ended Stall Wizard Modal */}
+      {reopenStallTarget && (
+        <ReopenStallModal
+          event={reopenStallTarget}
+          onClose={() => setReopenStallTarget(null)}
+          onSuccess={(updatedEv, message) => {
+            setStatusMessage({ type: 'success', text: message });
+            fetchEventsAndProducts();
+          }}
+        />
       )}
 
       {/* Extend Deadline Modal */}
