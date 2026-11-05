@@ -15,7 +15,9 @@ import analyticsRoutes from './routes/analytics';
 import gameRoutes from './routes/games';
 import comboRoutes from './routes/combos';
 import whatsappRoutes from './routes/whatsapp';
+import specialSalesRoutes from './routes/specialSales';
 import { whatsappService } from './services/whatsappService';
+import { initializeDatabaseSequences } from './services/dbInit';
 
 const app = express();
 const server = http.createServer(app);
@@ -61,6 +63,7 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/games', gameRoutes);
 app.use('/api/combos', comboRoutes);
 app.use('/api/whatsapp', whatsappRoutes);
+app.use('/api/special-sales', specialSalesRoutes);
 
 // Global Error Handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -74,6 +77,9 @@ import { reconcileAllExpiredEvents } from './services/eventLifecycle';
 // Schema and sequence maintenance must be an explicitly reviewed operation, never startup work.
 export function startServer() {
   validateRuntimeConfiguration();
+  initializeDatabaseSequences().catch(err =>
+    console.error('[Database] Startup sequence initialization error:', err)
+  );
   return server.listen(ENV.PORT, () => {
   console.log(`🚀 Enactus IMS Backend running on http://localhost:${ENV.PORT}`);
   console.log(`📡 WebSocket server mounted and ready`);

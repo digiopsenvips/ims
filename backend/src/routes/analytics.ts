@@ -332,6 +332,42 @@ router.get(
         revenue: canViewRevenue ? c.revenue : undefined,
       }));
 
+      // Special Sales Summary (Only for Developer and Admin, and not scoped to an event)
+      let specialSalesSummary: any = null;
+      if ((isDev || isAdmin) && !eventId) {
+        const specialSales = await prisma.specialSale.findMany({
+          where: {
+            status: { in: ['CONFIRMED', 'FULFILLED'] },
+            ...(startDate || endDate ? { createdAt: businessDateRange(startDate, endDate) } : {}),
+          },
+          select: {
+            totalAmount: true,
+            amountPaid: true,
+            balanceDue: true,
+            totalUnits: true,
+          },
+        });
+
+        let ssBilled = 0;
+        let ssReceived = 0;
+        let ssOutstanding = 0;
+        let ssUnits = 0;
+        for (const ss of specialSales) {
+          ssBilled += Number(ss.totalAmount) || 0;
+          ssReceived += Number(ss.amountPaid) || 0;
+          ssOutstanding += Number(ss.balanceDue) || 0;
+          ssUnits += ss.totalUnits;
+        }
+
+        specialSalesSummary = {
+          ordersCount: specialSales.length,
+          totalBilled: Math.round(ssBilled * 100) / 100,
+          totalRevenue: Math.round(ssReceived * 100) / 100,
+          outstandingAmount: Math.round(ssOutstanding * 100) / 100,
+          totalUnits: ssUnits,
+        };
+      }
+
       res.json({
         canViewRevenue,
         canViewEventBreakdown,
@@ -339,6 +375,7 @@ router.get(
           totalSalesRecords: sales.length,
           totalUnitsSold,
           totalRevenue: canViewRevenue ? totalRevenue : null,
+          combinedTotalRevenue: canViewRevenue ? Math.round((totalRevenue + (specialSalesSummary?.totalRevenue || 0)) * 100) / 100 : null,
         },
         productShare,
         projectShare,
@@ -361,6 +398,7 @@ router.get(
           totalComboUnits,
           comboBreakdown,
         },
+        specialSalesAnalytics: specialSalesSummary,
       });
     } catch (error) {
       console.error('Fetch analytics error:', error);

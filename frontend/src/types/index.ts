@@ -598,3 +598,136 @@ export interface Combo {
   createdAt: string;
   updatedAt: string;
 }
+
+export type SpecialSaleStatus = 'DRAFT' | 'CONFIRMED' | 'FULFILLED' | 'CANCELLED';
+export type SpecialSalePaymentStatus = 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' | 'REFUNDED';
+export type SpecialSaleCustomerCategory =
+  | 'FACULTY'
+  | 'COLLEGE_STAFF'
+  | 'BULK_ORDER'
+  | 'INSTITUTIONAL_ORDER'
+  | 'CORPORATE'
+  | 'GUEST_VIP'
+  | 'OTHER';
+
+export interface SpecialSaleItem {
+  id: string;
+  specialSaleId: string;
+  productId: string;
+  quantity: number;
+  standardPrice: number;
+  specialPrice: number;
+  isPriceOverridden: boolean;
+  overrideReason?: string | null;
+  discountAmount: number;
+  lineTotal: number;
+  createdAt: string;
+  product?: {
+    id: string;
+    name: string;
+    projectId?: string;
+    basePrice?: number | null;
+    project?: {
+      id: string;
+      name: string;
+      code: string;
+    };
+    inventory?: {
+      quantityOnHand: number;
+    } | null;
+  };
+}
+
+export interface SpecialSalePayment {
+  id: string;
+  specialSaleId: string;
+  paymentMethod: string;
+  amount: number;
+  cashAmount?: number | null;
+  upiAmount?: number | null;
+  reference?: string | null;
+  notes?: string | null;
+  recordedById?: string | null;
+  recordedByName?: string | null;
+  paidAt: string;
+  createdAt: string;
+}
+
+export interface SpecialSale {
+  id: string;
+  reference: string;
+  orderNumber: number;
+  customerName: string;
+  customerCategory: string;
+  contactPerson?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  billingAddress?: string | null;
+  department?: string | null;
+  notes?: string | null;
+  status: SpecialSaleStatus;
+  paymentStatus: SpecialSalePaymentStatus;
+  paymentMethod?: string | null;
+  subtotal: number;
+  discountAmount: number;
+  discountPercentage?: number | null;
+  discountReason?: string | null;
+  additionalCharges: number;
+  chargesReason?: string | null;
+  totalAmount: number;
+  amountPaid: number;
+  balanceDue: number;
+  totalUnits: number;
+  totalItems: number;
+  createdById?: string | null;
+  createdByName?: string | null;
+  lastModifiedById?: string | null;
+  lastModifiedByName?: string | null;
+  confirmedAt?: string | null;
+  confirmedById?: string | null;
+  confirmedByName?: string | null;
+  fulfilledAt?: string | null;
+  fulfilledById?: string | null;
+  fulfilledByName?: string | null;
+  cancelledAt?: string | null;
+  cancelledById?: string | null;
+  cancelledByName?: string | null;
+  cancelReason?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  items: SpecialSaleItem[];
+  payments: SpecialSalePayment[];
+  whatsappDeliveries?: Array<{
+    id: string;
+    status: string;
+    customerPhone: string;
+    lastAttemptAt?: string | null;
+    sentAt?: string | null;
+    lastError?: string | null;
+  }>;
+}
+
+export interface SpecialSalesStats {
+  totalRevenue: number;
+  totalBilled: number;
+  totalOrders: number;
+  totalUnits: number;
+  pendingPaymentsCount: number;
+  outstandingAmount: number;
+  pendingFulfilmentCount: number;
+  completedOrdersCount: number;
+  draftOrdersCount: number;
+  cancelledOrdersCount: number;
+  categoryBreakdown: Array<{
+    category: string;
+    count: number;
+    billed: number;
+    received: number;
+  }>;
+  projectBreakdown: Array<{
+    projectId: string;
+    projectName: string;
+    units: number;
+    amount: number;
+  }>;
+}

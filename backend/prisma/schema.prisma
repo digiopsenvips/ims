@@ -121,6 +121,7 @@ model Product {
   loseRewardGames Game[]            @relation("GameLoseReward")
   rewardSessions  GameSession[]
   comboItems      ComboItem[]
+  specialSaleItems SpecialSaleItem[]
 
   @@index([projectId])
   @@index([isArchived])
@@ -364,6 +365,7 @@ model WhatsAppDelivery {
   id                String    @id @default(uuid())
   receiptNumber     Int       @map("receipt_number")
   saleId            Int?      @unique @map("sale_id")
+  specialSaleId     String?   @map("special_sale_id")
   customerName      String?   @map("customer_name")
   customerPhone     String    @map("customer_phone")
   billSnapshot      Json      @map("bill_snapshot")
@@ -382,11 +384,13 @@ model WhatsAppDelivery {
   createdAt         DateTime  @default(now()) @map("created_at")
   updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  sale              Sale?     @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  sale              Sale?        @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  specialSale       SpecialSale? @relation(fields: [specialSaleId], references: [id], onDelete: SetNull)
 
   @@index([status])
   @@index([receiptNumber])
   @@index([saleId])
+  @@index([specialSaleId])
   @@index([nextAttemptAt])
   @@index([createdAt])
   @@map("whatsapp_deliveries")
@@ -413,5 +417,104 @@ model WhatsAppConfig {
   updatedAt             DateTime @updatedAt @map("updated_at")
 
   @@map("whatsapp_config")
+}
+
+model SpecialSale {
+  id                 String               @id @default(uuid())
+  reference          String               @unique @map("reference") // e.g. SS-1001
+  orderNumber        Int                  @unique @map("order_number")
+  customerName       String               @map("customer_name")
+  customerCategory   String               @map("customer_category") // FACULTY, COLLEGE_STAFF, BULK_ORDER, INSTITUTIONAL_ORDER, CORPORATE, GUEST_VIP, OTHER
+  contactPerson      String?              @map("contact_person")
+  phone              String?              @map("phone")
+  email              String?              @map("email")
+  billingAddress     String?              @map("billing_address")
+  department         String?              @map("department")
+  notes              String?              @map("notes")
+  status             String               @default("DRAFT") @map("status") // DRAFT, CONFIRMED, FULFILLED, CANCELLED
+  paymentStatus      String               @default("UNPAID") @map("payment_status") // UNPAID, PARTIALLY_PAID, PAID, REFUNDED
+  paymentMethod      String?              @map("payment_method") // CASH, UPI, CASH_UPI, BANK_TRANSFER, OTHER
+  subtotal           Decimal              @default(0) @map("subtotal") @db.Decimal(10, 2)
+  discountAmount     Decimal              @default(0) @map("discount_amount") @db.Decimal(10, 2)
+  discountPercentage Decimal?             @map("discount_percentage") @db.Decimal(5, 2)
+  discountReason     String?              @map("discount_reason")
+  additionalCharges  Decimal              @default(0) @map("additional_charges") @db.Decimal(10, 2)
+  chargesReason      String?              @map("charges_reason")
+  totalAmount        Decimal              @default(0) @map("total_amount") @db.Decimal(10, 2)
+  amountPaid         Decimal              @default(0) @map("amount_paid") @db.Decimal(10, 2)
+  balanceDue         Decimal              @default(0) @map("balance_due") @db.Decimal(10, 2)
+  totalUnits         Int                  @default(0) @map("total_units")
+  totalItems         Int                  @default(0) @map("total_items")
+
+  // Audit Trail
+  createdById        String?              @map("created_by_id")
+  createdByName      String?              @map("created_by_name")
+  lastModifiedById   String?              @map("last_modified_by_id")
+  lastModifiedByName String?              @map("last_modified_by_name")
+  confirmedAt        DateTime?            @map("confirmed_at")
+  confirmedById      String?              @map("confirmed_by_id")
+  confirmedByName    String?              @map("confirmed_by_name")
+  fulfilledAt        DateTime?            @map("fulfilled_at")
+  fulfilledById      String?              @map("fulfilled_by_id")
+  fulfilledByName    String?              @map("fulfilled_by_name")
+  cancelledAt        DateTime?            @map("cancelled_at")
+  cancelledById      String?              @map("cancelled_by_id")
+  cancelledByName    String?              @map("cancelled_by_name")
+  cancelReason       String?              @map("cancel_reason")
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+
+  items              SpecialSaleItem[]
+  payments           SpecialSalePayment[]
+  whatsappDeliveries WhatsAppDelivery[]
+
+  @@index([status])
+  @@index([paymentStatus])
+  @@index([customerCategory])
+  @@index([createdAt])
+  @@index([reference])
+  @@map("special_sales")
+}
+
+model SpecialSaleItem {
+  id                String      @id @default(uuid())
+  specialSaleId     String      @map("special_sale_id")
+  productId         String      @map("product_id")
+  quantity          Int
+  standardPrice     Decimal     @map("standard_price") @db.Decimal(10, 2)
+  specialPrice      Decimal     @map("special_price") @db.Decimal(10, 2)
+  isPriceOverridden Boolean     @default(false) @map("is_price_overridden")
+  overrideReason    String?     @map("override_reason")
+  discountAmount    Decimal     @default(0) @map("discount_amount") @db.Decimal(10, 2)
+  lineTotal         Decimal     @map("line_total") @db.Decimal(10, 2)
+  createdAt         DateTime    @default(now()) @map("created_at")
+
+  specialSale       SpecialSale @relation(fields: [specialSaleId], references: [id], onDelete: Cascade)
+  product           Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([specialSaleId])
+  @@index([productId])
+  @@map("special_sale_items")
+}
+
+model SpecialSalePayment {
+  id             String      @id @default(uuid())
+  specialSaleId  String      @map("special_sale_id")
+  paymentMethod  String      @map("payment_method") // CASH, UPI, CASH_UPI, BANK_TRANSFER, OTHER
+  amount         Decimal     @db.Decimal(10, 2)
+  cashAmount     Decimal?    @map("cash_amount") @db.Decimal(10, 2)
+  upiAmount      Decimal?    @map("upi_amount") @db.Decimal(10, 2)
+  reference      String?
+  notes          String?
+  recordedById   String?     @map("recorded_by_id")
+  recordedByName String?     @map("recorded_by_name")
+  paidAt         DateTime    @default(now()) @map("paid_at")
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  specialSale    SpecialSale @relation(fields: [specialSaleId], references: [id], onDelete: Cascade)
+
+  @@index([specialSaleId])
+  @@index([paidAt])
+  @@map("special_sale_payments")
 }
 

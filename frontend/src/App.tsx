@@ -23,6 +23,7 @@ import { GameSessionsPage } from './pages/GameSessionsPage';
 import { CustomerGameQrPage } from './pages/CustomerGameQrPage';
 import { CombosPage } from './pages/CombosPage';
 import { WhatsAppBillingPage } from './pages/WhatsAppBillingPage';
+import { SpecialSalesPage } from './pages/SpecialSalesPage';
 
 export const App: React.FC = () => {
   const { user, isMember } = useAuth();
@@ -137,6 +138,15 @@ export const App: React.FC = () => {
           element={
             <ProtectedRoute>
               <SalesManagementPage />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="special-sales"
+          element={
+            <ProtectedRoute allowedRoles={['DEVELOPER', 'ADMIN']}>
+              <SpecialSalesPage />
             </ProtectedRoute>
           }
         />

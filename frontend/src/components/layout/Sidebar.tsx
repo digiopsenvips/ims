@@ -18,6 +18,7 @@ import {
   History,
   Gift,
   MessageCircle,
+  Briefcase,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -49,6 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
     if (to === '/dashboard') return currentPath === '/dashboard';
     if (to.startsWith('/sales-entry')) return currentPath === '/sales-entry';
     if (to === '/sales') return currentPath === '/sales';
+    if (to === '/special-sales') return currentPath.startsWith('/special-sales');
     if (to === '/events') return currentPath === '/events' || currentPath.startsWith('/events/');
     if (to === '/combos') return currentPath === '/combos';
     if (to === '/games') return currentPath === '/games';
@@ -91,6 +93,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           to: '/sales',
           icon: ReceiptText,
           show: !isMember,
+        },
+        {
+          label: 'Special Sales',
+          to: '/special-sales',
+          icon: Briefcase,
+          badge: 'BULK',
+          show: isDeveloper || isAdmin,
         },
       ],
     },
