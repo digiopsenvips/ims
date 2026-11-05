@@ -42,7 +42,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
             <div>
               <h2 className="text-lg font-bold text-slate-900">
-                {this.props.fallbackTitle || 'Unable to Load Stall Console'}
+                {this.props.fallbackTitle || 'Something Went Wrong'}
               </h2>
               <p className="text-xs text-slate-500 mt-1">
                 {this.props.fallbackMessage ||
@@ -65,12 +65,12 @@ export class ErrorBoundary extends Component<Props, State> {
               <button
                 type="button"
                 onClick={() => {
-                  window.location.href = '/events';
+                  window.location.href = '/dashboard';
                 }}
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition-colors cursor-pointer"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Back to Events</span>
+                <span>Back to Dashboard</span>
               </button>
             </div>
           </div>

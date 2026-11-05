@@ -144,14 +144,23 @@ export const SpecialSalesPage: React.FC = () => {
     setIsLoadingCatalog(true);
     try {
       const [prodsRes, invRes] = await Promise.all([
-        api.get<Product[]>('/products'),
-        api.get<any[]>('/inventory'),
+        api.get<any>('/products'),
+        api.get<any>('/inventory'),
       ]);
-      setCatalogProducts(prodsRes || []);
+      const prodsList = Array.isArray(prodsRes)
+        ? prodsRes
+        : (prodsRes?.products && Array.isArray(prodsRes.products) ? prodsRes.products : []);
+      setCatalogProducts(prodsList);
+
+      const invList = Array.isArray(invRes)
+        ? invRes
+        : (invRes?.inventory && Array.isArray(invRes.inventory) ? invRes.inventory : []);
 
       const stockMap: Record<string, number> = {};
-      for (const item of invRes || []) {
-        stockMap[item.productId] = item.warehouseStock ?? item.quantityOnHand ?? 0;
+      for (const item of invList) {
+        if (item && item.productId) {
+          stockMap[item.productId] = item.warehouseStock ?? item.quantityOnHand ?? 0;
+        }
       }
       setWarehouseStockMap(stockMap);
     } catch (err: any) {
@@ -851,9 +860,12 @@ const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
   const [paymentReference, setPaymentReference] = useState('');
   const [sendWhatsApp, setSendWhatsApp] = useState(true);
 
+  // Defensive safe product array
+  const safeProducts = useMemo(() => (Array.isArray(products) ? products : []), [products]);
+
   // Filtered Products for Picker
   const filteredCatalog = useMemo(() => {
-    return products.filter(p => {
+    return safeProducts.filter(p => {
       if (p.isDeleted || p.isArchived) return false;
       if (projectFilter !== 'ALL' && p.projectId !== projectFilter) return false;
       if (productSearch.trim()) {
@@ -862,15 +874,15 @@ const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
       }
       return true;
     });
-  }, [products, projectFilter, productSearch]);
+  }, [safeProducts, projectFilter, productSearch]);
 
   const uniqueProjects = useMemo(() => {
     const map = new Map<string, string>();
-    for (const p of products) {
-      if (p.project) map.set(p.project.id, p.project.name);
+    for (const p of safeProducts) {
+      if (p?.project) map.set(p.project.id, p.project.name);
     }
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [products]);
+  }, [safeProducts]);
 
   // Add product to cart
   const handleAddProduct = (prod: Product) => {
