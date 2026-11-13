@@ -454,6 +454,13 @@ export interface AnalyticsData {
     totalSalesRecords: number;
     totalUnitsSold: number;
     totalRevenue: number | null;
+    stallSalesRecords?: number;
+    stallUnitsSold?: number;
+    specialSalesOrdersCount?: number;
+    specialSalesUnitsSold?: number;
+    stallRevenue?: number | null;
+    specialSalesRevenue?: number | null;
+    combinedTotalRevenue?: number | null;
   };
   productShare: {
     name: string;
@@ -521,6 +528,13 @@ export interface AnalyticsData {
       unitsSold: number;
     }[];
   };
+  specialSalesAnalytics?: {
+    ordersCount: number;
+    totalBilled: number;
+    totalRevenue: number;
+    outstandingAmount: number;
+    totalUnits: number;
+  } | null;
 }
 
 export interface CartItem {

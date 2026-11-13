@@ -18,6 +18,8 @@ import {
   Percent,
   Banknote,
   Package,
+  Briefcase,
+  ReceiptText,
 } from 'lucide-react';
 import {
   PieChart,
@@ -259,6 +261,128 @@ export const AnalyticsPage: React.FC = () => {
         </div>
       ) : (
         <>
+          {/* Executive Overview KPI Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Total Revenue */}
+            {canViewRevenue && analytics.overview.totalRevenue !== null && (
+              <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    Total Revenue
+                  </span>
+                  <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center justify-center font-bold text-xs">
+                    ₹
+                  </div>
+                </div>
+                <div className="text-2xl font-black text-slate-900 mt-2 tracking-tight">
+                  ₹{analytics.overview.totalRevenue.toLocaleString('en-IN', {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 0,
+                  })}
+                </div>
+                {Boolean(analytics.overview.specialSalesRevenue && analytics.overview.specialSalesRevenue > 0) ? (
+                  <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+                    <span>Stalls: <strong className="text-slate-800">₹{(analytics.overview.stallRevenue || 0).toLocaleString('en-IN')}</strong></span>
+                    <Link to="/special-sales" className="text-purple-700 font-semibold hover:underline">
+                      Special: ₹{Number(analytics.overview.specialSalesRevenue || 0).toLocaleString('en-IN')}
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-500 mt-1">Across all matching transactions</div>
+                )}
+              </div>
+            )}
+
+            {/* Total Units Sold */}
+            <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                  Units Sold
+                </span>
+                <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-700 border border-blue-100 flex items-center justify-center">
+                  <Package className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-2xl font-black text-slate-900 mt-2 tracking-tight">
+                {analytics.overview.totalUnitsSold}
+              </div>
+              {analytics.overview.specialSalesUnitsSold !== undefined && analytics.overview.specialSalesUnitsSold > 0 ? (
+                <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>Stalls: <strong className="text-slate-800">{analytics.overview.stallUnitsSold || 0}</strong></span>
+                  <span>Special: <strong className="text-purple-800">{analytics.overview.specialSalesUnitsSold}</strong></span>
+                </div>
+              ) : (
+                <div className="text-xs text-slate-500 mt-1">Total physical products & bundles</div>
+              )}
+            </div>
+
+            {/* Total Transactions / Orders */}
+            <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                  Total Orders
+                </span>
+                <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-700 border border-purple-100 flex items-center justify-center">
+                  <ReceiptText className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="text-2xl font-black text-slate-900 mt-2 tracking-tight">
+                {analytics.overview.totalSalesRecords}
+              </div>
+              {analytics.overview.specialSalesOrdersCount !== undefined && analytics.overview.specialSalesOrdersCount > 0 ? (
+                <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>Stall bills: <strong className="text-slate-800">{analytics.overview.stallSalesRecords || 0}</strong></span>
+                  <span>Special: <strong className="text-purple-800">{analytics.overview.specialSalesOrdersCount}</strong></span>
+                </div>
+              ) : (
+                <div className="text-xs text-slate-500 mt-1">Recorded sales & order receipts</div>
+              )}
+            </div>
+
+            {/* Special Sales / Institutional Orders Quick Tile */}
+            {analytics.specialSalesAnalytics && (isDeveloper || isAdmin) ? (
+              <div className="bg-purple-50/50 p-5 rounded-2xl border border-purple-200/80 shadow-xs flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-purple-700 uppercase tracking-wider">
+                    Special Sales (B2B)
+                  </span>
+                  <div className="w-8 h-8 rounded-xl bg-purple-100 text-purple-700 border border-purple-200 flex items-center justify-center">
+                    <Briefcase className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl font-black text-purple-950 mt-2 tracking-tight">
+                  ₹{analytics.specialSalesAnalytics.totalRevenue.toLocaleString('en-IN')}
+                </div>
+                <div className="mt-2 pt-2 border-t border-purple-200/60 flex items-center justify-between text-[11px]">
+                  <span className="text-purple-700">
+                    Billed: ₹{analytics.specialSalesAnalytics.totalBilled.toLocaleString('en-IN')}
+                  </span>
+                  <Link
+                    to="/special-sales"
+                    className="text-purple-900 font-bold hover:underline"
+                  >
+                    Manage →
+                  </Link>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    Stalls Active
+                  </span>
+                  <div className="w-8 h-8 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 flex items-center justify-center">
+                    <Store className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl font-black text-slate-900 mt-2 tracking-tight">
+                  {events.length}
+                </div>
+                <div className="text-xs text-slate-500 mt-1">Total configured pop-up events</div>
+              </div>
+            )}
+          </div>
+
           {/* Top Charts Grid: Donut Chart & Timeline */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
             {/* Donut Chart: Sales Share by Product / Project */}

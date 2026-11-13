@@ -418,6 +418,42 @@ router.get(
 
       const totalCalculatedUnits = summaryUnits._sum.quantity ?? summaryRevenue._sum.quantity ?? 0;
 
+      // Special Sales revenue and units for all-time organizational summaries
+      let specialSalesRevenue = 0;
+      let specialSalesUnits = 0;
+      let specialSalesOrders = 0;
+
+      if (!eventId && canViewRevenue) {
+        const ssAggWhere: any = {
+          status: { in: ['CONFIRMED', 'FULFILLED'] },
+        };
+        if (startDate || endDate) {
+          ssAggWhere.createdAt = businessDateRange(startDate, endDate);
+        }
+        if (productId) {
+          ssAggWhere.items = {
+            some: { productId: String(productId) },
+          };
+        }
+        const ssAgg = await prisma.specialSale.aggregate({
+          where: ssAggWhere,
+          _sum: {
+            amountPaid: true,
+            totalUnits: true,
+          },
+          _count: {
+            id: true,
+          },
+        });
+        specialSalesRevenue = Math.round(Number(ssAgg._sum.amountPaid || 0) * 100) / 100;
+        specialSalesUnits = Number(ssAgg._sum.totalUnits || 0);
+        specialSalesOrders = ssAgg._count.id || 0;
+      }
+
+      const stallRevenue = Number(summaryRevenue._sum.totalAmount || 0);
+      const combinedRevenue = Math.round((stallRevenue + specialSalesRevenue) * 100) / 100;
+      const combinedUnits = totalCalculatedUnits + specialSalesUnits;
+
       res.json({
         sales: sanitized,
         data: sanitized,
@@ -430,8 +466,14 @@ router.get(
           hasPreviousPage: !isAll && page > 1,
         },
         summary: {
-          totalUnits: totalCalculatedUnits,
-          totalRevenue: canViewRevenue ? Number(summaryRevenue._sum.totalAmount || 0) : null,
+          totalUnits: combinedUnits,
+          stallUnits: totalCalculatedUnits,
+          specialSalesUnits,
+          totalRevenue: canViewRevenue ? combinedRevenue : null,
+          stallRevenue: canViewRevenue ? stallRevenue : null,
+          specialSalesRevenue: canViewRevenue ? specialSalesRevenue : 0,
+          overallRevenue: canViewRevenue ? combinedRevenue : null,
+          specialSalesOrders,
         },
         totalCount: totalRecords,
       });

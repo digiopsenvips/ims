@@ -18,6 +18,7 @@ import {
   Activity,
   Gamepad2,
   Dices,
+  Briefcase,
 } from 'lucide-react';
 
 export const DashboardPage: React.FC = () => {
@@ -27,6 +28,14 @@ export const DashboardPage: React.FC = () => {
   const [sales, setSales] = useState<Sale[]>([]);
   const [events, setEvents] = useState<AppEvent[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [specialSalesStats, setSpecialSalesStats] = useState<{
+    totalRevenue: number;
+    totalBilled: number;
+    totalOrders: number;
+    totalUnits: number;
+    outstandingAmount: number;
+    completedOrdersCount: number;
+  } | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   const canViewRevenue = isDeveloper || isAdmin || hasPermission('view_revenue');
@@ -34,13 +43,25 @@ export const DashboardPage: React.FC = () => {
 
   const loadDashboardData = async () => {
     try {
-      const [salesRes, eventsRes] = await Promise.all([
+      const promises: Promise<any>[] = [
         api.get('/sales?all=true'),
         api.get('/events'),
-      ]);
+      ];
+
+      if (canViewRevenue && (isDeveloper || isAdmin)) {
+        promises.push(
+          api.get('/special-sales/stats').catch(err => {
+            console.error('Failed to load special sales stats for dashboard:', err);
+            return null;
+          })
+        );
+      }
+
+      const [salesRes, eventsRes, ssStatsRes] = await Promise.all(promises);
 
       if (salesRes?.sales) setSales(salesRes.sales);
       if (eventsRes?.events) setEvents(eventsRes.events);
+      if (ssStatsRes) setSpecialSalesStats(ssStatsRes);
 
       if (canViewInventory) {
         const invRes = await api.get('/inventory');
@@ -65,12 +86,22 @@ export const DashboardPage: React.FC = () => {
     socket.on('inventory:updated', loadDashboardData);
     socket.on('event:updated', loadDashboardData);
     socket.on('game:played', loadDashboardData);
+    socket.on('special_sale_created', loadDashboardData);
+    socket.on('special_sale_confirmed', loadDashboardData);
+    socket.on('special_sale_fulfilled', loadDashboardData);
+    socket.on('special_sale_cancelled', loadDashboardData);
+    socket.on('special_sale_payment_recorded', loadDashboardData);
 
     return () => {
       socket.off('sale:created', loadDashboardData);
       socket.off('inventory:updated', loadDashboardData);
       socket.off('event:updated', loadDashboardData);
       socket.off('game:played', loadDashboardData);
+      socket.off('special_sale_created', loadDashboardData);
+      socket.off('special_sale_confirmed', loadDashboardData);
+      socket.off('special_sale_fulfilled', loadDashboardData);
+      socket.off('special_sale_cancelled', loadDashboardData);
+      socket.off('special_sale_payment_recorded', loadDashboardData);
     };
   }, [socket]);
 
@@ -115,10 +146,17 @@ export const DashboardPage: React.FC = () => {
     return Number(s.quantity) || 0;
   };
 
-  const totalUnitsSold = sales.reduce((acc, s) => acc + getSaleUnits(s), 0);
-  const totalRevenue = sales.reduce((acc, s) => acc + (Number(s.totalAmount) || 0), 0);
+  const regularUnitsSold = sales.reduce((acc, s) => acc + getSaleUnits(s), 0);
+  const specialUnitsSold = specialSalesStats?.totalUnits || 0;
+  const totalUnitsSold = regularUnitsSold + specialUnitsSold;
+
+  const regularRevenue = sales.reduce((acc, s) => acc + (Number(s.totalAmount) || 0), 0);
+  const specialRevenue = specialSalesStats?.totalRevenue || 0;
+  const overallRevenue = Math.round((regularRevenue + specialRevenue) * 100) / 100;
+
   const totalStockOnHand = inventory.reduce((acc, i) => acc + (Number(i.quantityOnHand) || 0), 0);
-  const averageTransactionValue = sales.length > 0 ? totalRevenue / sales.length : 0;
+  const totalTxCount = sales.length + (specialSalesStats?.totalOrders || 0);
+  const averageTransactionValue = totalTxCount > 0 ? overallRevenue / totalTxCount : 0;
 
   // Games stats breakdown
   const gameSales = useMemo(() => {
@@ -347,12 +385,25 @@ export const DashboardPage: React.FC = () => {
               </div>
             </div>
             <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-3 tracking-tight">
-              ₹{totalRevenue.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+              ₹{overallRevenue.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
             </div>
-            <div className="text-xs text-slate-500 mt-1.5 flex items-center gap-1.5">
+            <div className="text-xs text-slate-500 mt-1.5 flex items-center gap-1.5 flex-wrap">
               <span className="text-emerald-700 font-bold">All-time</span>
-              <span>across {sales.length} transactions</span>
+              <span>across {totalTxCount} transactions</span>
             </div>
+            {canViewRevenue && (isDeveloper || isAdmin) && specialRevenue > 0 && (
+              <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                <span className="text-slate-500">
+                  Stalls: <strong className="text-slate-800">₹{regularRevenue.toLocaleString('en-IN')}</strong>
+                </span>
+                <Link
+                  to="/special-sales"
+                  className="text-purple-700 hover:text-purple-900 font-semibold hover:underline"
+                >
+                  Special: ₹{specialRevenue.toLocaleString('en-IN')}
+                </Link>
+              </div>
+            )}
           </div>
         ) : (
           <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:border-slate-300 transition-all flex flex-col justify-between h-full">
@@ -365,9 +416,9 @@ export const DashboardPage: React.FC = () => {
               </div>
             </div>
             <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-3 tracking-tight">
-              {sales.length}
+              {totalTxCount}
             </div>
-            <div className="text-xs text-slate-500 mt-1.5">Recorded sales receipts</div>
+            <div className="text-xs text-slate-500 mt-1.5">Recorded transactions</div>
           </div>
         )}
 
@@ -387,6 +438,12 @@ export const DashboardPage: React.FC = () => {
           <div className="text-xs text-slate-500 mt-1.5 flex items-center gap-1.5">
             <span className="font-semibold text-slate-700">{events.length}</span> stalls & events held
           </div>
+          {canViewRevenue && (isDeveloper || isAdmin) && specialUnitsSold > 0 && (
+            <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+              <span>Stall items: <strong className="text-slate-800">{regularUnitsSold}</strong></span>
+              <span>Special: <strong className="text-purple-800">{specialUnitsSold}</strong></span>
+            </div>
+          )}
         </div>
 
         {/* Average Transaction Value (ATV) */}
@@ -623,6 +680,20 @@ export const DashboardPage: React.FC = () => {
                     <div className="text-[11px] text-slate-500 mt-0.5">Tahsin & Upcycle catalog</div>
                   </div>
                   <FolderTree className="w-4 h-4 text-slate-400 group-hover:text-slate-700 transition-colors shrink-0 mt-0.5" />
+                </Link>
+
+                <Link
+                  to="/special-sales"
+                  className="p-3.5 bg-purple-50/40 hover:bg-purple-100/50 border border-purple-200/70 hover:border-purple-300 rounded-xl transition-all group flex items-start justify-between cursor-pointer"
+                >
+                  <div>
+                    <div className="text-xs font-bold text-slate-900 group-hover:text-purple-900 transition-colors flex items-center gap-1.5">
+                      <Briefcase className="w-3.5 h-3.5 text-purple-600" />
+                      <span>Special Sales</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">Bulk orders & institutional sales</div>
+                  </div>
+                  <ArrowUpRight className="w-4 h-4 text-purple-400 group-hover:text-purple-700 transition-colors shrink-0 mt-0.5" />
                 </Link>
 
                 <Link

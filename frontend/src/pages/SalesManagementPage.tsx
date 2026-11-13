@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import { api } from '../lib/api';
@@ -28,6 +28,7 @@ import {
   Loader2,
   Eye,
   ShieldCheck,
+  Briefcase,
   Copy,
   CheckCircle2,
   Lock,
@@ -100,7 +101,13 @@ export const SalesManagementPage: React.FC = () => {
   const [sales, setSales] = useState<Sale[]>([]);
   const [events, setEvents] = useState<AppEvent[]>([]);
   const [totalRecords, setTotalRecords] = useState<number>(0);
-  const [summary, setSummary] = useState<{ totalUnits: number; totalRevenue: number | null }>({
+  const [summary, setSummary] = useState<{
+    totalUnits: number;
+    totalRevenue: number | null;
+    stallRevenue?: number | null;
+    specialSalesRevenue?: number | null;
+    specialSalesOrders?: number;
+  }>({
     totalUnits: 0,
     totalRevenue: 0,
   });
@@ -266,6 +273,9 @@ export const SalesManagementPage: React.FC = () => {
         setSummary({
           totalUnits: res.summary.totalUnits ?? 0,
           totalRevenue: res.summary.totalRevenue ?? null,
+          stallRevenue: res.summary.stallRevenue ?? null,
+          specialSalesRevenue: res.summary.specialSalesRevenue ?? 0,
+          specialSalesOrders: res.summary.specialSalesOrders ?? 0,
         });
       } else {
         setSummary({
@@ -845,6 +855,17 @@ export const SalesManagementPage: React.FC = () => {
                 ))}
               </div>
             </div>
+
+            {(isDeveloper || isAdmin) && (
+              <Link
+                to="/special-sales"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 transition-colors whitespace-nowrap"
+                title="Manage institutional orders & bulk sales"
+              >
+                <Briefcase className="w-3.5 h-3.5 text-purple-600" />
+                <span>Special Sales Ledger</span>
+              </Link>
+            )}
           </div>
         </div>
 
@@ -861,11 +882,24 @@ export const SalesManagementPage: React.FC = () => {
             </div>
           </div>
           {canViewRevenue && summary.totalRevenue !== null && (
-            <div className="px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg">
-              <span className="text-slate-600 text-[11px] font-medium mr-1.5">Total Revenue:</span>
-              <span className="font-black text-emerald-800 text-xs sm:text-sm">
-                ₹{summary.totalRevenue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg">
+                <span className="text-slate-600 text-[11px] font-medium mr-1.5">
+                  {summary.specialSalesRevenue && summary.specialSalesRevenue > 0 ? 'Combined Revenue:' : 'Total Revenue:'}
+                </span>
+                <span className="font-black text-emerald-800 text-xs sm:text-sm">
+                  ₹{summary.totalRevenue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+              {Boolean(summary.specialSalesRevenue && summary.specialSalesRevenue > 0) && (
+                <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-slate-500 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
+                  <span>Stalls: <strong className="text-slate-800">₹{(summary.stallRevenue ?? (summary.totalRevenue - Number(summary.specialSalesRevenue || 0))).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong></span>
+                  <span>•</span>
+                  <Link to="/special-sales" className="text-purple-700 hover:text-purple-900 font-semibold hover:underline">
+                    Special: ₹{Number(summary.specialSalesRevenue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </Link>
+                </div>
+              )}
             </div>
           )}
         </div>

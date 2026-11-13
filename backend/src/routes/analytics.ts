@@ -140,6 +140,104 @@ router.get(
         }
       }
 
+      // Special Sales aggregation (for organizational-level analytics when not scoped to a specific stall/event)
+      let specialSalesSummary: any = null;
+      let specialSalesRevenue = 0;
+      let specialSalesUnits = 0;
+      let specialSalesOrdersCount = 0;
+
+      if (!eventId && canViewRevenue) {
+        const specialSaleWhere: any = {
+          status: { in: ['CONFIRMED', 'FULFILLED'] },
+        };
+        if (startDate || endDate) {
+          specialSaleWhere.createdAt = businessDateRange(startDate, endDate);
+        }
+        if (projectId) {
+          specialSaleWhere.items = {
+            some: {
+              product: { projectId: String(projectId) },
+            },
+          };
+        }
+
+        const specialSales = await prisma.specialSale.findMany({
+          where: specialSaleWhere,
+          include: {
+            items: {
+              include: {
+                product: {
+                  include: { project: true },
+                },
+              },
+            },
+            payments: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+
+        let ssBilled = 0;
+        let ssReceived = 0;
+        let ssOutstanding = 0;
+        let ssUnits = 0;
+
+        for (const ss of specialSales) {
+          const billed = Number(ss.totalAmount) || 0;
+          const received = Number(ss.amountPaid) || 0;
+          const balance = Number(ss.balanceDue) || 0;
+          const units = Number(ss.totalUnits) || 0;
+
+          const matchingItems = projectId
+            ? ss.items.filter(it => it.product?.projectId === String(projectId))
+            : ss.items;
+
+          if (projectId && matchingItems.length === 0) continue;
+
+          specialSalesOrdersCount++;
+          ssBilled += billed;
+          ssReceived += received;
+          ssOutstanding += balance;
+          ssUnits += units;
+
+          // Add to time trend (Daily Sales Timeline)
+          const date = businessDay(ss.createdAt);
+          if (!dateMap[date]) dateMap[date] = { date, units: 0, revenue: 0 };
+          dateMap[date].units += units;
+          dateMap[date].revenue += received;
+
+          // Add to product and project share
+          for (const it of matchingItems) {
+            const pId = it.productId;
+            const pName = it.product?.name || 'Special Item';
+            const prjName = it.product?.project?.name || 'General';
+            const itRev = Number(it.lineTotal) || (Number(it.specialPrice) * it.quantity) || 0;
+
+            if (!productMap[pId]) {
+              productMap[pId] = { name: pName, project: prjName, units: 0, revenue: 0 };
+            }
+            productMap[pId].units += it.quantity;
+            productMap[pId].revenue += itRev;
+
+            if (!projectMap[prjName]) {
+              projectMap[prjName] = { name: prjName, units: 0, revenue: 0 };
+            }
+            projectMap[prjName].units += it.quantity;
+            projectMap[prjName].revenue += itRev;
+          }
+        }
+
+        specialSalesRevenue = Math.round(ssReceived * 100) / 100;
+        specialSalesUnits = ssUnits;
+
+        specialSalesSummary = {
+          ordersCount: specialSalesOrdersCount,
+          totalBilled: Math.round(ssBilled * 100) / 100,
+          totalRevenue: specialSalesRevenue,
+          outstandingAmount: Math.round(ssOutstanding * 100) / 100,
+          totalUnits: specialSalesUnits,
+        };
+      }
+
       // Convert product share to array
       const productShare = Object.values(productMap).map(p => ({
         name: p.name,
@@ -332,50 +430,24 @@ router.get(
         revenue: canViewRevenue ? c.revenue : undefined,
       }));
 
-      // Special Sales Summary (Only for Developer and Admin, and not scoped to an event)
-      let specialSalesSummary: any = null;
-      if ((isDev || isAdmin) && !eventId) {
-        const specialSales = await prisma.specialSale.findMany({
-          where: {
-            status: { in: ['CONFIRMED', 'FULFILLED'] },
-            ...(startDate || endDate ? { createdAt: businessDateRange(startDate, endDate) } : {}),
-          },
-          select: {
-            totalAmount: true,
-            amountPaid: true,
-            balanceDue: true,
-            totalUnits: true,
-          },
-        });
-
-        let ssBilled = 0;
-        let ssReceived = 0;
-        let ssOutstanding = 0;
-        let ssUnits = 0;
-        for (const ss of specialSales) {
-          ssBilled += Number(ss.totalAmount) || 0;
-          ssReceived += Number(ss.amountPaid) || 0;
-          ssOutstanding += Number(ss.balanceDue) || 0;
-          ssUnits += ss.totalUnits;
-        }
-
-        specialSalesSummary = {
-          ordersCount: specialSales.length,
-          totalBilled: Math.round(ssBilled * 100) / 100,
-          totalRevenue: Math.round(ssReceived * 100) / 100,
-          outstandingAmount: Math.round(ssOutstanding * 100) / 100,
-          totalUnits: ssUnits,
-        };
-      }
+      const combinedTotalRevenue = Math.round((totalRevenue + specialSalesRevenue) * 100) / 100;
+      const combinedTotalUnits = totalUnitsSold + specialSalesUnits;
+      const combinedRecordsCount = sales.length + specialSalesOrdersCount;
 
       res.json({
         canViewRevenue,
         canViewEventBreakdown,
         overview: {
-          totalSalesRecords: sales.length,
-          totalUnitsSold,
-          totalRevenue: canViewRevenue ? totalRevenue : null,
-          combinedTotalRevenue: canViewRevenue ? Math.round((totalRevenue + (specialSalesSummary?.totalRevenue || 0)) * 100) / 100 : null,
+          totalSalesRecords: combinedRecordsCount,
+          totalUnitsSold: combinedTotalUnits,
+          stallSalesRecords: sales.length,
+          stallUnitsSold: totalUnitsSold,
+          specialSalesOrdersCount,
+          specialSalesUnitsSold: specialSalesUnits,
+          totalRevenue: canViewRevenue ? combinedTotalRevenue : null,
+          stallRevenue: canViewRevenue ? totalRevenue : null,
+          specialSalesRevenue: canViewRevenue ? specialSalesRevenue : 0,
+          combinedTotalRevenue: canViewRevenue ? combinedTotalRevenue : null,
         },
         productShare,
         projectShare,
