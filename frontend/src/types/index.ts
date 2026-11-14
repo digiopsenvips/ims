@@ -1,5 +1,7 @@
 export type Role = 'DEVELOPER' | 'ADMIN' | 'HEAD' | 'MEMBER';
 
+export type UserStatus = 'ACTIVE' | 'RETIRED' | 'SUSPENDED';
+
 export type EventStatus = 'UPCOMING' | 'ACTIVE' | 'ENDED';
 
 export type PaymentMethod = 'CASH' | 'UPI' | 'CASH_UPI';
@@ -22,6 +24,11 @@ export interface User {
   username: string;
   email?: string | null;
   role: Role;
+  status?: UserStatus;
+  retiredAt?: string | null;
+  retiredById?: string | null;
+  retiredByName?: string | null;
+  retireReason?: string | null;
   department?: string | null;
   permissions?: Record<string, boolean>;
   createdAt?: string;

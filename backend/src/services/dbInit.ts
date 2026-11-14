@@ -163,7 +163,22 @@ export async function initializeDatabaseSequences(): Promise<void> {
     await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS idx_special_sale_payments_sale_id ON special_sale_payments(special_sale_id);`);
     await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS idx_whatsapp_deliveries_special_sale ON whatsapp_deliveries(special_sale_id);`);
 
-    console.log('✅ [Database] PostgreSQL sequences, WhatsApp session, and Special Sales tables initialized.');
+    // Safely add user status and retirement metadata columns to users
+    await prisma.$executeRawUnsafe(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'UserStatus') THEN
+          CREATE TYPE "UserStatus" AS ENUM ('ACTIVE', 'RETIRED', 'SUSPENDED');
+        END IF;
+      END $$;
+    `);
+    await prisma.$executeRawUnsafe(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "status" "UserStatus" NOT NULL DEFAULT 'ACTIVE';`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "retired_at" TIMESTAMP(3);`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "retired_by_id" TEXT;`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "retired_by_name" TEXT;`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "retire_reason" TEXT;`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_users_status" ON "users"("status");`);
+
+    console.log('✅ [Database] PostgreSQL sequences, WhatsApp session, Special Sales tables, and User retirement schema initialized.');
   } catch (err) {
     console.error('❌ [Database] Sequence initialization failed:', err);
   }

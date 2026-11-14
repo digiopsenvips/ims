@@ -42,6 +42,21 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    // Reject retired or suspended accounts
+    if (user.status === 'RETIRED') {
+      res.status(403).json({
+        error: 'This account has been retired and can no longer log in. Contact a Developer if this account needs reactivation.',
+      });
+      return;
+    }
+
+    if (user.status === 'SUSPENDED') {
+      res.status(403).json({
+        error: 'This account is currently suspended. Please contact an Administrator.',
+      });
+      return;
+    }
+
     // Build permissions dictionary
     const permissions: Record<string, boolean> = {};
     if (user.role === Role.HEAD) {
@@ -90,6 +105,7 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
       name: activeName,
       username: user.username,
       role: user.role,
+      status: user.status,
       department: activeDepartment,
       permissions,
     };
@@ -104,6 +120,7 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
         username: user.username,
         email: user.email,
         role: user.role,
+        status: user.status,
         department: activeDepartment,
         permissions,
       },

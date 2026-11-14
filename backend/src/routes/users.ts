@@ -1,12 +1,12 @@
 import { responsePolicy } from '../middleware/responsePolicy';
-import { preserveRecords } from '../middleware/preservation';
 import { Router, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../config/prisma';
 import { authenticateToken } from '../middleware/auth';
 import { requireRoles } from '../middleware/rbac';
 import { AuthenticatedRequest } from '../types';
-import { Role } from '@prisma/client';
+import { Role, UserStatus } from '@prisma/client';
+import { broadcast } from '../sockets';
 
 const router = Router();
 router.use(responsePolicy);
@@ -29,13 +29,36 @@ router.get(
   requireRoles(Role.DEVELOPER, Role.ADMIN),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
+      const isDeveloper = req.user?.role === Role.DEVELOPER;
+      const statusParam = req.query.status as string | undefined;
+
+      let whereClause: any = {};
+      if (!isDeveloper) {
+        // Non-developers can only see active accounts
+        whereClause.status = 'ACTIVE';
+      } else if (statusParam === 'ACTIVE') {
+        whereClause.status = 'ACTIVE';
+      } else if (statusParam === 'RETIRED') {
+        whereClause.status = 'RETIRED';
+      } else if (statusParam === 'SUSPENDED') {
+        whereClause.status = 'SUSPENDED';
+      }
+      // If statusParam is ALL or omitted by Developer, whereClause returns all accounts
+
       const users = await prisma.user.findMany({
+        where: whereClause,
         select: {
           id: true,
           name: true,
           username: true,
           email: true,
           role: true,
+          status: true,
+          retiredAt: true,
+          retiredById: true,
+          retiredByName: true,
+          retireReason: true,
+          department: true,
           createdAt: true,
           updatedAt: true,
           permissions: {
@@ -45,7 +68,7 @@ router.get(
             },
           },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
       });
 
       const formatted = users.map(u => ({
@@ -106,6 +129,12 @@ router.post(
       });
 
       if (existingUser) {
+        if (existingUser.status === 'RETIRED') {
+          res.status(409).json({
+            error: `Username '@${existingUser.username}' belongs to a retired account whose historical records and attribution are preserved. You can reactivate this account from the Retired Accounts view, or choose another username.`,
+          });
+          return;
+        }
         res.status(409).json({ error: 'Username or email already exists' });
         return;
       }
@@ -204,12 +233,161 @@ router.put(
   }
 );
 
-// DELETE /api/users/:id: DEVELOPER ONLY (Admin cannot delete accounts)
+// Reusable retirement handler: safe retirement that permanently preserves all historical attribution
+async function handleRetireUser(req: AuthenticatedRequest, res: Response): Promise<void> {
+  const { id } = req.params;
+  const reason = req.body?.reason || req.query?.reason;
+
+  if (id === req.user?.id) {
+    res.status(400).json({ error: 'Cannot retire your own Developer account' });
+    return;
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: {
+            sales: true,
+            gameSessions: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    if (user.role === Role.DEVELOPER) {
+      res.status(403).json({
+        error: 'Developer accounts cannot be retired. Demote the account first if retirement is required.',
+      });
+      return;
+    }
+
+    if (user.status === 'RETIRED') {
+      res.status(400).json({ error: 'This user account is already retired' });
+      return;
+    }
+
+    const updated = await prisma.user.update({
+      where: { id },
+      data: {
+        status: 'RETIRED',
+        retiredAt: new Date(),
+        retiredById: req.user!.id,
+        retiredByName: req.user!.name,
+        retireReason: typeof reason === 'string' && reason.trim() ? reason.trim() : 'Account retired by Developer',
+      },
+      select: {
+        id: true,
+        name: true,
+        username: true,
+        email: true,
+        role: true,
+        status: true,
+        retiredAt: true,
+        retiredById: true,
+        retiredByName: true,
+        retireReason: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    broadcast('user:retired', { userId: updated.id, username: updated.username });
+    broadcast('user:updated', { userId: updated.id });
+
+    res.json({
+      success: true,
+      retired: true,
+      message: `Account @${user.username} successfully retired. Historical sales (${user._count.sales}) and game records (${user._count.gameSessions}) remain permanently attributed.`,
+      user: updated,
+    });
+  } catch (error) {
+    console.error('Retire user error:', error);
+    res.status(500).json({ error: 'Failed to retire user account' });
+  }
+}
+
+// POST /api/users/:id/retire: DEVELOPER ONLY
+router.post(
+  '/:id/retire',
+  authenticateToken,
+  requireRoles(Role.DEVELOPER),
+  handleRetireUser
+);
+
+// DELETE /api/users/:id: DEVELOPER ONLY (Account retirement replacing destructive deletion)
 router.delete(
   '/:id',
   authenticateToken,
   requireRoles(Role.DEVELOPER),
-  preserveRecords
+  handleRetireUser
+);
+
+// POST /api/users/:id/reactivate: DEVELOPER ONLY
+router.post(
+  '/:id/reactivate',
+  authenticateToken,
+  requireRoles(Role.DEVELOPER),
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const { id } = req.params;
+
+    try {
+      const user = await prisma.user.findUnique({ where: { id } });
+      if (!user) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+
+      if (user.status !== 'RETIRED' && user.status !== 'SUSPENDED') {
+        res.status(400).json({ error: 'Only retired or suspended accounts can be reactivated' });
+        return;
+      }
+
+      const updated = await prisma.user.update({
+        where: { id },
+        data: {
+          status: 'ACTIVE',
+          retiredAt: null,
+          retiredById: null,
+          retiredByName: null,
+          retireReason: null,
+        },
+        select: {
+          id: true,
+          name: true,
+          username: true,
+          email: true,
+          role: true,
+          status: true,
+          retiredAt: true,
+          retiredById: true,
+          retiredByName: true,
+          retireReason: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+
+      broadcast('user:reactivated', { userId: updated.id, username: updated.username });
+      broadcast('user:updated', { userId: updated.id });
+
+      res.json({
+        success: true,
+        reactivated: true,
+        message: `Account @${user.username} reactivated successfully. User can now log in.`,
+        user: updated,
+      });
+    } catch (error) {
+      console.error('Reactivate user error:', error);
+      res.status(500).json({ error: 'Failed to reactivate user account' });
+    }
+  }
 );
 
 // POST /api/users/:id/reset-password: DEVELOPER ONLY

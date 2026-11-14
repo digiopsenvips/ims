@@ -12,6 +12,7 @@ export async function userForToken(token: string): Promise<AuthUserPayload> {
   if (typeof decoded === 'string' || typeof decoded.id !== 'string') throw new Error('Invalid token subject');
   const user = await prisma.user.findUnique({ where: { id: decoded.id }, include: { permissions: true } });
   if (!user || !Object.values(Role).includes(user.role)) throw new Error('User revoked');
+  if (user.status && user.status !== 'ACTIVE') throw new Error(`User account is ${user.status.toLowerCase()}`);
   // Newly issued sessions are revoked on password reset. Legacy tokens remain compatible
   // until expiry; full legacy revocation requires an approved signing-key rotation.
   if (decoded.credentialVersion && decoded.credentialVersion !== credentialVersion(user.passwordHash)) throw new Error('Session revoked');
@@ -20,7 +21,7 @@ export async function userForToken(token: string): Promise<AuthUserPayload> {
   if (user.role === Role.DEVELOPER || user.role === Role.ADMIN) {
     for (const key of ['view_inventory','view_revenue','view_customer_pii','view_analytics','view_event_breakdown','edit_inventory','edit_events','export_data']) permissions[key] = true;
   }
-  return { id: user.id, name: user.name, username: user.username, role: user.role, department: user.department, permissions };
+  return { id: user.id, name: user.name, username: user.username, role: user.role, status: user.status, department: user.department, permissions };
 }
 export const authenticateToken = async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
   const header = req.headers.authorization;

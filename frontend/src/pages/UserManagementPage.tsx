@@ -15,6 +15,9 @@ import {
   RotateCcw,
   Shield,
   UserCheck,
+  UserMinus,
+  UserX,
+  ShieldAlert,
   Check,
 } from 'lucide-react';
 
@@ -99,6 +102,7 @@ export const UserManagementPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRole, setSelectedRole] = useState<string>('ALL');
+  const [selectedStatus, setSelectedStatus] = useState<'ACTIVE' | 'RETIRED' | 'ALL'>('ACTIVE');
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Modals
@@ -127,8 +131,12 @@ export const UserManagementPage: React.FC = () => {
   const [resetTargetUser, setResetTargetUser] = useState<User | null>(null);
   const [newPassword, setNewPassword] = useState('');
 
-  // Delete User Confirmation Modal
-  const [deleteTargetUser, setDeleteTargetUser] = useState<User | null>(null);
+  // Retire User Modal
+  const [retireTargetUser, setRetireTargetUser] = useState<User | null>(null);
+  const [retireReason, setRetireReason] = useState('');
+
+  // Reactivate User Modal
+  const [reactivateTargetUser, setReactivateTargetUser] = useState<User | null>(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -239,52 +247,103 @@ export const UserManagementPage: React.FC = () => {
     }
   };
 
-  const handleConfirmDeleteUser = async () => {
-    if (!deleteTargetUser) return;
+  const handleConfirmRetireUser = async () => {
+    if (!retireTargetUser) return;
 
     setIsSubmitting(true);
     setStatusMessage(null);
 
     try {
-      await api.delete(`/users/${deleteTargetUser.id}`);
+      const res = await api.post(`/users/${retireTargetUser.id}/retire`, {
+        reason: retireReason.trim() || undefined,
+      });
       setStatusMessage({
         type: 'success',
-        text: `User @${deleteTargetUser.username} deleted successfully. Historical sales records preserved.`,
+        text: res.message || `Account @${retireTargetUser.username} retired successfully. Historical sales and audit records preserved.`,
       });
-      setDeleteTargetUser(null);
+      setRetireTargetUser(null);
+      setRetireReason('');
       fetchUsers();
     } catch (err: any) {
-      setStatusMessage({ type: 'error', text: err.message || 'Failed to delete user' });
+      setStatusMessage({ type: 'error', text: err.message || 'Failed to retire user' });
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const handleConfirmReactivateUser = async () => {
+    if (!reactivateTargetUser) return;
+
+    setIsSubmitting(true);
+    setStatusMessage(null);
+
+    try {
+      const res = await api.post(`/users/${reactivateTargetUser.id}/reactivate`);
+      setStatusMessage({
+        type: 'success',
+        text: res.message || `Account @${reactivateTargetUser.username} reactivated successfully. User can now log in.`,
+      });
+      setReactivateTargetUser(null);
+      fetchUsers();
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err.message || 'Failed to reactivate user' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const statusCounts = useMemo(() => {
+    let active = 0;
+    let retired = 0;
+    users.forEach(u => {
+      if (u.status === 'RETIRED') retired++;
+      else active++;
+    });
+    return {
+      ACTIVE: active,
+      RETIRED: retired,
+      ALL: users.length,
+    };
+  }, [users]);
+
   const filteredUsers = useMemo(() => {
     return users.filter(u => {
+      // Status filter
+      if (selectedStatus === 'ACTIVE' && u.status === 'RETIRED') return false;
+      if (selectedStatus === 'RETIRED' && u.status !== 'RETIRED') return false;
+
+      // Role filter
       if (selectedRole !== 'ALL' && u.role !== selectedRole) {
         return false;
       }
+
+      // Search query
       if (searchQuery.trim()) {
         const query = searchQuery.trim().toLowerCase();
         const matchesName = u.name.toLowerCase().includes(query);
         const matchesUsername = u.username.toLowerCase().includes(query);
         const matchesEmail = (u.email || '').toLowerCase().includes(query);
-        if (!matchesName && !matchesUsername && !matchesEmail) return false;
+        const matchesReason = (u.retireReason || '').toLowerCase().includes(query);
+        if (!matchesName && !matchesUsername && !matchesEmail && !matchesReason) return false;
       }
       return true;
     });
-  }, [users, selectedRole, searchQuery]);
+  }, [users, selectedStatus, selectedRole, searchQuery]);
 
   const roleCounts = useMemo(() => {
-    const counts: Record<string, number> = { ALL: users.length };
-    users.forEach(u => {
+    const statusFiltered = users.filter(u => {
+      if (selectedStatus === 'ACTIVE') return u.status !== 'RETIRED';
+      if (selectedStatus === 'RETIRED') return u.status === 'RETIRED';
+      return true;
+    });
+    const counts: Record<string, number> = { ALL: statusFiltered.length };
+    statusFiltered.forEach(u => {
       counts[u.role] = (counts[u.role] || 0) + 1;
     });
     return counts;
-  }, [users]);
+  }, [users, selectedStatus]);
 
-  const hasActiveFilters = searchQuery.trim() !== '' || selectedRole !== 'ALL';
+  const hasActiveFilters = searchQuery.trim() !== '' || selectedRole !== 'ALL' || selectedStatus !== 'ACTIVE';
 
   return (
     <div className="space-y-5 w-full max-w-[1600px] mx-auto pb-12">
@@ -347,6 +406,70 @@ export const UserManagementPage: React.FC = () => {
 
       {/* Search and Role Filter Toolbar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-3">
+        {/* Status Tabs: Active vs Retired (for Developers & Admins) */}
+        {isDeveloper && (
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100 flex-wrap gap-2">
+            <div className="inline-flex rounded-xl border border-slate-200 bg-slate-100/80 p-1 text-xs">
+              <button
+                type="button"
+                onClick={() => setSelectedStatus('ACTIVE')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 ${
+                  selectedStatus === 'ACTIVE'
+                    ? 'bg-white text-emerald-800 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Active Accounts</span>
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800">
+                  {statusCounts.ACTIVE}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedStatus('RETIRED')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 ${
+                  selectedStatus === 'RETIRED'
+                    ? 'bg-white text-amber-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <UserX className="w-3.5 h-3.5 text-amber-600" />
+                <span>Retired Accounts</span>
+                <span
+                  className={`px-1.5 py-0.5 rounded-full text-[10px] font-extrabold ${
+                    statusCounts.RETIRED > 0 ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  {statusCounts.RETIRED}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedStatus('ALL')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 ${
+                  selectedStatus === 'ALL'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>All Accounts</span>
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-slate-200 text-slate-700">
+                  {statusCounts.ALL}
+                </span>
+              </button>
+            </div>
+
+            {selectedStatus === 'RETIRED' && (
+              <span className="text-[11px] text-amber-700 font-medium bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200/70">
+                Retired accounts are inactive and cannot log in. Historical sales & audit logs are permanently preserved.
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
           {/* Search Box */}
           <div className="relative flex-1 max-w-md">
@@ -439,7 +562,14 @@ export const UserManagementPage: React.FC = () => {
                 <div key={u.id} className="p-3 bg-white space-y-2">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="font-bold text-slate-900 text-sm">{u.name}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-900 text-sm">{u.name}</span>
+                        {u.status === 'RETIRED' && (
+                          <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200">
+                            <UserX className="w-3 h-3 text-amber-600" /> RETIRED
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                         <span className="font-mono font-semibold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100 text-[11px]">
                           @{u.username}
@@ -448,6 +578,12 @@ export const UserManagementPage: React.FC = () => {
                           {u.email || 'No email'}
                         </span>
                       </div>
+                      {u.status === 'RETIRED' && u.retiredAt && (
+                        <div className="text-[10px] text-amber-700 mt-1">
+                          Retired {new Date(u.retiredAt).toLocaleDateString()} {u.retiredByName ? `by ${u.retiredByName}` : ''}
+                          {u.retireReason ? ` • "${u.retireReason}"` : ''}
+                        </div>
+                      )}
                     </div>
                     <span
                       className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider shrink-0 ${
@@ -464,7 +600,7 @@ export const UserManagementPage: React.FC = () => {
                     </span>
                   </div>
 
-                  {isHead && (
+                  {isHead && u.status !== 'RETIRED' && (
                     <div className="flex items-center justify-between p-2 bg-slate-50 rounded-lg text-xs">
                       <span className="text-slate-700 font-medium">
                         Head Permissions: <span className="font-bold text-indigo-700">{activePermCount} active</span>
@@ -483,24 +619,39 @@ export const UserManagementPage: React.FC = () => {
 
                   {isDeveloper && (
                     <div className="flex items-center justify-end gap-1.5 pt-1 border-t border-slate-50">
-                      <button
-                        onClick={() => {
-                          setResetTargetUser(u);
-                          setNewPassword('');
-                        }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
-                      >
-                        <KeyRound className="w-3.5 h-3.5 text-slate-500" /> Reset Password
-                      </button>
-
-                      {u.id !== currentUser?.id && u.role !== 'DEVELOPER' && (
+                      {u.status === 'RETIRED' ? (
                         <button
                           type="button"
-                          onClick={() => setDeleteTargetUser(u)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors cursor-pointer"
+                          onClick={() => setReactivateTargetUser(u)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors cursor-pointer border border-emerald-200"
                         >
-                          <Trash2 className="w-3.5 h-3.5 text-rose-500" /> Delete
+                          <RotateCcw className="w-3.5 h-3.5" /> Reactivate Account
                         </button>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => {
+                              setResetTargetUser(u);
+                              setNewPassword('');
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <KeyRound className="w-3.5 h-3.5 text-slate-500" /> Reset Password
+                          </button>
+
+                          {u.id !== currentUser?.id && u.role !== 'DEVELOPER' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRetireTargetUser(u);
+                                setRetireReason('');
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors cursor-pointer border border-amber-200"
+                            >
+                              <UserMinus className="w-3.5 h-3.5 text-amber-600" /> Retire
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   )}
@@ -554,10 +705,24 @@ export const UserManagementPage: React.FC = () => {
                   return (
                     <tr key={u.id} className="hover:bg-slate-50/70 transition-colors">
                       <td className="px-5 py-3.5">
-                        <div className="font-bold text-slate-900 text-sm">{u.name}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-900 text-sm">{u.name}</span>
+                          {u.status === 'RETIRED' && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200">
+                              <UserX className="w-3 h-3 text-amber-600" /> RETIRED
+                            </span>
+                          )}
+                        </div>
                         <div className="text-[11px] text-slate-400 mt-0.5">
                           {u.email ? u.email : 'No email registered'}
                         </div>
+                        {u.status === 'RETIRED' && u.retiredAt && (
+                          <div className="text-[10px] text-amber-700 mt-1 flex items-center gap-1">
+                            <span>Retired {new Date(u.retiredAt).toLocaleDateString()}</span>
+                            {u.retiredByName && <span>by {u.retiredByName}</span>}
+                            {u.retireReason && <span className="text-slate-500 italic">• "{u.retireReason}"</span>}
+                          </div>
+                        )}
                       </td>
                       <td className="px-5 py-3.5 whitespace-nowrap">
                         <span className="font-mono font-semibold text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100 text-xs whitespace-nowrap">
@@ -580,7 +745,9 @@ export const UserManagementPage: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-5 py-3.5 text-slate-600 whitespace-nowrap">
-                        {isHead ? (
+                        {u.status === 'RETIRED' ? (
+                          <span className="text-amber-600 italic text-xs whitespace-nowrap">Account retired — login disabled</span>
+                        ) : isHead ? (
                           <div className="flex items-center gap-2.5">
                             <span className="text-xs font-semibold text-slate-800 whitespace-nowrap">
                               {activePermCount} of {ALL_PERMISSIONS.length} enabled
@@ -604,28 +771,45 @@ export const UserManagementPage: React.FC = () => {
                       <td className="px-5 py-3.5 text-right whitespace-nowrap">
                         {isDeveloper && (
                           <div className="inline-flex items-center gap-1.5">
-                            <button
-                              onClick={() => {
-                                setResetTargetUser(u);
-                                setNewPassword('');
-                              }}
-                              className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                              title={`Reset password for @${u.username}`}
-                              aria-label={`Reset password for @${u.username}`}
-                            >
-                              <KeyRound className="w-4 h-4" />
-                            </button>
-
-                            {u.id !== currentUser?.id && u.role !== 'DEVELOPER' && (
+                            {u.status === 'RETIRED' ? (
                               <button
                                 type="button"
-                                onClick={() => setDeleteTargetUser(u)}
-                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                                title={`Delete account @${u.username}`}
-                                aria-label={`Delete account @${u.username}`}
+                                onClick={() => setReactivateTargetUser(u)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors cursor-pointer border border-emerald-200"
+                                title={`Reactivate @${u.username}`}
                               >
-                                <Trash2 className="w-4 h-4" />
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                <span>Reactivate</span>
                               </button>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => {
+                                    setResetTargetUser(u);
+                                    setNewPassword('');
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                                  title={`Reset password for @${u.username}`}
+                                  aria-label={`Reset password for @${u.username}`}
+                                >
+                                  <KeyRound className="w-4 h-4" />
+                                </button>
+
+                                {u.id !== currentUser?.id && u.role !== 'DEVELOPER' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setRetireTargetUser(u);
+                                      setRetireReason('');
+                                    }}
+                                    className="p-1.5 text-slate-400 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                                    title={`Retire account @${u.username}`}
+                                    aria-label={`Retire account @${u.username}`}
+                                  >
+                                    <UserMinus className="w-4 h-4 text-amber-600" />
+                                  </button>
+                                )}
+                              </>
                             )}
                           </div>
                         )}
@@ -932,32 +1116,59 @@ export const UserManagementPage: React.FC = () => {
         </div>
       )}
 
-      {/* Modal: Delete User Confirmation */}
-      {deleteTargetUser && (
+      {/* Modal: Retire User Confirmation */}
+      {retireTargetUser && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-start gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0 border border-rose-200/60">
-                <Trash2 className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0 border border-amber-200/60">
+                <UserMinus className="w-5 h-5" />
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-900">
-                  Delete Account: @{deleteTargetUser.username}?
+                  Retire Account: @{retireTargetUser.username}?
                 </h3>
                 <p className="text-xs text-slate-500 font-medium mt-0.5">
-                  {deleteTargetUser.name} • {deleteTargetUser.role}
+                  {retireTargetUser.name} • {retireTargetUser.role}
                 </p>
               </div>
             </div>
 
-            <p className="text-xs text-slate-600 leading-relaxed mb-4">
-              Are you sure you want to delete this account? The user will no longer be able to log in. Historical sales and inventory actions made by this user will remain permanently attributed in audit logs.
-            </p>
+            <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-xl text-xs text-amber-900 space-y-2 mb-4">
+              <div className="font-bold flex items-center gap-1.5">
+                <ShieldAlert className="w-4 h-4 text-amber-700 shrink-0" />
+                <span>Permanent Attribution & Security Notice</span>
+              </div>
+              <p className="leading-relaxed text-amber-800">
+                Retiring this account immediately revokes login access and hides the user from active lists.
+              </p>
+              <ul className="list-disc pl-4 space-y-1 text-amber-800 text-[11px]">
+                <li>Historical sales, stall transactions, and audit logs are <strong>permanently preserved</strong> and retain @{retireTargetUser.username}'s attribution.</li>
+                <li>Historical transactions are <strong>never reassigned</strong> to any other user.</li>
+                <li>You can reactivate this account at any time from the Retired Accounts view.</li>
+              </ul>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1">
+                Retirement Reason (Optional)
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Tenure completed, graduated, department change..."
+                value={retireReason}
+                onChange={e => setRetireReason(e.target.value)}
+                className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-600/20 focus:border-amber-600"
+              />
+            </div>
 
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => setDeleteTargetUser(null)}
+                onClick={() => {
+                  setRetireTargetUser(null);
+                  setRetireReason('');
+                }}
                 disabled={isSubmitting}
                 className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
               >
@@ -966,10 +1177,74 @@ export const UserManagementPage: React.FC = () => {
               <button
                 type="button"
                 disabled={isSubmitting}
-                onClick={handleConfirmDeleteUser}
-                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl cursor-pointer shadow-xs disabled:opacity-50"
+                onClick={handleConfirmRetireUser}
+                className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl cursor-pointer shadow-xs disabled:opacity-50 inline-flex items-center gap-1.5"
               >
-                {isSubmitting ? 'Deleting...' : 'Delete Account'}
+                {isSubmitting ? (
+                  <>
+                    <RotateCcw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Retiring Account...</span>
+                  </>
+                ) : (
+                  <>
+                    <UserMinus className="w-3.5 h-3.5" />
+                    <span>Retire Account</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Reactivate User Confirmation */}
+      {reactivateTargetUser && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 border border-emerald-200/60">
+                <UserCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Reactivate Account: @{reactivateTargetUser.username}?
+                </h3>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">
+                  {reactivateTargetUser.name} • {reactivateTargetUser.role}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed mb-4">
+              Reactivating this account will restore active status and allow @{reactivateTargetUser.username} to log into the IMS again. All historical sales and records remain permanently attributed.
+            </p>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setReactivateTargetUser(null)}
+                disabled={isSubmitting}
+                className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={handleConfirmReactivateUser}
+                className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl cursor-pointer shadow-xs disabled:opacity-50 inline-flex items-center gap-1.5"
+              >
+                {isSubmitting ? (
+                  <>
+                    <RotateCcw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Reactivating...</span>
+                  </>
+                ) : (
+                  <>
+                    <UserCheck className="w-3.5 h-3.5" />
+                    <span>Reactivate Account</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

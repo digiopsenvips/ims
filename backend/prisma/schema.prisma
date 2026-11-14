@@ -14,6 +14,12 @@ enum Role {
   MEMBER
 }
 
+enum UserStatus {
+  ACTIVE
+  RETIRED
+  SUSPENDED
+}
+
 enum EventStatus {
   UPCOMING
   ACTIVE
@@ -60,19 +66,25 @@ enum GameSessionStatus {
 }
 
 model User {
-  id           String           @id @default(uuid())
-  name         String
-  username     String           @unique
-  email        String?          @unique
-  passwordHash String           @map("password_hash")
-  role         Role             @default(MEMBER)
-  department   String?
-  createdAt    DateTime         @default(now()) @map("created_at")
-  updatedAt    DateTime         @updatedAt @map("updated_at")
-  permissions  HeadPermission[]
-  sales        Sale[]
-  gameSessions GameSession[]
+  id            String           @id @default(uuid())
+  name          String
+  username      String           @unique
+  email         String?          @unique
+  passwordHash  String           @map("password_hash")
+  role          Role             @default(MEMBER)
+  status        UserStatus       @default(ACTIVE)
+  retiredAt     DateTime?        @map("retired_at")
+  retiredById   String?          @map("retired_by_id")
+  retiredByName String?          @map("retired_by_name")
+  retireReason  String?          @map("retire_reason")
+  department    String?
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+  permissions   HeadPermission[]
+  sales         Sale[]
+  gameSessions  GameSession[]
 
+  @@index([status])
   @@map("users")
 }
 

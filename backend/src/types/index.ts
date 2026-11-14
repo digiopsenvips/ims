@@ -1,4 +1,4 @@
-import { Role } from '@prisma/client';
+import { Role, UserStatus } from '@prisma/client';
 import { Request } from 'express';
 
 export type HeadPermissionKey =
@@ -16,6 +16,7 @@ export interface AuthUserPayload {
   name: string;
   username: string;
   role: Role;
+  status?: UserStatus;
   department?: string | null;
   permissions?: Record<string, boolean>;
 }
