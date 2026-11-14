@@ -336,6 +336,7 @@ model Combo {
   project        Project?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
   items          ComboItem[]
   sales          Sale[]
+  specialSaleItems SpecialSaleItem[]
 
   @@index([status])
   @@index([eventId])
@@ -479,7 +480,11 @@ model SpecialSale {
 model SpecialSaleItem {
   id                String      @id @default(uuid())
   specialSaleId     String      @map("special_sale_id")
-  productId         String      @map("product_id")
+  itemType          String      @default("PRODUCT") @map("item_type") // PRODUCT, COMBO
+  productId         String?     @map("product_id")
+  comboId           String?     @map("combo_id")
+  comboName         String?     @map("combo_name")
+  components        Json?       @map("components")
   quantity          Int
   standardPrice     Decimal     @map("standard_price") @db.Decimal(10, 2)
   specialPrice      Decimal     @map("special_price") @db.Decimal(10, 2)
@@ -490,10 +495,13 @@ model SpecialSaleItem {
   createdAt         DateTime    @default(now()) @map("created_at")
 
   specialSale       SpecialSale @relation(fields: [specialSaleId], references: [id], onDelete: Cascade)
-  product           Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+  product           Product?    @relation(fields: [productId], references: [id], onDelete: Restrict)
+  combo             Combo?      @relation(fields: [comboId], references: [id], onDelete: SetNull)
 
   @@index([specialSaleId])
   @@index([productId])
+  @@index([comboId])
+  @@index([itemType])
   @@map("special_sale_items")
 }
 

@@ -143,6 +143,15 @@ export async function initializeDatabaseSequences(): Promise<void> {
       ADD COLUMN IF NOT EXISTS special_sale_id TEXT REFERENCES special_sales(id) ON DELETE SET NULL;
     `);
 
+    // Safely add combo support columns to special_sale_items
+    await prisma.$executeRawUnsafe(`ALTER TABLE special_sale_items ALTER COLUMN product_id DROP NOT NULL;`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE special_sale_items ADD COLUMN IF NOT EXISTS item_type TEXT NOT NULL DEFAULT 'PRODUCT';`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE special_sale_items ADD COLUMN IF NOT EXISTS combo_id TEXT REFERENCES combos(id) ON DELETE SET NULL;`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE special_sale_items ADD COLUMN IF NOT EXISTS combo_name TEXT;`);
+    await prisma.$executeRawUnsafe(`ALTER TABLE special_sale_items ADD COLUMN IF NOT EXISTS components JSONB;`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS idx_special_sale_items_combo_id ON special_sale_items(combo_id);`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS idx_special_sale_items_item_type ON special_sale_items(item_type);`);
+
     // Create indexes for fast query performance individually
     await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS idx_special_sales_status ON special_sales(status);`);
     await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS idx_special_sales_payment_status ON special_sales(payment_status);`);

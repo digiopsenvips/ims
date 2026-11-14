@@ -93,8 +93,9 @@ export const SpecialSalesPage: React.FC = () => {
   const [printingSale, setPrintingSale] = useState<SpecialSale | null>(null);
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
 
-  // Products & Warehouse Stock (for Creation/Edit)
+  // Products, Combos & Warehouse Stock (for Creation/Edit)
   const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
+  const [catalogCombos, setCatalogCombos] = useState<any[]>([]);
   const [warehouseStockMap, setWarehouseStockMap] = useState<Record<string, number>>({});
   const [isLoadingCatalog, setIsLoadingCatalog] = useState(false);
 
@@ -139,18 +140,24 @@ export const SpecialSalesPage: React.FC = () => {
     }
   };
 
-  // Fetch Catalog & Live Warehouse Stock
+  // Fetch Catalog, Combos & Live Warehouse Stock
   const fetchCatalogAndStock = async () => {
     setIsLoadingCatalog(true);
     try {
-      const [prodsRes, invRes] = await Promise.all([
+      const [prodsRes, invRes, combosRes] = await Promise.all([
         api.get<any>('/products'),
         api.get<any>('/inventory'),
+        api.get<any>('/combos'),
       ]);
       const prodsList = Array.isArray(prodsRes)
         ? prodsRes
         : (prodsRes?.products && Array.isArray(prodsRes.products) ? prodsRes.products : []);
       setCatalogProducts(prodsList);
+
+      const combosList = Array.isArray(combosRes)
+        ? combosRes
+        : (combosRes?.combos && Array.isArray(combosRes.combos) ? combosRes.combos : []);
+      setCatalogCombos(combosList.filter((c: any) => !c.isArchived));
 
       const invList = Array.isArray(invRes)
         ? invRes
@@ -164,7 +171,7 @@ export const SpecialSalesPage: React.FC = () => {
       }
       setWarehouseStockMap(stockMap);
     } catch (err: any) {
-      console.error('Failed to load product catalog/stock:', err);
+      console.error('Failed to load product/combo catalog & stock:', err);
     } finally {
       setIsLoadingCatalog(false);
     }
@@ -721,6 +728,7 @@ export const SpecialSalesPage: React.FC = () => {
       {isCreateOpen && (
         <CreateSpecialSaleModal
           products={catalogProducts}
+          combos={catalogCombos}
           stockMap={warehouseStockMap}
           onClose={() => setIsCreateOpen(false)}
           onSuccess={(newSale, msg) => {
@@ -806,13 +814,26 @@ export const SpecialSalesPage: React.FC = () => {
 // =========================================================================
 interface CreateSpecialSaleModalProps {
   products: Product[];
+  combos?: any[];
   stockMap: Record<string, number>;
   onClose: () => void;
   onSuccess: (sale: SpecialSale, msg: string) => void;
 }
 
 interface DraftLineItem {
-  productId: string;
+  id: string; // unique identifier: `prod-${productId}` or `combo-${comboId}`
+  itemType: 'PRODUCT' | 'COMBO';
+  productId?: string | null;
+  comboId?: string | null;
+  name: string;
+  codeOrDetails?: string;
+  components?: Array<{
+    productId: string;
+    productName: string;
+    project?: string;
+    quantity: number;
+    standardPrice: number;
+  }> | null;
   quantity: number;
   standardPrice: number;
   specialPrice: number;
@@ -823,6 +844,7 @@ interface DraftLineItem {
 
 const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
   products,
+  combos = [],
   stockMap,
   onClose,
   onSuccess,
@@ -842,9 +864,11 @@ const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
   const [department, setDepartment] = useState('');
   const [notes, setNotes] = useState('');
 
-  // Step 2: Line Items
+  // Step 2: Line Items & Categories
+  const [activeCategory, setActiveCategory] = useState<'PRODUCTS' | 'COMBOS'>('PRODUCTS');
   const [lineItems, setLineItems] = useState<DraftLineItem[]>([]);
   const [productSearch, setProductSearch] = useState('');
+  const [comboSearch, setComboSearch] = useState('');
   const [projectFilter, setProjectFilter] = useState('ALL');
 
   // Step 3: Discounts, Charges & Payment
@@ -860,8 +884,20 @@ const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
   const [paymentReference, setPaymentReference] = useState('');
   const [sendWhatsApp, setSendWhatsApp] = useState(true);
 
-  // Defensive safe product array
+  // Defensive safe arrays
   const safeProducts = useMemo(() => (Array.isArray(products) ? products : []), [products]);
+  const safeCombos = useMemo(() => (Array.isArray(combos) ? combos : []), [combos]);
+
+  // Compute live warehouse sets available for any combo
+  const getComboAvailability = (combo: any): number => {
+    if (!combo.items || combo.items.length === 0) return 0;
+    const ratios = combo.items.map((ci: any) => {
+      const req = Number(ci.quantity) || 1;
+      const wh = stockMap[ci.productId] ?? 0;
+      return Math.floor(wh / req);
+    });
+    return Math.min(...ratios);
+  };
 
   // Filtered Products for Picker
   const filteredCatalog = useMemo(() => {
@@ -876,6 +912,23 @@ const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
     });
   }, [safeProducts, projectFilter, productSearch]);
 
+  // Filtered Combos for Picker
+  const filteredCombos = useMemo(() => {
+    return safeCombos.filter(c => {
+      if (c.isArchived) return false;
+      if (projectFilter !== 'ALL' && c.projectId && c.projectId !== projectFilter) return false;
+      if (comboSearch.trim()) {
+        const q = comboSearch.toLowerCase();
+        const nameMatch = c.name?.toLowerCase().includes(q);
+        const itemMatch = (c.items || []).some((ci: any) =>
+          (ci.product?.name || ci.productName || '').toLowerCase().includes(q)
+        );
+        return nameMatch || itemMatch;
+      }
+      return true;
+    });
+  }, [safeCombos, projectFilter, comboSearch]);
+
   const uniqueProjects = useMemo(() => {
     const map = new Map<string, string>();
     for (const p of safeProducts) {
@@ -886,7 +939,8 @@ const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
 
   // Add product to cart
   const handleAddProduct = (prod: Product) => {
-    const existingIndex = lineItems.findIndex(i => i.productId === prod.id);
+    const lineId = `prod-${prod.id}`;
+    const existingIndex = lineItems.findIndex(i => i.id === lineId);
     if (existingIndex >= 0) {
       const updated = [...lineItems];
       updated[existingIndex].quantity += 1;
@@ -897,7 +951,13 @@ const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
     setLineItems(prev => [
       ...prev,
       {
+        id: lineId,
+        itemType: 'PRODUCT',
         productId: prod.id,
+        comboId: null,
+        name: prod.name,
+        codeOrDetails: prod.id,
+        components: null,
         quantity: 1,
         standardPrice: stdPrice,
         specialPrice: stdPrice,
@@ -908,14 +968,52 @@ const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
     ]);
   };
 
-  const handleRemoveProduct = (productId: string) => {
-    setLineItems(prev => prev.filter(i => i.productId !== productId));
+  // Add combo to cart
+  const handleAddCombo = (combo: any) => {
+    const lineId = `combo-${combo.id}`;
+    const existingIndex = lineItems.findIndex(i => i.id === lineId);
+    if (existingIndex >= 0) {
+      const updated = [...lineItems];
+      updated[existingIndex].quantity += 1;
+      setLineItems(updated);
+      return;
+    }
+    const stdPrice = Number(combo.price || 0);
+    const comps = (combo.items || []).map((ci: any) => ({
+      productId: ci.productId,
+      productName: ci.product?.name || ci.productName || ci.productId,
+      project: ci.product?.project?.name || ci.projectName,
+      quantity: Number(ci.quantity) || 1,
+      standardPrice: Number(ci.product?.basePrice || ci.unitPrice || 0),
+    }));
+    setLineItems(prev => [
+      ...prev,
+      {
+        id: lineId,
+        itemType: 'COMBO',
+        comboId: combo.id,
+        productId: null,
+        name: combo.name,
+        codeOrDetails: comps.map((c: any) => `${c.productName} × ${c.quantity}`).join(', '),
+        components: comps,
+        quantity: 1,
+        standardPrice: stdPrice,
+        specialPrice: stdPrice,
+        isOverridden: false,
+        overrideReason: '',
+        discountAmount: 0,
+      },
+    ]);
   };
 
-  const handleUpdateItem = (productId: string, field: keyof DraftLineItem, val: any) => {
+  const handleRemoveItem = (lineId: string) => {
+    setLineItems(prev => prev.filter(i => i.id !== lineId));
+  };
+
+  const handleUpdateItem = (lineId: string, field: keyof DraftLineItem, val: any) => {
     setLineItems(prev =>
       prev.map(i => {
-        if (i.productId !== productId) return i;
+        if (i.id !== lineId) return i;
         const updated = { ...i, [field]: val };
         if (field === 'specialPrice') {
           updated.isOverridden = Math.abs(Number(val) - i.standardPrice) > 0.001;
@@ -955,23 +1053,44 @@ const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
     setStep(2);
   };
 
-  // Step 2 Validation
+  // Step 2 Validation (checks individual products + underlying combo components)
   const handleProceedToStep3 = () => {
     setErrorMsg(null);
     if (lineItems.length === 0) {
-      setErrorMsg('Please select at least one product for this order.');
+      setErrorMsg('Please select at least one product or combo for this order.');
       return;
     }
     for (const item of lineItems) {
       if (item.quantity <= 0) {
-        setErrorMsg(`Product '${item.productId}' has an invalid quantity (${item.quantity}).`);
+        setErrorMsg(`Item '${item.name}' has an invalid quantity (${item.quantity}).`);
         return;
       }
-      if (confirmImmediately) {
-        const whAvail = stockMap[item.productId] ?? 0;
-        if (whAvail < item.quantity) {
+    }
+    if (confirmImmediately) {
+      // Aggregate requirements across individual products and combo components
+      const requiredMap: Record<string, { name: string; quantity: number }> = {};
+      for (const item of lineItems) {
+        if (item.itemType === 'COMBO' && item.components) {
+          for (const comp of item.components) {
+            const needed = comp.quantity * item.quantity;
+            if (!requiredMap[comp.productId]) {
+              requiredMap[comp.productId] = { name: comp.productName, quantity: 0 };
+            }
+            requiredMap[comp.productId].quantity += needed;
+          }
+        } else if (item.productId) {
+          if (!requiredMap[item.productId]) {
+            requiredMap[item.productId] = { name: item.name, quantity: 0 };
+          }
+          requiredMap[item.productId].quantity += item.quantity;
+        }
+      }
+
+      for (const [pid, req] of Object.entries(requiredMap)) {
+        const whAvail = stockMap[pid] ?? 0;
+        if (whAvail < req.quantity) {
           setErrorMsg(
-            `Insufficient warehouse stock for product '${item.productId}'. Requested: ${item.quantity}, Available: ${whAvail} in warehouse.`
+            `Insufficient warehouse stock for '${req.name}' (${pid}). Total required across products & combos: ${req.quantity} units, available in warehouse: ${whAvail} units (shortfall: ${req.quantity - whAvail} units).`
           );
           return;
         }
@@ -1001,7 +1120,9 @@ const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
       department: department.trim() || undefined,
       notes: notes.trim() || undefined,
       items: lineItems.map(i => ({
-        productId: i.productId,
+        itemType: i.itemType,
+        productId: i.productId || undefined,
+        comboId: i.comboId || undefined,
         quantity: i.quantity,
         unitPrice: i.specialPrice,
         overrideReason: i.overrideReason?.trim() || undefined,
@@ -1265,74 +1386,200 @@ const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
             </form>
           )}
 
-          {/* ================= STEP 2: PRODUCT SELECTION & NEGOTIATED PRICING ================= */}
+          {/* ================= STEP 2: PRODUCT & COMBO SELECTION & NEGOTIATED PRICING ================= */}
           {step === 2 && (
             <div className="space-y-4">
-              {/* Product Search & Project Filter */}
-              <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2.5">
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <div className="relative flex-1">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="Search catalog products by name or product ID..."
-                      value={productSearch}
-                      onChange={e => setProductSearch(e.target.value)}
-                      className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
-                    />
-                  </div>
-                  <select
-                    value={projectFilter}
-                    onChange={e => setProjectFilter(e.target.value)}
-                    className="p-1.5 text-xs border border-slate-300 rounded-lg bg-white font-medium text-slate-700"
-                  >
-                    <option value="ALL">All Projects</option>
-                    {uniqueProjects.map(p => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              {/* Category Switcher Tabs: Products vs Combos */}
+              <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveCategory('PRODUCTS')}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeCategory === 'PRODUCTS'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  <Package className="w-3.5 h-3.5" />
+                  <span>Products ({safeProducts.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveCategory('COMBOS')}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeCategory === 'COMBOS'
+                      ? 'bg-purple-600 text-white shadow-xs'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  <Tag className="w-3.5 h-3.5" />
+                  <span>Combos &amp; Offers ({safeCombos.length})</span>
+                </button>
+              </div>
 
-                {/* Quick Add Suggestions Grid */}
-                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pt-1">
-                  {filteredCatalog.slice(0, 12).map(prod => {
-                    const whAvail = stockMap[prod.id] ?? 0;
-                    const isAdded = lineItems.some(i => i.productId === prod.id);
-                    return (
-                      <button
-                        key={prod.id}
-                        type="button"
-                        onClick={() => handleAddProduct(prod)}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border flex items-center gap-1.5 transition-colors cursor-pointer ${
-                          isAdded
-                            ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-bold'
-                            : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
-                        }`}
-                      >
-                        <span>{prod.name}</span>
-                        <span className="font-mono text-[9px] text-slate-400">({prod.id})</span>
-                        <span
-                          className={`text-[9px] px-1 py-0.2 rounded font-black ${
-                            whAvail > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-700'
+              {/* PRODUCTS SELECTION PANEL */}
+              {activeCategory === 'PRODUCTS' && (
+                <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2.5">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="relative flex-1">
+                      <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Search products by name or product ID..."
+                        value={productSearch}
+                        onChange={e => setProductSearch(e.target.value)}
+                        className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-300 rounded-lg bg-white"
+                      />
+                    </div>
+                    <select
+                      value={projectFilter}
+                      onChange={e => setProjectFilter(e.target.value)}
+                      className="p-1.5 text-xs border border-slate-300 rounded-lg bg-white font-medium text-slate-700"
+                    >
+                      <option value="ALL">All Projects</option>
+                      {uniqueProjects.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Quick Add Suggestions Grid for Products */}
+                  <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pt-1">
+                    {filteredCatalog.slice(0, 16).map(prod => {
+                      const whAvail = stockMap[prod.id] ?? 0;
+                      const isAdded = lineItems.some(i => i.id === `prod-${prod.id}`);
+                      return (
+                        <button
+                          key={prod.id}
+                          type="button"
+                          onClick={() => handleAddProduct(prod)}
+                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border flex items-center gap-1.5 transition-colors cursor-pointer ${
+                            isAdded
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-bold'
+                              : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200'
                           }`}
                         >
-                          WH: {whAvail}
-                        </span>
-                      </button>
-                    );
-                  })}
+                          <span>{prod.name}</span>
+                          <span className="font-mono text-[9px] text-slate-400">({prod.id})</span>
+                          <span className="text-[10px] text-slate-500 font-medium">₹{Number(prod.basePrice || 0).toFixed(0)}</span>
+                          <span
+                            className={`text-[9px] px-1 py-0.2 rounded font-black ${
+                              whAvail > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-700'
+                            }`}
+                          >
+                            WH: {whAvail}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {/* COMBOS SELECTION PANEL */}
+              {activeCategory === 'COMBOS' && (
+                <div className="p-3 bg-purple-50/50 border border-purple-200/80 rounded-xl space-y-2.5">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="relative flex-1">
+                      <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-purple-400" />
+                      <input
+                        type="text"
+                        placeholder="Search combos by offer name or component product..."
+                        value={comboSearch}
+                        onChange={e => setComboSearch(e.target.value)}
+                        className="w-full pl-8 pr-3 py-1.5 text-xs border border-purple-300 rounded-lg bg-white"
+                      />
+                    </div>
+                    <select
+                      value={projectFilter}
+                      onChange={e => setProjectFilter(e.target.value)}
+                      className="p-1.5 text-xs border border-purple-300 rounded-lg bg-white font-medium text-slate-700"
+                    >
+                      <option value="ALL">All Projects</option>
+                      {uniqueProjects.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Combos Cards Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-44 overflow-y-auto pt-1">
+                    {filteredCombos.length === 0 ? (
+                      <div className="col-span-full py-4 text-center text-xs text-slate-400">
+                        No active combos found matching search criteria.
+                      </div>
+                    ) : (
+                      filteredCombos.map(combo => {
+                        const whSets = getComboAvailability(combo);
+                        const isAdded = lineItems.some(i => i.id === `combo-${combo.id}`);
+                        const itemsSummary = (combo.items || [])
+                          .map((ci: any) => `${ci.product?.name || ci.productName || ci.productId} ×${ci.quantity}`)
+                          .join(', ');
+
+                        return (
+                          <div
+                            key={combo.id}
+                            className={`p-2.5 rounded-xl border transition-all text-xs flex flex-col justify-between gap-1.5 ${
+                              isAdded
+                                ? 'bg-purple-50 border-purple-300 ring-1 ring-purple-300'
+                                : 'bg-white hover:bg-slate-50 border-slate-200'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-1.5">
+                              <div>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-bold text-slate-900">{combo.name}</span>
+                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-purple-100 text-purple-800 border border-purple-200">
+                                    Combo
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-slate-500 font-medium mt-0.5 line-clamp-1" title={itemsSummary}>
+                                  {itemsSummary}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className="font-black text-slate-900">₹{Number(combo.price).toFixed(2)}</div>
+                                <span
+                                  className={`text-[9px] px-1.5 py-0.2 rounded font-black inline-block mt-0.5 ${
+                                    whSets > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-700'
+                                  }`}
+                                >
+                                  WH: {whSets} sets
+                                </span>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleAddCombo(combo)}
+                              className={`w-full py-1 px-2 rounded-lg font-bold text-[11px] flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+                                isAdded
+                                  ? 'bg-purple-600 text-white hover:bg-purple-700'
+                                  : 'bg-purple-100 hover:bg-purple-200 text-purple-900'
+                              }`}
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>{isAdded ? 'Add Another Set' : '+ Add Combo to Bill'}</span>
+                            </button>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Selected Order Line Items Table */}
               <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
                 <table className="w-full text-xs text-left">
                   <thead className="bg-slate-50 text-slate-600 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
                     <tr>
-                      <th scope="col" className="px-3.5 py-2.5">Product</th>
-                      <th scope="col" className="px-2 py-2.5 text-center">Warehouse</th>
+                      <th scope="col" className="px-3.5 py-2.5">Item Description</th>
+                      <th scope="col" className="px-2 py-2.5 text-center">Warehouse Avail</th>
                       <th scope="col" className="px-2 py-2.5 text-right w-20">Quantity</th>
                       <th scope="col" className="px-2 py-2.5 text-right w-24">Special Unit ₹</th>
                       <th scope="col" className="px-2 py-2.5 text-right w-20">Item Disc ₹</th>
@@ -1345,31 +1592,62 @@ const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
                       <tr>
                         <td colSpan={7} className="py-8 text-center text-slate-400">
                           <Package className="w-6 h-6 mx-auto mb-1 text-slate-300" />
-                          <span>No products added yet. Click on products above to add them to this order.</span>
+                          <span>No items added yet. Choose individual products or combos above to build this special order.</span>
                         </td>
                       </tr>
                     ) : (
                       lineItems.map(item => {
-                        const prod = products.find(p => p.id === item.productId);
-                        const whAvail = stockMap[item.productId] ?? 0;
+                        const isCombo = item.itemType === 'COMBO';
+                        let whAvail = 0;
+                        if (isCombo && item.components) {
+                          whAvail = Math.min(
+                            ...item.components.map(c => Math.floor((stockMap[c.productId] ?? 0) / c.quantity))
+                          );
+                        } else if (item.productId) {
+                          whAvail = stockMap[item.productId] ?? 0;
+                        }
+
                         const isStockShortage = item.quantity > whAvail;
                         const lineTotal = Math.max(0, item.specialPrice * item.quantity - item.discountAmount);
 
                         return (
-                          <tr key={item.productId} className={`hover:bg-slate-50/70 ${isStockShortage ? 'bg-rose-50/50' : ''}`}>
+                          <tr key={item.id} className={`hover:bg-slate-50/70 ${isStockShortage ? 'bg-rose-50/50' : ''}`}>
                             <td className="px-3.5 py-2">
-                              <div className="font-bold text-slate-900">{prod?.name || item.productId}</div>
-                              <div className="text-[10px] text-slate-400 font-mono">
-                                <span>{item.productId}</span> &bull;{' '}
-                                <span className="font-sans">Std: ₹{item.standardPrice.toFixed(2)}</span>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-bold text-slate-900">{item.name}</span>
+                                {isCombo && (
+                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-purple-100 text-purple-800 border border-purple-200">
+                                    Combo
+                                  </span>
+                                )}
                               </div>
+
+                              {isCombo && item.components && (
+                                <div className="text-[10px] text-purple-700/90 font-mono mt-0.5">
+                                  Contains: {item.components.map(c => `${c.productName} (×${c.quantity})`).join(', ')}
+                                </div>
+                              )}
+
+                              {!isCombo && (
+                                <div className="text-[10px] text-slate-400 font-mono">
+                                  <span>{item.productId}</span> &bull;{' '}
+                                  <span className="font-sans">Std: ₹{item.standardPrice.toFixed(2)}</span>
+                                </div>
+                              )}
+
+                              {isCombo && (
+                                <div className="text-[10px] text-slate-400">
+                                  Std Combo Price: ₹{item.standardPrice.toFixed(2)}
+                                </div>
+                              )}
+
                               {item.isOverridden && (
                                 <div className="mt-1">
                                   <input
                                     type="text"
                                     placeholder="Price override reason..."
                                     value={item.overrideReason || ''}
-                                    onChange={e => handleUpdateItem(item.productId, 'overrideReason', e.target.value)}
+                                    onChange={e => handleUpdateItem(item.id, 'overrideReason', e.target.value)}
                                     className="w-full text-[10px] p-1 border border-amber-300 rounded bg-amber-50 text-amber-900 placeholder:text-amber-500 font-medium"
                                   />
                                 </div>
@@ -1384,7 +1662,7 @@ const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
                                     : 'bg-rose-100 text-rose-800 border border-rose-300'
                                 }`}
                               >
-                                {whAvail}
+                                {whAvail} {isCombo ? 'sets' : 'units'}
                               </span>
                             </td>
 
@@ -1394,7 +1672,7 @@ const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
                                 min="1"
                                 step="1"
                                 value={item.quantity}
-                                onChange={e => handleUpdateItem(item.productId, 'quantity', Math.max(1, parseInt(e.target.value, 10) || 1))}
+                                onChange={e => handleUpdateItem(item.id, 'quantity', Math.max(1, parseInt(e.target.value, 10) || 1))}
                                 className={`w-16 p-1 text-right text-xs border rounded-lg font-bold ${
                                   isStockShortage ? 'border-rose-400 ring-1 ring-rose-400 bg-rose-50 text-rose-900' : 'border-slate-300'
                                 }`}
@@ -1408,7 +1686,7 @@ const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
                                   min="0"
                                   step="0.5"
                                   value={item.specialPrice}
-                                  onChange={e => handleUpdateItem(item.productId, 'specialPrice', Math.max(0, parseFloat(e.target.value) || 0))}
+                                  onChange={e => handleUpdateItem(item.id, 'specialPrice', Math.max(0, parseFloat(e.target.value) || 0))}
                                   className={`w-20 p-1 text-right text-xs border rounded-lg font-bold ${
                                     item.isOverridden
                                       ? 'border-amber-400 ring-1 ring-amber-400 bg-amber-50 text-amber-900'
@@ -1429,7 +1707,7 @@ const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
                                 min="0"
                                 step="1"
                                 value={item.discountAmount}
-                                onChange={e => handleUpdateItem(item.productId, 'discountAmount', Math.max(0, parseFloat(e.target.value) || 0))}
+                                onChange={e => handleUpdateItem(item.id, 'discountAmount', Math.max(0, parseFloat(e.target.value) || 0))}
                                 className="w-16 p-1 text-right text-xs border border-slate-300 rounded-lg text-emerald-800 font-bold"
                               />
                             </td>
@@ -1441,7 +1719,7 @@ const CreateSpecialSaleModal: React.FC<CreateSpecialSaleModalProps> = ({
                             <td className="px-2 py-2 text-center">
                               <button
                                 type="button"
-                                onClick={() => handleRemoveProduct(item.productId)}
+                                onClick={() => handleRemoveItem(item.id)}
                                 className="text-slate-400 hover:text-rose-600 p-1 rounded transition-colors cursor-pointer"
                               >
                                 <X className="w-3.5 h-3.5" />
@@ -1921,13 +2199,13 @@ const SpecialSaleDetailsModal: React.FC<SpecialSaleDetailsModalProps> = ({
           {/* Line Items Table */}
           <div className="space-y-1.5">
             <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-              Ordered Products ({sale.totalUnits} units)
+              Ordered Items ({sale.totalUnits} {sale.totalUnits === 1 ? 'unit' : 'units'})
             </h4>
             <div className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
               <table className="w-full text-xs text-left">
                 <thead className="bg-slate-50 text-slate-600 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200">
                   <tr>
-                    <th scope="col" className="px-3.5 py-2">Product</th>
+                    <th scope="col" className="px-3.5 py-2">Item Description</th>
                     <th scope="col" className="px-2 py-2 text-right">Qty</th>
                     <th scope="col" className="px-2 py-2 text-right">Standard ₹</th>
                     <th scope="col" className="px-2 py-2 text-right">Special Price ₹</th>
@@ -1935,29 +2213,58 @@ const SpecialSaleDetailsModal: React.FC<SpecialSaleDetailsModalProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {sale.items.map(item => (
-                    <tr key={item.id} className="hover:bg-slate-50/70">
-                      <td className="px-3.5 py-2">
-                        <div className="font-bold text-slate-900">{item.product?.name || item.productId}</div>
-                        <div className="text-[10px] text-slate-400 font-mono">
-                          {item.productId}
-                          {item.isPriceOverridden && (
-                            <span className="ml-1 text-amber-700 font-sans font-semibold">
-                              (Negotiated: {item.overrideReason || 'Special pricing'})
-                            </span>
+                  {sale.items.map(item => {
+                    const isCombo = item.itemType === 'COMBO' || Boolean(item.comboId);
+                    const displayName = isCombo
+                      ? (item.comboName || item.combo?.name || 'Combo Offer')
+                      : (item.product?.name || item.productId || 'Product');
+
+                    return (
+                      <tr key={item.id} className="hover:bg-slate-50/70">
+                        <td className="px-3.5 py-2">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-slate-900">{displayName}</span>
+                            {isCombo && (
+                              <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 border border-purple-200">
+                                Combo
+                              </span>
+                            )}
+                          </div>
+                          {isCombo && item.components && Array.isArray(item.components) && item.components.length > 0 && (
+                            <div className="mt-1 text-[10px] text-purple-900 bg-purple-50/70 rounded-md p-1.5 border border-purple-100">
+                              <span className="font-bold block mb-0.5 text-purple-950">Combo Composition ({item.quantity} sets):</span>
+                              <div className="flex flex-wrap gap-x-2.5 gap-y-0.5">
+                                {item.components.map((c: any, idx: number) => (
+                                  <span key={idx} className="font-mono text-purple-800">
+                                    &bull; {c.productName} <strong>× {c.quantity * item.quantity}</strong>
+                                    <span className="text-purple-500 font-sans"> ({c.quantity}/set)</span>
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
                           )}
-                        </div>
-                      </td>
-                      <td className="px-2 py-2 text-right font-bold text-slate-900">{item.quantity}</td>
-                      <td className="px-2 py-2 text-right text-slate-500">₹{Number(item.standardPrice).toFixed(2)}</td>
-                      <td className="px-2 py-2 text-right font-bold text-slate-900">
-                        ₹{Number(item.specialPrice).toFixed(2)}
-                      </td>
-                      <td className="px-3 py-2 text-right font-black text-slate-900">
-                        ₹{Number(item.lineTotal).toFixed(2)}
-                      </td>
-                    </tr>
-                  ))}
+                          {!isCombo && (
+                            <div className="text-[10px] text-slate-400 font-mono">
+                              {item.productId}
+                            </div>
+                          )}
+                          {item.isPriceOverridden && (
+                            <div className="text-[10px] text-amber-700 font-sans font-semibold mt-0.5">
+                              (Negotiated: {item.overrideReason || 'Special pricing'})
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-2 py-2 text-right font-bold text-slate-900">{item.quantity}</td>
+                        <td className="px-2 py-2 text-right text-slate-500">₹{Number(item.standardPrice).toFixed(2)}</td>
+                        <td className="px-2 py-2 text-right font-bold text-slate-900">
+                          ₹{Number(item.specialPrice).toFixed(2)}
+                        </td>
+                        <td className="px-3 py-2 text-right font-black text-slate-900">
+                          ₹{Number(item.lineTotal).toFixed(2)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2559,22 +2866,44 @@ const SpecialSaleBillModal: React.FC<SpecialSaleBillModalProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {sale.items.map(item => (
-                  <tr key={item.id}>
-                    <td className="px-3.5 py-2">
-                      <div className="font-bold text-slate-900">{item.product?.name || item.productId}</div>
-                      <div className="text-[10px] text-slate-400 font-mono">{item.productId}</div>
-                    </td>
-                    <td className="px-2 py-2 text-right font-bold text-slate-900">{item.quantity}</td>
-                    <td className="px-2 py-2 text-right text-slate-600">₹{Number(item.specialPrice).toFixed(2)}</td>
-                    <td className="px-2 py-2 text-right text-slate-500">
-                      {Number(item.discountAmount) > 0 ? `-₹${Number(item.discountAmount).toFixed(2)}` : '—'}
-                    </td>
-                    <td className="px-3.5 py-2 text-right font-black text-slate-900">
-                      ₹{Number(item.lineTotal).toFixed(2)}
-                    </td>
-                  </tr>
-                ))}
+                {sale.items.map(item => {
+                  const isCombo = item.itemType === 'COMBO' || Boolean(item.comboId);
+                  const displayName = isCombo
+                    ? (item.comboName || item.combo?.name || 'Combo Offer')
+                    : (item.product?.name || item.productId || 'Item');
+
+                  return (
+                    <tr key={item.id}>
+                      <td className="px-3.5 py-2">
+                        <div className="font-bold text-slate-900">
+                          {displayName}
+                          {isCombo && (
+                            <span className="ml-1.5 px-1 py-0.2 rounded text-[8px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 border border-purple-200">
+                              Combo
+                            </span>
+                          )}
+                        </div>
+                        {isCombo && item.components && Array.isArray(item.components) && item.components.length > 0 && (
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            Contains:{' '}
+                            {item.components.map((c: any) => `${c.productName} × ${c.quantity * item.quantity}`).join(', ')}
+                          </div>
+                        )}
+                        {!isCombo && (
+                          <div className="text-[10px] text-slate-400 font-mono">{item.productId}</div>
+                        )}
+                      </td>
+                      <td className="px-2 py-2 text-right font-bold text-slate-900">{item.quantity}</td>
+                      <td className="px-2 py-2 text-right text-slate-600">₹{Number(item.specialPrice).toFixed(2)}</td>
+                      <td className="px-2 py-2 text-right text-slate-500">
+                        {Number(item.discountAmount) > 0 ? `-₹${Number(item.discountAmount).toFixed(2)}` : '—'}
+                      </td>
+                      <td className="px-3.5 py-2 text-right font-black text-slate-900">
+                        ₹{Number(item.lineTotal).toFixed(2)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

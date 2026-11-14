@@ -24,6 +24,225 @@ async function getNextSpecialSaleSequence(): Promise<{ orderNumber: number; refe
   return { orderNumber, reference };
 }
 
+interface ProcessedSpecialSaleItem {
+  itemType: 'PRODUCT' | 'COMBO';
+  productId: string | null;
+  comboId: string | null;
+  comboName: string | null;
+  components: any | null;
+  productName: string;
+  quantity: number;
+  standardPrice: number;
+  specialPrice: number;
+  isPriceOverridden: boolean;
+  overrideReason?: string;
+  discountAmount: number;
+  lineTotal: number;
+}
+
+interface StockRequirement {
+  productId: string;
+  productName: string;
+  quantity: number;
+}
+
+/**
+ * Aggregates required warehouse units per productId across both standalone products
+ * and underlying combo component products.
+ */
+function aggregateStockRequirements(items: Array<{
+  itemType?: string | null;
+  productId?: string | null;
+  productName?: string | null;
+  quantity: number;
+  components?: any;
+}>): Map<string, StockRequirement> {
+  const map = new Map<string, StockRequirement>();
+  for (const item of items) {
+    if (item.itemType === 'COMBO' && Array.isArray(item.components)) {
+      for (const comp of item.components) {
+        const needed = (Number(comp.quantity) || 1) * item.quantity;
+        const existing = map.get(comp.productId);
+        if (existing) {
+          existing.quantity += needed;
+        } else {
+          map.set(comp.productId, {
+            productId: comp.productId,
+            productName: comp.productName || comp.productId,
+            quantity: needed,
+          });
+        }
+      }
+    } else if (item.productId) {
+      const needed = item.quantity;
+      const existing = map.get(item.productId);
+      if (existing) {
+        existing.quantity += needed;
+      } else {
+        map.set(item.productId, {
+          productId: item.productId,
+          productName: item.productName || item.productId,
+          quantity: needed,
+        });
+      }
+    }
+  }
+  return map;
+}
+
+/**
+ * Validates products and combos, snapshots components, and calculates pricing.
+ */
+async function parseAndValidateItems(
+  items: any[],
+  client: any
+): Promise<{
+  processedItems: ProcessedSpecialSaleItem[];
+  subtotal: number;
+  totalUnitsCount: number;
+}> {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error('At least one item (product or combo) is required.');
+  }
+
+  const productIds: string[] = [];
+  const comboIds: string[] = [];
+
+  for (const item of items) {
+    const isCombo = item.itemType === 'COMBO' || (!item.productId && Boolean(item.comboId));
+    if (isCombo) {
+      if (!item.comboId) {
+        throw new Error('Combo ID is required for combo line items.');
+      }
+      comboIds.push(item.comboId);
+    } else {
+      if (!item.productId) {
+        throw new Error('Product ID is required for product line items.');
+      }
+      productIds.push(item.productId);
+    }
+  }
+
+  const [existingProducts, existingCombos] = await Promise.all([
+    productIds.length > 0
+      ? client.product.findMany({
+          where: { id: { in: productIds }, isDeleted: false },
+          include: { project: true },
+        })
+      : [],
+    comboIds.length > 0
+      ? client.combo.findMany({
+          where: { id: { in: comboIds }, isArchived: false },
+          include: {
+            project: true,
+            items: {
+              include: {
+                product: {
+                  include: { project: true },
+                },
+              },
+            },
+          },
+        })
+      : [],
+  ]);
+
+  const productMap = new Map<string, any>(existingProducts.map((p: any) => [p.id, p]));
+  const comboMap = new Map<string, any>(existingCombos.map((c: any) => [c.id, c]));
+
+  let subtotalCents = 0;
+  let totalUnitsCount = 0;
+  const processedItems: ProcessedSpecialSaleItem[] = [];
+
+  for (const item of items) {
+    const qty = parseInt(String(item.quantity), 10);
+    if (isNaN(qty) || qty <= 0) {
+      throw new Error(`Invalid quantity '${item.quantity}'. Quantity must be a positive integer.`);
+    }
+
+    const isCombo = item.itemType === 'COMBO' || (!item.productId && Boolean(item.comboId));
+
+    if (isCombo) {
+      const combo = comboMap.get(item.comboId);
+      if (!combo) {
+        throw new Error(`Combo ID '${item.comboId}' not found or is archived.`);
+      }
+      const stdPrice = Number(combo.price || 0);
+      const specPrice = item.unitPrice !== undefined && item.unitPrice !== null && item.unitPrice !== ''
+        ? Math.max(0, Number(item.unitPrice))
+        : stdPrice;
+      const isPriceOverridden = Math.abs(specPrice - stdPrice) > 0.001;
+      const itemDiscount = Math.max(0, Number(item.discountAmount || 0));
+      const lineTotal = Math.max(0, Math.round((specPrice * qty - itemDiscount) * 100) / 100);
+
+      subtotalCents += Math.round(lineTotal * 100);
+      totalUnitsCount += qty;
+
+      const components = (combo.items || []).map((ci: any) => ({
+        productId: ci.productId,
+        productName: ci.product?.name || ci.productId,
+        project: ci.product?.project?.name,
+        quantity: ci.quantity,
+        standardPrice: Number(ci.product?.basePrice || 0),
+        isFree: ci.isFree || false,
+      }));
+
+      processedItems.push({
+        itemType: 'COMBO',
+        productId: null,
+        comboId: combo.id,
+        comboName: combo.name,
+        components,
+        productName: `[Combo] ${combo.name}`,
+        quantity: qty,
+        standardPrice: stdPrice,
+        specialPrice: specPrice,
+        isPriceOverridden,
+        overrideReason: item.overrideReason?.trim() || (isPriceOverridden ? 'Special negotiated pricing' : undefined),
+        discountAmount: itemDiscount,
+        lineTotal,
+      });
+    } else {
+      const prod = productMap.get(item.productId);
+      if (!prod) {
+        throw new Error(`Product ID '${item.productId}' not found or is retired.`);
+      }
+      const stdPrice = Number(prod.basePrice || 0);
+      const specPrice = item.unitPrice !== undefined && item.unitPrice !== null && item.unitPrice !== ''
+        ? Math.max(0, Number(item.unitPrice))
+        : stdPrice;
+      const isPriceOverridden = Math.abs(specPrice - stdPrice) > 0.001;
+      const itemDiscount = Math.max(0, Number(item.discountAmount || 0));
+      const lineTotal = Math.max(0, Math.round((specPrice * qty - itemDiscount) * 100) / 100);
+
+      subtotalCents += Math.round(lineTotal * 100);
+      totalUnitsCount += qty;
+
+      processedItems.push({
+        itemType: 'PRODUCT',
+        productId: prod.id,
+        comboId: null,
+        comboName: null,
+        components: null,
+        productName: prod.name,
+        quantity: qty,
+        standardPrice: stdPrice,
+        specialPrice: specPrice,
+        isPriceOverridden,
+        overrideReason: item.overrideReason?.trim() || (isPriceOverridden ? 'Special negotiated pricing' : undefined),
+        discountAmount: itemDiscount,
+        lineTotal,
+      });
+    }
+  }
+
+  return {
+    processedItems,
+    subtotal: subtotalCents / 100,
+    totalUnitsCount,
+  };
+}
+
 /**
  * GET /api/special-sales/stats
  * Dashboard metrics & reporting
@@ -35,6 +254,9 @@ router.get('/stats', async (req: AuthenticatedRequest, res: Response): Promise<v
         items: {
           include: {
             product: {
+              include: { project: true },
+            },
+            combo: {
               include: { project: true },
             },
           },
@@ -100,8 +322,8 @@ router.get('/stats', async (req: AuthenticatedRequest, res: Response): Promise<v
 
       // Project breakdown from items
       for (const item of sale.items) {
-        const projId = item.product?.projectId || 'UNKNOWN';
-        const projName = item.product?.project?.name || 'General';
+        const projId = item.product?.projectId || item.combo?.projectId || 'UNKNOWN';
+        const projName = item.product?.project?.name || item.combo?.project?.name || 'General';
         const pEntry = projectMap.get(projId) || { projectName: projName, units: 0, amount: 0 };
         pEntry.units += item.quantity;
         pEntry.amount += Number(item.lineTotal) || 0;
@@ -208,6 +430,15 @@ router.get('/', async (req: AuthenticatedRequest, res: Response): Promise<void> 
                   project: { select: { id: true, name: true, code: true } },
                 },
               },
+              combo: {
+                select: {
+                  id: true,
+                  name: true,
+                  price: true,
+                  projectId: true,
+                  project: { select: { id: true, name: true, code: true } },
+                },
+              },
             },
           },
           payments: {
@@ -257,6 +488,11 @@ router.get('/:id', async (req: AuthenticatedRequest, res: Response): Promise<voi
               include: {
                 project: true,
                 inventory: true,
+              },
+            },
+            combo: {
+              include: {
+                project: true,
               },
             },
           },
@@ -317,71 +553,12 @@ router.post('/', async (req: AuthenticatedRequest, res: Response): Promise<void>
       return;
     }
     if (!Array.isArray(items) || items.length === 0) {
-      res.status(400).json({ error: 'At least one product item is required.' });
+      res.status(400).json({ error: 'At least one item (product or combo) is required.' });
       return;
     }
 
-    // Verify all products exist and calculate pricing
-    const productIds = items.map(i => i.productId);
-    const existingProducts = await prisma.product.findMany({
-      where: { id: { in: productIds }, isDeleted: false },
-      include: { inventory: true, project: true },
-    });
-    const productMap = new Map(existingProducts.map(p => [p.id, p]));
+    const { processedItems, subtotal, totalUnitsCount } = await parseAndValidateItems(items, prisma);
 
-    for (const item of items) {
-      if (!productMap.has(item.productId)) {
-        res.status(400).json({ error: `Product ID '${item.productId}' not found or is retired.` });
-        return;
-      }
-      const qty = parseInt(String(item.quantity), 10);
-      if (isNaN(qty) || qty <= 0) {
-        res.status(400).json({ error: `Invalid quantity '${item.quantity}' for product '${item.productId}'. Quantity must be a positive integer.` });
-        return;
-      }
-    }
-
-    // Process line items
-    let subtotalCents = 0;
-    let totalUnitsCount = 0;
-    const processedItems: Array<{
-      productId: string;
-      quantity: number;
-      standardPrice: number;
-      specialPrice: number;
-      isPriceOverridden: boolean;
-      overrideReason?: string;
-      discountAmount: number;
-      lineTotal: number;
-    }> = [];
-
-    for (const item of items) {
-      const prod = productMap.get(item.productId)!;
-      const qty = parseInt(String(item.quantity), 10);
-      const stdPrice = Number(prod.basePrice || 0);
-      const specPrice = item.unitPrice !== undefined && item.unitPrice !== null && item.unitPrice !== ''
-        ? Math.max(0, Number(item.unitPrice))
-        : stdPrice;
-      const isPriceOverridden = Math.abs(specPrice - stdPrice) > 0.001;
-      const itemDiscount = Math.max(0, Number(item.discountAmount || 0));
-
-      const lineTotal = Math.max(0, Math.round((specPrice * qty - itemDiscount) * 100) / 100);
-      subtotalCents += Math.round(lineTotal * 100);
-      totalUnitsCount += qty;
-
-      processedItems.push({
-        productId: item.productId,
-        quantity: qty,
-        standardPrice: stdPrice,
-        specialPrice: specPrice,
-        isPriceOverridden,
-        overrideReason: item.overrideReason?.trim() || (isPriceOverridden ? 'Special negotiated pricing' : undefined),
-        discountAmount: itemDiscount,
-        lineTotal,
-      });
-    }
-
-    const subtotal = subtotalCents / 100;
     const orderDiscount = Math.max(0, Number(discountAmount || 0));
     const orderAdditional = Math.max(0, Number(additionalCharges || 0));
     const totalAmount = Math.max(0, Math.round((subtotal - orderDiscount + orderAdditional) * 100) / 100);
@@ -402,28 +579,29 @@ router.post('/', async (req: AuthenticatedRequest, res: Response): Promise<void>
     if (confirmImmediately) {
       // Execute atomically under stockTransaction with advisory lock
       const createdSale = await stockTransaction(async tx => {
-        // 1. Authoritative Warehouse Stock Check
-        for (const item of processedItems) {
+        // 1. Authoritative Warehouse Stock Check across all required component and standalone products
+        const stockReqs = aggregateStockRequirements(processedItems);
+        for (const [pid, req] of stockReqs.entries()) {
           const inv = await tx.inventory.findUnique({
-            where: { productId: item.productId },
+            where: { productId: pid },
             include: { product: true },
           });
           const whStock = inv?.quantityOnHand ?? 0;
-          if (whStock < item.quantity) {
-            const prodName = inv?.product?.name || item.productId;
+          if (whStock < req.quantity) {
+            const prodName = inv?.product?.name || req.productName || pid;
             throw new StockConflict(
-              `Insufficient warehouse stock for '${prodName}' (${item.productId}). Requested: ${item.quantity} units, available in warehouse: ${whStock} units (shortfall: ${item.quantity - whStock} units).`
+              `Insufficient warehouse stock for '${prodName}' (${pid}). Requested: ${req.quantity} units, available in warehouse: ${whStock} units (shortfall: ${req.quantity - whStock} units).`
             );
           }
         }
 
         // 2. Decrement warehouse stock for confirmed order
-        for (const item of processedItems) {
+        for (const [pid, req] of stockReqs.entries()) {
           await tx.inventory.update({
-            where: { productId: item.productId },
+            where: { productId: pid },
             data: {
-              quantityOnHand: { decrement: item.quantity },
-              notes: `Special Sale deduction: ${item.quantity} units for customer '${customerName}'`,
+              quantityOnHand: { decrement: req.quantity },
+              notes: `Special Sale deduction: ${req.quantity} units for customer '${customerName}'`,
               lastUpdated: new Date(),
             },
           });
@@ -468,7 +646,11 @@ router.post('/', async (req: AuthenticatedRequest, res: Response): Promise<void>
             confirmedByName: currentUser.name,
             items: {
               create: processedItems.map(i => ({
+                itemType: i.itemType,
                 productId: i.productId,
+                comboId: i.comboId,
+                comboName: i.comboName,
+                components: i.components,
                 quantity: i.quantity,
                 standardPrice: i.standardPrice,
                 specialPrice: i.specialPrice,
@@ -497,7 +679,7 @@ router.post('/', async (req: AuthenticatedRequest, res: Response): Promise<void>
           },
           include: {
             items: {
-              include: { product: true },
+              include: { product: true, combo: true },
             },
             payments: true,
           },
@@ -560,7 +742,11 @@ router.post('/', async (req: AuthenticatedRequest, res: Response): Promise<void>
         createdByName: currentUser.name,
         items: {
           create: processedItems.map(i => ({
+            itemType: i.itemType,
             productId: i.productId,
+            comboId: i.comboId,
+            comboName: i.comboName,
+            components: i.components,
             quantity: i.quantity,
             standardPrice: i.standardPrice,
             specialPrice: i.specialPrice,
@@ -573,7 +759,7 @@ router.post('/', async (req: AuthenticatedRequest, res: Response): Promise<void>
       },
       include: {
         items: {
-          include: { product: true },
+          include: { product: true, combo: true },
         },
         payments: true,
       },
@@ -643,55 +829,29 @@ router.put('/:id', async (req: AuthenticatedRequest, res: Response): Promise<voi
       let totalItems = existing.totalItems;
 
       if (Array.isArray(items) && items.length > 0) {
-        // Recalculate items
-        const productIds = items.map(i => i.productId);
-        const existingProducts = await prisma.product.findMany({
-          where: { id: { in: productIds } },
-        });
-        const productMap = new Map(existingProducts.map(p => [p.id, p]));
-
-        let subtotalCents = 0;
-        let unitsSum = 0;
-        const newItems: any[] = [];
-
-        for (const item of items) {
-          const prod = productMap.get(item.productId);
-          if (!prod) {
-            res.status(400).json({ error: `Product '${item.productId}' not found.` });
-            return;
-          }
-          const qty = parseInt(String(item.quantity), 10);
-          const stdPrice = Number(prod.basePrice || 0);
-          const specPrice = item.unitPrice !== undefined && item.unitPrice !== null
-            ? Math.max(0, Number(item.unitPrice))
-            : stdPrice;
-          const isOverridden = Math.abs(specPrice - stdPrice) > 0.001;
-          const discount = Math.max(0, Number(item.discountAmount || 0));
-          const lineTotal = Math.max(0, Math.round((specPrice * qty - discount) * 100) / 100);
-
-          subtotalCents += Math.round(lineTotal * 100);
-          unitsSum += qty;
-
-          newItems.push({
-            productId: item.productId,
-            quantity: qty,
-            standardPrice: stdPrice,
-            specialPrice: specPrice,
-            isPriceOverridden: isOverridden,
-            overrideReason: item.overrideReason?.trim() || (isOverridden ? 'Special negotiated pricing' : undefined),
-            discountAmount: discount,
-            lineTotal,
-          });
-        }
-
-        subtotal = subtotalCents / 100;
-        totalUnits = unitsSum;
-        totalItems = newItems.length;
+        const { processedItems, subtotal: newSubtotal, totalUnitsCount: newTotalUnits } = await parseAndValidateItems(items, prisma);
+        subtotal = newSubtotal;
+        totalUnits = newTotalUnits;
+        totalItems = processedItems.length;
 
         // Delete old items and insert new items
         await prisma.specialSaleItem.deleteMany({ where: { specialSaleId: saleId } });
         await prisma.specialSaleItem.createMany({
-          data: newItems.map(i => ({ ...i, specialSaleId: saleId })),
+          data: processedItems.map(i => ({
+            specialSaleId: saleId,
+            itemType: i.itemType,
+            productId: i.productId,
+            comboId: i.comboId,
+            comboName: i.comboName,
+            components: i.components,
+            quantity: i.quantity,
+            standardPrice: i.standardPrice,
+            specialPrice: i.specialPrice,
+            isPriceOverridden: i.isPriceOverridden,
+            overrideReason: i.overrideReason,
+            discountAmount: i.discountAmount,
+            lineTotal: i.lineTotal,
+          })),
         });
       }
 
@@ -724,7 +884,7 @@ router.put('/:id', async (req: AuthenticatedRequest, res: Response): Promise<voi
           lastModifiedById: currentUser.id,
           lastModifiedByName: currentUser.name,
         },
-        include: { items: { include: { product: true } }, payments: true },
+        include: { items: { include: { product: true, combo: true } }, payments: true },
       });
 
       broadcast('special_sale_updated', updated);
@@ -736,22 +896,16 @@ router.put('/:id', async (req: AuthenticatedRequest, res: Response): Promise<voi
     // Update contact and non-stock fields, or if items edited, apply stock deltas under stockTransaction
     if (Array.isArray(items) && items.length > 0) {
       const updated = await stockTransaction(async tx => {
-        // Calculate stock deltas for each product
-        const oldQtyMap = new Map<string, number>();
-        for (const item of existing.items) {
-          oldQtyMap.set(item.productId, (oldQtyMap.get(item.productId) || 0) + item.quantity);
-        }
+        const { processedItems, subtotal: newSubtotal, totalUnitsCount: newTotalUnits } = await parseAndValidateItems(items, tx);
 
-        const newQtyMap = new Map<string, number>();
-        for (const item of items) {
-          const q = parseInt(String(item.quantity), 10);
-          newQtyMap.set(item.productId, (newQtyMap.get(item.productId) || 0) + q);
-        }
+        // Calculate component-level stock deltas across all products
+        const oldReqMap = aggregateStockRequirements(existing.items);
+        const newReqMap = aggregateStockRequirements(processedItems);
 
-        const allProductIds = new Set([...oldQtyMap.keys(), ...newQtyMap.keys()]);
+        const allProductIds = new Set([...oldReqMap.keys(), ...newReqMap.keys()]);
         for (const pid of allProductIds) {
-          const oldQ = oldQtyMap.get(pid) || 0;
-          const newQ = newQtyMap.get(pid) || 0;
+          const oldQ = oldReqMap.get(pid)?.quantity || 0;
+          const newQ = newReqMap.get(pid)?.quantity || 0;
           const delta = newQ - oldQ; // positive means need more, negative means return
 
           if (delta > 0) {
@@ -761,7 +915,7 @@ router.put('/:id', async (req: AuthenticatedRequest, res: Response): Promise<voi
             });
             const wh = inv?.quantityOnHand ?? 0;
             if (wh < delta) {
-              const name = inv?.product?.name || pid;
+              const name = inv?.product?.name || newReqMap.get(pid)?.productName || pid;
               throw new StockConflict(
                 `Insufficient warehouse stock to increase '${name}' allocation by +${delta} units (warehouse available: ${wh}).`
               );
@@ -787,42 +941,27 @@ router.put('/:id', async (req: AuthenticatedRequest, res: Response): Promise<voi
           }
         }
 
-        // Re-create items with updated prices
+        // Re-create items with updated prices and components
         await tx.specialSaleItem.deleteMany({ where: { specialSaleId: saleId } });
-        let subtotalCents = 0;
-        let unitsSum = 0;
-        const newProcessed: any[] = [];
-
-        for (const item of items) {
-          const prod = await tx.product.findUnique({ where: { id: item.productId } });
-          const qty = parseInt(String(item.quantity), 10);
-          const stdPrice = Number(prod?.basePrice || 0);
-          const specPrice = item.unitPrice !== undefined && item.unitPrice !== null
-            ? Math.max(0, Number(item.unitPrice))
-            : stdPrice;
-          const isOverridden = Math.abs(specPrice - stdPrice) > 0.001;
-          const discount = Math.max(0, Number(item.discountAmount || 0));
-          const lineTotal = Math.max(0, Math.round((specPrice * qty - discount) * 100) / 100);
-
-          subtotalCents += Math.round(lineTotal * 100);
-          unitsSum += qty;
-
-          newProcessed.push({
+        await tx.specialSaleItem.createMany({
+          data: processedItems.map(i => ({
             specialSaleId: saleId,
-            productId: item.productId,
-            quantity: qty,
-            standardPrice: stdPrice,
-            specialPrice: specPrice,
-            isPriceOverridden: isOverridden,
-            overrideReason: item.overrideReason?.trim() || (isOverridden ? 'Special negotiated pricing' : undefined),
-            discountAmount: discount,
-            lineTotal,
-          });
-        }
+            itemType: i.itemType,
+            productId: i.productId,
+            comboId: i.comboId,
+            comboName: i.comboName,
+            components: i.components,
+            quantity: i.quantity,
+            standardPrice: i.standardPrice,
+            specialPrice: i.specialPrice,
+            isPriceOverridden: i.isPriceOverridden,
+            overrideReason: i.overrideReason,
+            discountAmount: i.discountAmount,
+            lineTotal: i.lineTotal,
+          })),
+        });
 
-        await tx.specialSaleItem.createMany({ data: newProcessed });
-
-        const subtotal = subtotalCents / 100;
+        const subtotal = newSubtotal;
         const orderDiscount = discountAmount !== undefined ? Math.max(0, Number(discountAmount)) : Number(existing.discountAmount);
         const orderAdditional = additionalCharges !== undefined ? Math.max(0, Number(additionalCharges)) : Number(existing.additionalCharges);
         const totalAmount = Math.max(0, Math.round((subtotal - orderDiscount + orderAdditional) * 100) / 100);
@@ -850,12 +989,12 @@ router.put('/:id', async (req: AuthenticatedRequest, res: Response): Promise<voi
             totalAmount,
             balanceDue,
             paymentStatus,
-            totalUnits: unitsSum,
-            totalItems: newProcessed.length,
+            totalUnits: newTotalUnits,
+            totalItems: processedItems.length,
             lastModifiedById: currentUser.id,
             lastModifiedByName: currentUser.name,
           },
-          include: { items: { include: { product: true } }, payments: true },
+          include: { items: { include: { product: true, combo: true } }, payments: true },
         });
 
         return upd;
@@ -882,7 +1021,7 @@ router.put('/:id', async (req: AuthenticatedRequest, res: Response): Promise<voi
         lastModifiedById: currentUser.id,
         lastModifiedByName: currentUser.name,
       },
-      include: { items: { include: { product: true } }, payments: true },
+      include: { items: { include: { product: true, combo: true } }, payments: true },
     });
 
     broadcast('special_sale_updated', updated);
@@ -930,28 +1069,29 @@ router.post('/:id/confirm', async (req: AuthenticatedRequest, res: Response): Pr
 
     // Process atomically under stockTransaction
     const confirmedSale = await stockTransaction(async tx => {
-      // 1. Authoritative Warehouse Stock Check
-      for (const item of existing.items) {
+      // 1. Authoritative Warehouse Stock Check across all required components and products
+      const stockReqs = aggregateStockRequirements(existing.items);
+      for (const [pid, req] of stockReqs.entries()) {
         const inv = await tx.inventory.findUnique({
-          where: { productId: item.productId },
+          where: { productId: pid },
           include: { product: true },
         });
         const whStock = inv?.quantityOnHand ?? 0;
-        if (whStock < item.quantity) {
-          const prodName = inv?.product?.name || item.productId;
+        if (whStock < req.quantity) {
+          const prodName = inv?.product?.name || req.productName || pid;
           throw new StockConflict(
-            `Insufficient warehouse stock for '${prodName}' (${item.productId}). Requested: ${item.quantity} units, available in warehouse: ${whStock} units (shortfall: ${item.quantity - whStock} units).`
+            `Insufficient warehouse stock for '${prodName}' (${pid}). Requested: ${req.quantity} units, available in warehouse: ${whStock} units (shortfall: ${req.quantity - whStock} units).`
           );
         }
       }
 
-      // 2. Decrement warehouse stock for each item
-      for (const item of existing.items) {
+      // 2. Decrement warehouse stock for each required product
+      for (const [pid, req] of stockReqs.entries()) {
         await tx.inventory.update({
-          where: { productId: item.productId },
+          where: { productId: pid },
           data: {
-            quantityOnHand: { decrement: item.quantity },
-            notes: `Special Sale confirmed: ${item.quantity} units for customer '${existing.customerName}'`,
+            quantityOnHand: { decrement: req.quantity },
+            notes: `Special Sale confirmed: ${req.quantity} units for customer '${existing.customerName}'`,
             lastUpdated: new Date(),
           },
         });
@@ -1012,7 +1152,7 @@ router.post('/:id/confirm', async (req: AuthenticatedRequest, res: Response): Pr
         },
         include: {
           items: {
-            include: { product: true },
+            include: { product: true, combo: true },
           },
           payments: true,
         },
@@ -1135,12 +1275,13 @@ router.post('/:id/cancel', async (req: AuthenticatedRequest, res: Response): Pro
     const cancelledSale = await stockTransaction(async tx => {
       // If order was CONFIRMED or FULFILLED, restore warehouse inventory
       if (existing.status === 'CONFIRMED' || existing.status === 'FULFILLED') {
-        for (const item of existing.items) {
+        const stockReqs = aggregateStockRequirements(existing.items);
+        for (const [pid, req] of stockReqs.entries()) {
           await tx.inventory.update({
-            where: { productId: item.productId },
+            where: { productId: pid },
             data: {
-              quantityOnHand: { increment: item.quantity },
-              notes: `Special Sale ${existing.reference} cancelled; restored ${item.quantity} units to warehouse`,
+              quantityOnHand: { increment: req.quantity },
+              notes: `Special Sale ${existing.reference} cancelled; restored ${req.quantity} units to warehouse`,
               lastUpdated: new Date(),
             },
           });
@@ -1157,7 +1298,7 @@ router.post('/:id/cancel', async (req: AuthenticatedRequest, res: Response): Pro
           cancelReason: cancelReason.trim(),
         },
         include: {
-          items: { include: { product: true } },
+          items: { include: { product: true, combo: true } },
           payments: true,
         },
       });
@@ -1319,7 +1460,9 @@ router.post('/:id/send-whatsapp', async (req: AuthenticatedRequest, res: Respons
  */
 async function enqueueSpecialSaleWhatsAppBill(sale: any): Promise<{ id: string; status: string }> {
   const items = (sale.items || []).map((i: any) => ({
-    productName: i.product?.name || i.productId,
+    productName: i.itemType === 'COMBO'
+      ? `[Combo] ${i.comboName || 'Combo Offer'}`
+      : (i.product?.name || i.productId),
     quantity: i.quantity,
     unitPrice: Number(i.specialPrice),
     lineTotal: Number(i.lineTotal),

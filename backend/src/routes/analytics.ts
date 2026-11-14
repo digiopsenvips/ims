@@ -156,7 +156,10 @@ router.get(
         if (projectId) {
           specialSaleWhere.items = {
             some: {
-              product: { projectId: String(projectId) },
+              OR: [
+                { product: { projectId: String(projectId) } },
+                { combo: { projectId: String(projectId) } },
+              ],
             },
           };
         }
@@ -167,6 +170,9 @@ router.get(
             items: {
               include: {
                 product: {
+                  include: { project: true },
+                },
+                combo: {
                   include: { project: true },
                 },
               },
@@ -188,7 +194,7 @@ router.get(
           const units = Number(ss.totalUnits) || 0;
 
           const matchingItems = projectId
-            ? ss.items.filter(it => it.product?.projectId === String(projectId))
+            ? ss.items.filter(it => it.product?.projectId === String(projectId) || it.combo?.projectId === String(projectId))
             : ss.items;
 
           if (projectId && matchingItems.length === 0) continue;
@@ -207,9 +213,11 @@ router.get(
 
           // Add to product and project share
           for (const it of matchingItems) {
-            const pId = it.productId;
-            const pName = it.product?.name || 'Special Item';
-            const prjName = it.product?.project?.name || 'General';
+            const pId = it.productId || it.comboId || 'UNKNOWN';
+            const pName = it.itemType === 'COMBO'
+              ? `[Combo] ${it.comboName || 'Combo Offer'}`
+              : (it.product?.name || 'Special Item');
+            const prjName = it.product?.project?.name || it.combo?.project?.name || 'General';
             const itRev = Number(it.lineTotal) || (Number(it.specialPrice) * it.quantity) || 0;
 
             if (!productMap[pId]) {

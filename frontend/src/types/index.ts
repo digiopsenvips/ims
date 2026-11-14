@@ -624,10 +624,23 @@ export type SpecialSaleCustomerCategory =
   | 'GUEST_VIP'
   | 'OTHER';
 
+export interface SpecialSaleComponent {
+  productId: string;
+  productName: string;
+  project?: string;
+  quantity: number;
+  standardPrice: number;
+  isFree?: boolean;
+}
+
 export interface SpecialSaleItem {
   id: string;
   specialSaleId: string;
-  productId: string;
+  itemType?: 'PRODUCT' | 'COMBO';
+  productId?: string | null;
+  comboId?: string | null;
+  comboName?: string | null;
+  components?: SpecialSaleComponent[] | null;
   quantity: number;
   standardPrice: number;
   specialPrice: number;
@@ -649,7 +662,18 @@ export interface SpecialSaleItem {
     inventory?: {
       quantityOnHand: number;
     } | null;
-  };
+  } | null;
+  combo?: {
+    id: string;
+    name: string;
+    price: number;
+    projectId?: string | null;
+    project?: {
+      id: string;
+      name: string;
+      code: string;
+    } | null;
+  } | null;
 }
 
 export interface SpecialSalePayment {
