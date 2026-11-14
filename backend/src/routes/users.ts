@@ -7,20 +7,11 @@ import { requireRoles } from '../middleware/rbac';
 import { AuthenticatedRequest } from '../types';
 import { Role, UserStatus } from '@prisma/client';
 import { broadcast } from '../sockets';
+import { logAuditEvent } from '../services/auditLogger';
+import { PERMISSION_TEMPLATES, ALL_PERMISSION_KEYS } from '../constants/permissions';
 
 const router = Router();
 router.use(responsePolicy);
-
-const ALL_HEAD_PERMISSIONS = [
-  'view_inventory',
-  'view_revenue',
-  'view_customer_pii',
-  'view_analytics',
-  'view_event_breakdown',
-  'edit_inventory',
-  'edit_events',
-  'export_data',
-];
 
 // GET /api/users: Accessible by Developer and Admin (view only for Admin)
 router.get(
@@ -151,18 +142,47 @@ router.post(
         },
       });
 
-      // If user is HEAD, initialize permissions
-      if (normalizedRole === Role.HEAD) {
-        const permsToInsert = ALL_HEAD_PERMISSIONS.map(key => ({
+      // Initialize permissions for non-developer roles
+      if (normalizedRole !== Role.DEVELOPER) {
+        let permsToSave: Record<string, boolean> = {};
+
+        if (permissions && typeof permissions === 'object') {
+          permsToSave = permissions;
+        } else {
+          // Fall back to template defaults for the role
+          if (normalizedRole === Role.ADMIN) {
+            permsToSave = PERMISSION_TEMPLATES.find(t => t.id === 'ADMIN_DEFAULT')?.permissions || {};
+          } else if (normalizedRole === Role.HEAD) {
+            permsToSave = PERMISSION_TEMPLATES.find(t => t.id === 'EVENT_OPERATIONS_MANAGER')?.permissions || {};
+          } else if (normalizedRole === Role.MEMBER) {
+            permsToSave = PERMISSION_TEMPLATES.find(t => t.id === 'SALES_OPERATOR')?.permissions || {};
+          }
+        }
+
+        const permsToInsert = Object.entries(permsToSave).map(([key, value]) => ({
           userId: newUser.id,
           permissionKey: key,
-          allowed: permissions && typeof permissions[key] === 'boolean' ? permissions[key] : false,
+          allowed: Boolean(value),
         }));
 
-        await prisma.headPermission.createMany({
-          data: permsToInsert,
-        });
+        if (permsToInsert.length > 0) {
+          await prisma.headPermission.createMany({
+            data: permsToInsert,
+            skipDuplicates: true,
+          });
+        }
       }
+
+      await logAuditEvent({
+        action: 'USER_CREATED',
+        actorId: req.user!.id,
+        actorName: req.user!.name,
+        actorRole: req.user!.role,
+        targetUserId: newUser.id,
+        targetUsername: newUser.username,
+        details: { role: normalizedRole, name: newUser.name, email: newUser.email },
+        ipAddress: req.ip,
+      });
 
       const created = await prisma.user.findUnique({
         where: { id: newUser.id },
@@ -172,6 +192,7 @@ router.post(
           username: true,
           email: true,
           role: true,
+          status: true,
           createdAt: true,
           updatedAt: true,
           permissions: {
@@ -223,6 +244,17 @@ router.put(
           email: email !== undefined ? (email ? email.trim().toLowerCase() : null) : undefined,
           role: role ? (role.toUpperCase() as Role) : undefined,
         },
+      });
+
+      await logAuditEvent({
+        action: 'USER_UPDATED',
+        actorId: req.user!.id,
+        actorName: req.user!.name,
+        actorRole: req.user!.role,
+        targetUserId: user.id,
+        targetUsername: user.username,
+        details: { changes: { name, username, email, role } },
+        ipAddress: req.ip,
       });
 
       res.json({ user: updated });
@@ -296,6 +328,17 @@ async function handleRetireUser(req: AuthenticatedRequest, res: Response): Promi
         createdAt: true,
         updatedAt: true,
       },
+    });
+
+    await logAuditEvent({
+      action: 'USER_RETIRED',
+      actorId: req.user!.id,
+      actorName: req.user!.name,
+      actorRole: req.user!.role,
+      targetUserId: user.id,
+      targetUsername: user.username,
+      details: { reason },
+      ipAddress: req.ip,
     });
 
     broadcast('user:retired', { userId: updated.id, username: updated.username });
@@ -374,6 +417,17 @@ router.post(
         },
       });
 
+      await logAuditEvent({
+        action: 'USER_REACTIVATED',
+        actorId: req.user!.id,
+        actorName: req.user!.name,
+        actorRole: req.user!.role,
+        targetUserId: user.id,
+        targetUsername: user.username,
+        details: { previousStatus: user.status },
+        ipAddress: req.ip,
+      });
+
       broadcast('user:reactivated', { userId: updated.id, username: updated.username });
       broadcast('user:updated', { userId: updated.id });
 
@@ -417,10 +471,41 @@ router.post(
         data: { passwordHash },
       });
 
+      await logAuditEvent({
+        action: 'PASSWORD_RESET',
+        actorId: req.user!.id,
+        actorName: req.user!.name,
+        actorRole: req.user!.role,
+        targetUserId: user.id,
+        targetUsername: user.username,
+        details: { targetUsername: user.username },
+        ipAddress: req.ip,
+      });
+
       res.json({ message: `Password reset successfully for ${user.username}` });
     } catch (error) {
       console.error('Password reset error:', error);
       res.status(500).json({ error: 'Failed to reset password' });
+    }
+  }
+);
+
+// GET /api/users/audit-logs: DEVELOPER ONLY
+router.get(
+  '/audit-logs',
+  authenticateToken,
+  requireRoles(Role.DEVELOPER),
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 300);
+      const logs = await prisma.auditLog.findMany({
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      });
+      res.json({ logs });
+    } catch (error) {
+      console.error('Fetch audit logs error:', error);
+      res.status(500).json({ error: 'Failed to fetch audit logs' });
     }
   }
 );
@@ -434,6 +519,21 @@ router.get(
     const { id } = req.params;
 
     try {
+      const user = await prisma.user.findUnique({ where: { id } });
+      if (!user) {
+        res.status(404).json({ error: 'User not found' });
+        return;
+      }
+
+      if (user.role === Role.DEVELOPER) {
+        const allPerms: Record<string, boolean> = {};
+        for (const key of ALL_PERMISSION_KEYS) {
+          allPerms[key] = true;
+        }
+        res.json({ permissions: allPerms, isDeveloper: true });
+        return;
+      }
+
       const perms = await prisma.headPermission.findMany({
         where: { userId: id },
       });
@@ -443,6 +543,19 @@ router.get(
         return acc;
       }, {} as Record<string, boolean>);
 
+      if (perms.length === 0) {
+        let defaultPerms: Record<string, boolean> = {};
+        if (user.role === Role.ADMIN) {
+          defaultPerms = PERMISSION_TEMPLATES.find(t => t.id === 'ADMIN_DEFAULT')?.permissions || {};
+        } else if (user.role === Role.HEAD) {
+          defaultPerms = PERMISSION_TEMPLATES.find(t => t.id === 'EVENT_OPERATIONS_MANAGER')?.permissions || {};
+        } else if (user.role === Role.MEMBER) {
+          defaultPerms = PERMISSION_TEMPLATES.find(t => t.id === 'SALES_OPERATOR')?.permissions || {};
+        }
+        res.json({ permissions: defaultPerms, isDefault: true });
+        return;
+      }
+
       res.json({ permissions: permsMap });
     } catch (error) {
       console.error('Get permissions error:', error);
@@ -451,14 +564,14 @@ router.get(
   }
 );
 
-// PUT /api/users/:id/permissions: DEVELOPER ONLY
+// PUT /api/users/:id/permissions: DEVELOPER ONLY (Can configure permissions for any non-developer user)
 router.put(
   '/:id/permissions',
   authenticateToken,
   requireRoles(Role.DEVELOPER),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { id } = req.params;
-    const { permissions } = req.body; // e.g. { view_inventory: true, view_revenue: false }
+    const { permissions } = req.body;
 
     if (!permissions || typeof permissions !== 'object') {
       res.status(400).json({ error: 'Permissions object required' });
@@ -467,40 +580,75 @@ router.put(
 
     try {
       const user = await prisma.user.findUnique({ where: { id } });
-      if (!user || user.role !== Role.HEAD) {
-        res.status(400).json({ error: 'Permissions checklist only applies to HEAD accounts' });
+      if (!user) {
+        res.status(404).json({ error: 'User not found' });
         return;
       }
 
+      if (user.role === Role.DEVELOPER) {
+        res.status(400).json({ error: 'Developer accounts possess full system privileges and cannot be restricted' });
+        return;
+      }
+
+      const existing = await prisma.headPermission.findMany({ where: { userId: id } });
+      const oldMap = new Map(existing.map(p => [p.permissionKey, p.allowed]));
+
+      const added: string[] = [];
+      const removed: string[] = [];
+
       for (const [key, value] of Object.entries(permissions)) {
-        if (ALL_HEAD_PERMISSIONS.includes(key)) {
-          await prisma.headPermission.upsert({
-            where: {
-              userId_permissionKey: {
-                userId: id,
-                permissionKey: key,
-              },
-            },
-            update: { allowed: Boolean(value) },
-            create: {
+        const boolVal = Boolean(value);
+        const oldVal = oldMap.get(key);
+
+        if (boolVal && !oldVal) added.push(key);
+        else if (!boolVal && oldVal) removed.push(key);
+
+        await prisma.headPermission.upsert({
+          where: {
+            userId_permissionKey: {
               userId: id,
               permissionKey: key,
-              allowed: Boolean(value),
             },
-          });
-        }
+          },
+          update: { allowed: boolVal },
+          create: {
+            userId: id,
+            permissionKey: key,
+            allowed: boolVal,
+          },
+        });
       }
 
       const updatedPerms = await prisma.headPermission.findMany({
         where: { userId: id },
       });
 
+      const permsMap = updatedPerms.reduce((acc, p) => {
+        acc[p.permissionKey] = p.allowed;
+        return acc;
+      }, {} as Record<string, boolean>);
+
+      await logAuditEvent({
+        action: 'PERMISSIONS_UPDATED',
+        actorId: req.user!.id,
+        actorName: req.user!.name,
+        actorRole: req.user!.role,
+        targetUserId: user.id,
+        targetUsername: user.username,
+        details: {
+          added,
+          removed,
+          totalGranted: Object.values(permsMap).filter(Boolean).length,
+        },
+        ipAddress: req.ip,
+      });
+
+      broadcast('user:permissions_updated', { userId: user.id });
+      broadcast('user:updated', { userId: user.id });
+
       res.json({
-        message: 'Permissions updated successfully',
-        permissions: updatedPerms.reduce((acc, p) => {
-          acc[p.permissionKey] = p.allowed;
-          return acc;
-        }, {} as Record<string, boolean>),
+        message: `Permissions updated successfully for ${user.name} (@${user.username})`,
+        permissions: permsMap,
       });
     } catch (error) {
       console.error('Update permissions error:', error);

@@ -3,7 +3,7 @@ import { responsePolicy } from '../middleware/responsePolicy';
 import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { authenticateToken } from '../middleware/auth';
-import { requirePermission } from '../middleware/rbac';
+import { requirePermission, hasPermission } from '../middleware/rbac';
 import { AuthenticatedRequest } from '../types';
 import { Role } from '@prisma/client';
 
@@ -14,14 +14,12 @@ router.use(responsePolicy);
 router.get(
   '/dashboard',
   authenticateToken,
-  requirePermission('view_analytics'),
+  requirePermission('analytics.access', 'view_analytics'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { eventId, projectId, memberId, startDate, endDate } = req.query;
 
-    const isDev = req.user?.role === Role.DEVELOPER;
-    const isAdmin = req.user?.role === Role.ADMIN;
-    const canViewRevenue = isDev || isAdmin || !!req.user?.permissions?.['view_revenue'];
-    const canViewEventBreakdown = isDev || isAdmin || !!req.user?.permissions?.['view_event_breakdown'];
+    const canViewRevenue = hasPermission(req.user, 'analytics.view_financial') || hasPermission(req.user, 'dashboard.view_revenue');
+    const canViewEventBreakdown = hasPermission(req.user, 'events.view_sales_quantities') || hasPermission(req.user, 'dashboard.view_operational');
 
     try {
       const whereClause: any = {};

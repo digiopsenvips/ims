@@ -91,7 +91,7 @@ export const App: React.FC = () => {
         <Route
           path="products"
           element={
-            <ProtectedRoute allowedRoles={['DEVELOPER', 'ADMIN']}>
+            <ProtectedRoute allowedRoles={['DEVELOPER', 'ADMIN', 'HEAD']} requiredPermission="products.view">
               <ProjectsProductsPage />
             </ProtectedRoute>
           }
@@ -145,7 +145,7 @@ export const App: React.FC = () => {
         <Route
           path="special-sales"
           element={
-            <ProtectedRoute allowedRoles={['DEVELOPER', 'ADMIN']}>
+            <ProtectedRoute allowedRoles={['DEVELOPER', 'ADMIN', 'HEAD']} requiredPermission="special_sales.view">
               <SpecialSalesPage />
             </ProtectedRoute>
           }
@@ -208,7 +208,7 @@ export const App: React.FC = () => {
         <Route
           path="whatsapp"
           element={
-            <ProtectedRoute allowedRoles={['DEVELOPER', 'ADMIN']}>
+            <ProtectedRoute allowedRoles={['DEVELOPER', 'ADMIN', 'HEAD']} requiredPermission="whatsapp.view">
               <WhatsAppBillingPage />
             </ProtectedRoute>
           }

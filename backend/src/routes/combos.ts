@@ -4,9 +4,9 @@ import { responsePolicy } from '../middleware/responsePolicy';
 import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { authenticateToken } from '../middleware/auth';
-import { requireRoles } from '../middleware/rbac';
+import { requirePermission } from '../middleware/rbac';
 import { AuthenticatedRequest } from '../types';
-import { Role, ComboType, ComboStatus, Prisma } from '@prisma/client';
+import { ComboType, ComboStatus, Prisma } from '@prisma/client';
 import { broadcast } from '../sockets';
 
 const router = Router();
@@ -394,7 +394,7 @@ router.get(
 router.post(
   '/',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('combos.create'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const {
@@ -514,7 +514,7 @@ router.post(
 router.put(
   '/:id',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('combos.edit', 'combos.configure_pricing'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -641,7 +641,7 @@ router.put(
 router.patch(
   ['/:id/status', '/:id/toggle-status'],
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('combos.activate_deactivate'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -685,7 +685,7 @@ router.patch(
 router.patch(
   '/:id/archive',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('combos.archive'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -715,7 +715,7 @@ router.patch(
 router.delete(
   '/:id',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('combos.archive'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
       try {
         await stockTransaction(tx => tx.combo.update({ where: { id: req.params.id }, data: { isArchived: true, status: 'INACTIVE' } }));

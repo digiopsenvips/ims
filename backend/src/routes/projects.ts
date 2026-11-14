@@ -3,9 +3,8 @@ import { preserveRecords } from '../middleware/preservation';
 import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { authenticateToken } from '../middleware/auth';
-import { requireRoles } from '../middleware/rbac';
+import { requirePermission } from '../middleware/rbac';
 import { AuthenticatedRequest } from '../types';
-import { Role } from '@prisma/client';
 
 const router = Router();
 router.use(responsePolicy);
@@ -41,7 +40,7 @@ router.get(
 router.post(
   '/',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('products.manage_projects', 'products.create'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { name } = req.body;
 
@@ -98,7 +97,7 @@ router.post(
 router.post(
   '/:id/products',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('products.create'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { id: projectId } = req.params;
     const { name, basePrice } = req.body;
@@ -167,19 +166,19 @@ router.post(
   }
 );
 
-// DELETE /api/projects/:id: Delete a project and its products (DEVELOPER or ADMIN)
+// DELETE /api/projects/:id: Delete a project and its products
 router.delete(
   '/:id',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('products.manage_projects'),
   preserveRecords
 );
 
-// PUT /api/projects/:id: Edit project name (DEVELOPER or ADMIN)
+// PUT /api/projects/:id: Edit project name
 router.put(
   '/:id',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('products.manage_projects'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { id } = req.params;
     const { name } = req.body;

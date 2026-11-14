@@ -178,7 +178,27 @@ export async function initializeDatabaseSequences(): Promise<void> {
     await prisma.$executeRawUnsafe(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "retire_reason" TEXT;`);
     await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS "idx_users_status" ON "users"("status");`);
 
-    console.log('✅ [Database] PostgreSQL sequences, WhatsApp session, Special Sales tables, and User retirement schema initialized.');
+    // Safely ensure audit_logs table exists
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id TEXT PRIMARY KEY,
+        action TEXT NOT NULL,
+        actor_id TEXT NOT NULL,
+        actor_name TEXT NOT NULL,
+        actor_role TEXT NOT NULL,
+        target_user_id TEXT,
+        target_username TEXT,
+        details JSONB,
+        ip_address TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+    `);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_id ON audit_logs(actor_id);`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS idx_audit_logs_target_user_id ON audit_logs(target_user_id);`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);`);
+    await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);`);
+
+    console.log('✅ [Database] PostgreSQL sequences, WhatsApp session, Special Sales tables, User retirement schema, and Audit Logs initialized.');
   } catch (err) {
     console.error('❌ [Database] Sequence initialization failed:', err);
   }

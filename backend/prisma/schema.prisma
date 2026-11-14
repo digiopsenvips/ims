@@ -102,6 +102,25 @@ model HeadPermission {
   @@map("head_permissions")
 }
 
+model AuditLog {
+  id             String   @id @default(uuid())
+  action         String
+  actorId        String   @map("actor_id")
+  actorName      String   @map("actor_name")
+  actorRole      String   @map("actor_role")
+  targetUserId   String?  @map("target_user_id")
+  targetUsername String?  @map("target_username")
+  details        Json?
+  ipAddress      String?  @map("ip_address")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([actorId])
+  @@index([targetUserId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
 model Project {
   id        String    @id @default(uuid())
   name      String    @unique

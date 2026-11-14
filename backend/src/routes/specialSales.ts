@@ -1,18 +1,19 @@
 import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { authenticateToken } from '../middleware/auth';
-import { requireRoles } from '../middleware/rbac';
+import { requirePermission, hasPermission } from '../middleware/rbac';
 import { AuthenticatedRequest } from '../types';
-import { Role } from '@prisma/client';
 import { stockTransaction, StockConflict } from '../services/stock';
 import { whatsappQueueService } from '../services/whatsappQueueService';
 import { broadcast } from '../sockets';
+import { responsePolicy } from '../middleware/responsePolicy';
 
 const router = Router();
+router.use(responsePolicy);
 
-// Strict Access Control: Developer & Admin ONLY
+// Access Control: Developer or users with special sales permissions
 router.use(authenticateToken);
-router.use(requireRoles(Role.DEVELOPER, Role.ADMIN));
+router.use(requirePermission('special_sales.view', 'special_sales.create'));
 
 /**
  * Helper to get the next sequential special sale reference and order number

@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { authenticateToken } from '../middleware/auth';
-import { requireRoles } from '../middleware/rbac';
+import { requireRoles, requirePermission } from '../middleware/rbac';
 import { AuthenticatedRequest } from '../types';
 import { Role } from '@prisma/client';
 import { whatsappService } from '../services/whatsappService';
@@ -44,7 +44,7 @@ router.get(
 router.get(
   '/queue/summary',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('whatsapp.view_queue', 'whatsapp.view_status'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const summary = await whatsappQueueService.getSummaryStats();
@@ -63,7 +63,7 @@ router.get(
 router.get(
   '/queue',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('whatsapp.view_queue'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const {
       page: rawPage,
@@ -161,7 +161,7 @@ router.get(
 router.get(
   '/config',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('whatsapp.manage_settings'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const config = await whatsappQueueService.getConfig();
@@ -176,7 +176,7 @@ router.get(
 router.put(
   '/config',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('whatsapp.manage_settings'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const {
@@ -220,7 +220,7 @@ router.put(
 router.post(
   '/queue/pause',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('whatsapp.manage_queue'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const reason = req.body.reason || 'Manually paused by operator';
@@ -236,7 +236,7 @@ router.post(
 router.post(
   '/queue/resume',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('whatsapp.manage_queue'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       await whatsappQueueService.resetCircuitBreaker();
@@ -251,7 +251,7 @@ router.post(
 router.post(
   '/queue/:id/retry',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('whatsapp.retry'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { id } = req.params;

@@ -4,9 +4,8 @@ import { broadcast } from '../sockets';
 import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { authenticateToken } from '../middleware/auth';
-import { requireRoles } from '../middleware/rbac';
+import { requirePermission } from '../middleware/rbac';
 import { AuthenticatedRequest } from '../types';
-import { Role } from '@prisma/client';
 
 const router = Router();
 router.use(responsePolicy);
@@ -43,7 +42,7 @@ router.get(
 router.put(
   '/:id',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('products.edit', 'products.edit_standard_price'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { id } = req.params;
     const { name, basePrice } = req.body;
@@ -102,11 +101,11 @@ router.put(
   }
 );
 
-// PATCH /api/products/:id/archive: Toggle archive/restore status (Developer/Admin)
+// PATCH /api/products/:id/archive: Toggle archive/restore status
 router.patch(
   ['/:id/archive', '/:id/retire', '/:id'],
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('products.archive'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const { id } = req.params;
     const isArchived = typeof req.body.isArchived === 'boolean' ? req.body.isArchived : true;
@@ -142,11 +141,11 @@ router.patch(
   }
 );
 
-// DELETE /api/products/:id: Delete or soft-retire (Developer/Admin)
+// DELETE /api/products/:id: Delete or soft-retire
 router.delete(
   '/:id',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('products.archive'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       await stockTransaction(tx => tx.product.update({ where: { id: req.params.id }, data: { isArchived: true } }));

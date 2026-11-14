@@ -3,7 +3,7 @@ import { Router, Response } from 'express';
 import { prisma } from '../config/prisma';
 import { authenticateToken } from '../middleware/auth';
 import { AuthenticatedRequest } from '../types';
-import { requireRoles } from '../middleware/rbac';
+import { requireRoles, requirePermission } from '../middleware/rbac';
 import { sanitizeSaleForUser } from '../middleware/piiSanitizer';
 import { broadcast } from '../sockets';
 import { Role, GameStatus, GameResult, PaymentMethod, TransactionType, GameSessionStatus } from '@prisma/client';
@@ -734,11 +734,11 @@ router.get(
   }
 );
 
-// POST /api/games: Create a new game configuration (ADMIN / DEVELOPER)
+// POST /api/games: Create a new game configuration
 router.post(
   '/',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('games.create'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const {
@@ -839,11 +839,11 @@ router.post(
   }
 );
 
-// PUT /api/games/:id: Edit game configuration (ADMIN / DEVELOPER)
+// PUT /api/games/:id: Edit game configuration
 router.put(
   '/:id',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('games.edit', 'games.configure_rewards'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -973,7 +973,7 @@ router.put(
 router.patch(
   '/:id/status',
   authenticateToken,
-  requireRoles(Role.DEVELOPER, Role.ADMIN),
+  requirePermission('games.activate_deactivate'),
   async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
